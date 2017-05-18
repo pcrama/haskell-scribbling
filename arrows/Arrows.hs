@@ -1,3 +1,69 @@
+module Arrows (
+   Applicative
+ , Arrow
+ , ArrowApply
+ , ArrowChoice
+ , ArrowCircuit
+ , ArrowLoop
+ , Auto
+ , AutoFunctor
+ , BalTree(..)
+ , Except
+ , Hom
+ , MapTrans
+ , Monoid
+ , NonDet
+ , Pair
+ , Reader
+ , State
+ , Stream(..)
+ , StreamMap(..)
+ , Writer
+ , (&&&)
+ , (***)
+ , (*:*)
+ , (*>*)
+ , (+:+)
+ , (<*>)
+ , (>>>)
+ , app
+ , apply
+ , ask
+ , balTreeToList
+ , butterfly
+ , delay
+ , enumStream
+ , first
+ , get
+ , idA
+ , left
+ , liftA2
+ , listToBalTree
+ , local
+ , loop
+ , mappend
+ , mempty
+ , pure
+ , pureApp
+ , put
+ , right
+ , rsh
+ , runAuto
+ , runNonDet
+ , runReader
+ , runState
+ , runStreamMap
+ , runWriter
+ , scan
+ , scanM
+ , second
+ , streamIota
+ , streamToInfList
+ , tell
+ , test
+ , transpose
+) where
+
 class Monoid m where
   mempty :: m
   mappend :: m -> m -> m
@@ -39,14 +105,6 @@ streamToInfList (Cons a as) = a:streamToInfList as
 
 streamIota n = Cons n $ streamIota $ n + 1
 
-intIntegrator :: StreamMap Int Int
-intIntegrator = SM $ f 0
-  where f a (Cons x xs) = Cons a $ f (a + x) xs
-
-intDiff :: StreamMap Int Int
-intDiff = SM $ f 0
-  where f p (Cons x xs) = Cons (x - p) $ f x xs
-
 newtype StreamMap i o = SM (Stream i -> Stream o)
 
 instance Functor (StreamMap i) where
@@ -79,14 +137,6 @@ instance ArrowApply StreamMap where
             let Cons o _ = f $ repeatCons i
             in Cons o $ runStreamMap xs app
           repeatCons x = Cons x $ repeatCons x
--- xxx (intIntegrator &&& 10) >>> app
--- ArrowApply laws:
--- pure ((>>> h) *:* id) >>> app = app >>> h
--- pure (mkPair *:* id) >>> app = pure id
--- mkPair f >>> app = f
---
--- mkPair :: Arrow a => b -> a i (b, i)
--- mkPair b = pure (\c -> (b, c))
 
 instance ArrowApply (->) where
   app = uncurry ($)
@@ -96,11 +146,6 @@ instance ArrowApply (State s) where
   -- app :: State s (State s i o, i) o
   --        ST (s, (ST (s, i) -> (s, o), i)) -> (s, o)
   app = ST $ \(s, (ST f, i)) -> f (s, i)
-
-
-resampler = SM output
-  where output (Cons x xs) = Cons x (swallow xs)
-        swallow (Cons x xs) = output xs
 
 newtype State s i o = ST ((s, i) -> (s, o))
 
@@ -497,20 +542,6 @@ bisort = butterfly f
   where f (x, y) | x <= y    = (x, y)
                  | otherwise = (y, x)
 
-data Count a i o = Count Int (a i o)
-
-instance Arrow a => Arrow (Count a) where
-  pure = Count 0 . pure 
-  (Count n1 f) >>> (Count n2 g) = Count (n1 + n2) $ f >>> g
-  first (Count n f) = Count n $ first f
-
-instance ArrowChoice a => ArrowChoice (Count a) where
-  -- left :: a i o -> a (Either i d) (Either o d)
-  left (Count n f) = Count n $ left f
-
-instance ArrowLoop a => ArrowLoop (Count a) where
-  loop (Count n f) = Count n $ loop f
-
 newtype AutoFunctor a i o = AF (a i (o, AutoFunctor a i o))
 
 instance Arrow a => Arrow (AutoFunctor a) where
@@ -519,15 +550,23 @@ instance Arrow a => Arrow (AutoFunctor a) where
   -- >>> AF (a c (o, AutoFunctor a c o))
   -- = AF (a i (o, AutoFunctor a i o))
   (AF f) >>> (AF g) = AF $ h f g
-    where h f g = f
-              >>> (first g &&& second idA)
-              >>> (pure $ \((o, g'), f') -> (o, h f' g'))
+    where h :: Arrow a
+            => a i (c, AutoFunctor a i c)
+            -> a c (o, AutoFunctor a c o)
+            -> a i (o, AutoFunctor a i o)
+          h f g = f
+              >>> (g *** idA)
+              >>> (pure $ \((o, AF g'), AF f') ->
+                              (o, AF $ h f' g'))
   -- first :: AutoFunctor a i o
   --       -> AutoFunctor a (i, d) (o, d)
   --       ~~ AF (a i (o, AutoFunctor a i o))
   --       -> AF (a (i, d) ((o, d), AutoFunctor a (i, d) (o, d)))
-  first (AF f) = AF g
-    where g = first f >>> (pure $ \((o, a), d) -> ((o, d), a))
+  first (AF f) = AF $ g f
+    where g :: Arrow a
+            => a i (o, AutoFunctor a i o)
+            -> a (i, d) ((o, d), AutoFunctor a (i, d) (o, d))
+          g f = first f >>> (pure $ \((o, a), d) -> ((o, d), first a))
 
 -- Return list with even and list with odd elements
 -- (assuming there are an even number of elements)
