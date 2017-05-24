@@ -640,26 +640,3 @@ balTreeToList (Succ x) = go x
         go = concatMap tupleToList . balTreeToList
         tupleToList :: Pair a -> [a]
         tupleToList (x, y) = [x, y]
-
-bt0 :: BalTree Int
-bt0 = Succ $ Succ $ Succ $ Zero (((0, 0), (0, 0)), ((0, 0), (0, 0)))
-
-bt1 = apply (rsh 7) bt0
-bt2 = apply (rsh 6) bt1
-bt3 = apply (rsh 5) bt2
-bt4 = apply (rsh 4) bt3
-bt5 = apply (rsh 3) bt4
-bt6 = apply (rsh 2) bt5
-bt7 = apply (rsh 1) bt5
-
-main = do
-  putStrLn . show $ bt1
-  putStrLn . show $ bt2
-  putStrLn . show $ bt3
-  putStrLn . show $ bt4
-  putStrLn . show $ bt5
-  putStrLn . show $ bt6
-  putStrLn . show . ([2, 3, 4, 5, 6, 7, 0, 0] ==) $ balTreeToList bt6
-  putStrLn . maybe "?" (show . balTreeToList . apply (scan (+) 0)) $ listToBalTree [1..8]
-  putStrLn . maybe "?" (show . balTreeToList . apply (scan (+) 0)) $ listToBalTree [1..7]
-  putStrLn . maybe "?" (show . balTreeToList . apply bisort) $ listToBalTree [8, 9, 10, 11, 12, 13, 14, 15, 7, 6, 5, 4, 3, 2, 2.5, 2.25]
