@@ -568,6 +568,43 @@ instance Arrow a => Arrow (AutoFunctor a) where
             -> a (i, d) ((o, d), AutoFunctor a (i, d) (o, d))
           g f = first f >>> (pure $ \((o, a), d) -> ((o, d), first a))
 
+instance ArrowChoice a => ArrowChoice (AutoFunctor a) where
+  left (AF f) = AF $ h f
+    -- f :: a i (o, AutoFunctor a i o)
+    -- left f :: a (Either i d) (Either (o, AutoFunctor a i o) d)
+    where h :: ArrowChoice a
+            => a i (o, AutoFunctor a i o)
+            -> a (Either i d)
+                 (Either o d
+                 , AutoFunctor a (Either i d) (Either o d))
+          h f = left f >>> pure (g f)
+          g :: ArrowChoice a
+            => a i (o, AutoFunctor a i o)
+            -> Either (o, AutoFunctor a i o) d
+            -> (Either o d, AutoFunctor a (Either i d) (Either o d))
+          g _ (Left (o, af)) = (Left o, left af)
+          g f (Right d) = (Right d, left $ AF f)
+
+instance ArrowLoop a => ArrowLoop (AutoFunctor a) where
+  -- loop :: a (i, d) (o, d) -> a i o
+  -- loop :: AutoFunctor a (i, d) (o, d)
+  --      -> AutoFunctor a i o
+  --      ~~ AF a (i, d) ((o, d), AutoFunctor a (i, d) (o, d))
+  --      -> AF a i (o, AutoFunctor a i o)
+  loop (AF f) = AF . loop $ g f
+     where g :: ArrowLoop a
+             => a (i, c) ((o, c), AutoFunctor a (i, c) (o, c))
+             -> a (i, c) ((o, AutoFunctor a i o), c)
+           g f = f
+             >>> (pure $ \((o, c), af) -> ((o, loop af), c))
+
+instance ArrowCircuit a => ArrowCircuit (AutoFunctor a) where
+  -- delay :: b -> a b b
+  --       ~~ b -> AutoFunctor a b b
+  --       ~~ b -> AF a b (b, AutoFunctor a b b)
+  delay b = AF $     delay b -- :: a b b
+                 >>> (pure $ \o -> (o, delay o))
+
 -- Return list with even and list with odd elements
 -- (assuming there are an even number of elements)
 splitList :: [a] -> Maybe [(a, a)]
