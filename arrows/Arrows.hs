@@ -24,8 +24,10 @@ module Arrows (
  , (*:*)
  , (*>*)
  , (+:+)
+ , (+++)
  , (<*>)
  , (>>>)
+ , (|||)
  , app
  , apply
  , ask
@@ -41,6 +43,7 @@ module Arrows (
  , listToBalTree
  , local
  , loop
+ , mapA
  , mappend
  , mempty
  , pure
@@ -59,6 +62,7 @@ module Arrows (
  , second
  , streamIota
  , streamToInfList
+ , streamZip
  , tell
  , test
  , transpose
@@ -264,11 +268,26 @@ instance ArrowApply (Reader r) where
 class Arrow a => ArrowChoice a where
   left :: a i o -> a (Either i d) (Either o d)
 
+instance ArrowChoice (->) where
+  left f = g f
+    where g f (Left x) = Left $ f x
+          g _ (Right x) = Right x
+
 right :: ArrowChoice a => a i o -> a (Either d i) (Either d o)
 right a = mirror >>> left a >>> mirror
   where mirror = pure m
         m (Left a) = Right a
         m (Right a) = Left a
+
+(|||) :: ArrowChoice a
+      => a i o -> a i' o' -> a (Either i i') (Either o o')
+f ||| g = left f >>> right g
+
+(+++) :: ArrowChoice a
+      => a i o -> a i' o -> a (Either i i') o
+f +++ g = (f ||| g) >>> (pure untag)
+  where untag (Left x) = x
+        untag (Right x) = x
 
 newtype Except a i o = E (a i (Either String o))
 
@@ -292,6 +311,15 @@ instance ArrowChoice a => Arrow (Except a) where
   first (E f) = E $ first f >>> pure dropSndForLeft
     where dropSndForLeft (Left x, _) = Left x
           dropSndForLeft (Right y, d) = Right (y, d)
+
+listarr :: [a] -> Either () (a, [a])
+listarr [] = Left ()
+listarr (x:xs) = Right (x, xs)
+
+mapA :: ArrowChoice a => a i o -> a [i] [o]
+mapA a = pure listarr
+     >>> (    (pure $ const [])
+          +++ ((a *** mapA a) >>> (pure $ uncurry (:))))
 
 streamTail :: Stream (Either i d)
            -> (Stream i -> Stream o)
