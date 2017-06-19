@@ -1,0 +1,7 @@
+* haskell-scribbling
+Haskell experiments (notes while reading papers/tutorials, watching talks and throwaway code)
+
+* Warnings
+- This code is never guaranteed to work.
+- It is often written on an old tablet with GHC 7.6.3 and without internet connection.
+- It is mostly educational and may contain failing attempts (as failing and fixing is the best way to learn)
