@@ -17,17 +17,11 @@ many1' = fmap toNonEmptyList . many1
 a ... b = (,) <$> a <*> b
 
 searchForXinY :: ReadP ()
-searchForXinY = do
-  _ <- string "Search for '"
-  _ <- munch (not . (== '\''))
-  _ <- string "' in '"
-  _ <- munch (not . (== '\''))
-  _ <- string "'\n"
-  return ()
+searchForXinY = (munch1 (/= '\n') ... skipSpaces) >> return ()
 
 findCount :: ReadP Int
 findCount = do
-  _ <- string "findCount = "
+  _ <- string "findCount="
   sx <- munch1 isDigit
   _ <- skipSpaces
   return $ read sx -- can't fail: we only took digits
@@ -37,9 +31,9 @@ data PageRect = PageRect Int (Int, Int, Int, Int)
 
 pageRect :: ReadP PageRect
 pageRect = do
-    _ <- string "- page[" ... munch1 isDigit ... string "]="
+    _ <- string "pages[" ... munch1 isDigit ... string "]="
     sp <- _int
-    _ <- string ", rect=("
+    _ <- string " rects[i]=("
     sx <- _int
     _ <- string ", "
     sy <- _int
@@ -55,9 +49,35 @@ pageRect = do
 oneBlock :: ReadP (NonEmptyList PageRect)
 oneBlock = findCount >> many1' pageRect
 
-text = "Search for 'xyz' in 'a.pdf'\nfindCount = 1\n- page[1]=12, rect=(1, 2, 3, 4)\n"
+text = "morbi mattis in scripts/loremipsum.pdf\n\
+       \findCount=1\n\
+       \pages[0]=1 rects[i]=(287, 250, 62, 14)\n\
+       \findCount=2\n\
+       \pages[0]=1 rects[i]=(488, 609, 31, 14)\n\
+       \pages[1]=2 rects[i]=(56, 57, 30, 14)\n\
+       \total=2\n\
+       \Time: 1560.82ms\n\
+       \\n\
+       \\n\
+       \Backward:\n\
+       \findCount=1\n\
+       \pages[0]=1 rects[i]=(488, 609, 31, 14)\n\
+       \pages[1]=2 rects[i]=(56, 57, 30, 14)\n\
+       \findCount=2\n\
+       \pages[0]=1 rects[i]=(287, 250, 62, 14)\n\
+       \total=2\n\
+       \Time: 1513.24ms\n"
 
-fullParser = searchForXinY ... oneBlock
+fullParser = do
+  searchForXinY
+  forward <- many oneBlock
+  _ <- string "total=" ... munch1 isDigit ... skipSpaces
+  _ <- string "Time: " ... munch1 (\x -> isDigit x || x == '.') ... string "ms" ... skipSpaces
+  _ <- string "Backward:" ... skipSpaces
+  backward <- many oneBlock
+  _ <- string "total=" ... munch1 isDigit ... skipSpaces
+  _ <- string "Time: " ... munch1 (\x -> isDigit x || x == '.') ... string "ms" ... skipSpaces
+  return (forward, backward)
 
 main :: IO ()
 main = putStrLn . show . readP_to_S fullParser $ text
