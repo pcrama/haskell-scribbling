@@ -1,0 +1,10 @@
+* Transform log files into static data for unit tests
+
+I'm developing a patch for sumatrapdf.  I had prepared
+some log files of the old behavior to demonstrate it and
+to check for regressions.  My patch got rejected because
+they did not want external files, so I want to encode the
+same info as static data in the C++ source code.
+
+This is a parser for these log files.  I am not concerned
+about error recovery: the log files are well-formed.
