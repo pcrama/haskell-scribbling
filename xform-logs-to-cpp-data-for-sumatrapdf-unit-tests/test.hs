@@ -1,11 +1,13 @@
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable #-}
 
 import Control.Applicative ((<$>), (<*>))
 import Data.Char
+import Data.List
 import Text.ParserCombinators.ReadP
+import Text.Printf
 
 data NonEmptyList a = NonEmptyList a [a]
-  deriving (Functor, Show, Eq)
+  deriving (Functor, Show, Eq, Foldable)
 
 many1' :: ReadP a -> ReadP (NonEmptyList a)
 many1' = fmap toNonEmptyList . many1
@@ -68,6 +70,37 @@ text = "morbi mattis in scripts/loremipsum.pdf\n\
        \total=2\n\
        \Time: 1513.24ms\n"
 
+-- matches = 2; // how many matches in total
+-- rectCounts = {1, 2}; // match 1 has one rect, match 2 has two rects
+-- rects = {{287, 250, 62, 14},
+--          {488, 609, 31, 14},
+--          {56, 57, 30, 14}}
+-- pages = {1, 1, 2}
+--
+-- struct expectedResult {
+--   int matches; // how many matches in the document
+--   int rectCounts[]; // how many elements in pages[] and rects[] are for 1 match
+--   Rect rects[]; // rectangles covering the matches
+--   int pages[]; // pages on which the matches were found
+-- }
+
+formatRect :: PageRect -> String
+formatRect (PageRect _ (x, y, w, h)) = printf "{%d, %d, %d, %d}" x y w h
+
+-- foldMap :: (a -> m) -> t a -> m
+
+formatFullStruct :: [NonEmptyList PageRect] -> String
+formatFullStruct xs = printf "{ %d, // matches\n\
+                             \  { %s }, // rectCounts\n\
+                             \  { %s }, // rects\n\
+                             \  { %s } }; //pages\n"
+                             (length xs)
+                             (intercalate ", " $ map (show . length) xs)
+                             (intercalate ", "
+                                        $ foldMap (foldr ((:) . formatRect) []) xs)
+                             (intercalate ", " $ foldMap (foldr ((:) . (show . getPage)) []) xs)
+  where getPage (PageRect p _) = p
+
 fullParser = do
   searchForXinY
   forward <- many oneBlock
@@ -79,6 +112,8 @@ fullParser = do
   _ <- string "Time: " ... munch1 (\x -> isDigit x || x == '.') ... string "ms" ... skipSpaces
   return (forward, backward)
 
-main :: IO ()
-main = putStrLn . show . readP_to_S fullParser $ text
+parseLogString :: String -> [NonEmptyList PageRect]
+parseLogString = fst . fst . head . readP_to_S fullParser
 
+main :: IO ()
+main = putStrLn . formatFullStruct . parseLogString $ text
