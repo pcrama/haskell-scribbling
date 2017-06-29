@@ -18,8 +18,8 @@ many1' = fmap toNonEmptyList . many1
 (...) :: ReadP a -> ReadP b -> ReadP (a, b)
 a ... b = (,) <$> a <*> b
 
-searchForXinY :: ReadP ()
-searchForXinY = (munch1 (/= '\n') ... skipSpaces) >> return ()
+searchForXinY :: ReadP String
+searchForXinY = fmap fst $ munch1 (not . flip elem "\n\r") ... skipSpaces
 
 findCount :: ReadP Int
 findCount = do
@@ -89,11 +89,14 @@ formatRect (PageRect _ (x, y, w, h)) = printf "{%d, %d, %d, %d}" x y w h
 
 -- foldMap :: (a -> m) -> t a -> m
 
-formatFullStruct :: [NonEmptyList PageRect] -> String
-formatFullStruct xs = printf "{ %d, // matches\n\
+formatFullStruct :: SearchLog -> String
+formatFullStruct (SearchLog s xs) =
+                     printf "// %s\n\
+                             \{ %d, // matches\n\
                              \  { %s }, // rectCounts\n\
                              \  { %s }, // rects\n\
-                             \  { %s } }; //pages\n"
+                             \  { %s } }; // pages\n"
+                             s
                              (length xs)
                              (intercalate ", " $ map (show . length) xs)
                              (intercalate ", "
@@ -102,7 +105,7 @@ formatFullStruct xs = printf "{ %d, // matches\n\
   where getPage (PageRect p _) = p
 
 fullParser = do
-  searchForXinY
+  searchString <- searchForXinY
   forward <- many oneBlock
   _ <- string "total=" ... munch1 isDigit ... skipSpaces
   _ <- string "Time: " ... munch1 (\x -> isDigit x || x == '.') ... string "ms" ... skipSpaces
@@ -110,10 +113,12 @@ fullParser = do
   backward <- many oneBlock
   _ <- string "total=" ... munch1 isDigit ... skipSpaces
   _ <- string "Time: " ... munch1 (\x -> isDigit x || x == '.') ... string "ms" ... skipSpaces
-  return (forward, backward)
+  return ((searchString, forward), backward)
 
-parseLogString :: String -> [NonEmptyList PageRect]
-parseLogString = fst . fst . head . readP_to_S fullParser
+data SearchLog = SearchLog String [NonEmptyList PageRect]
+
+parseLogString :: String -> SearchLog
+parseLogString = uncurry SearchLog . fst . fst . head . readP_to_S fullParser
 
 main :: IO ()
 main = putStrLn . formatFullStruct . parseLogString $ text
