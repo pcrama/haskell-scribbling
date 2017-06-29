@@ -1,8 +1,11 @@
 {-# LANGUAGE DeriveFunctor, DeriveFoldable #-}
 
 import Control.Applicative ((<$>), (<*>))
+import Control.Monad (forM_)
 import Data.Char
 import Data.List
+import System.Directory
+import System.IO
 import Text.ParserCombinators.ReadP
 import Text.Printf
 
@@ -134,5 +137,16 @@ data SearchLog = SearchLog String [NonEmptyList PageRect]
 parseLogString :: String -> SearchLog
 parseLogString = uncurry SearchLog . fst . fst . head . readP_to_S fullParser
 
+workWithFile :: FilePath -> IO ()
+workWithFile f = withFile f ReadMode $ \handle -> do
+    xs <- hGetContents handle
+    putStrLn . formatFullStruct . parseLogString $ xs
+
+isLogFile :: FilePath -> Bool
+isLogFile ('o':'u':'t':'-':xs) = True
+isLogFile _ = False
+
 main :: IO ()
-main = putStrLn . formatFullStruct . parseLogString $ text
+main = do
+    dirContent <- listDirectory "."
+    forM_ [x | x <- dirContent, isLogFile x] workWithFile
