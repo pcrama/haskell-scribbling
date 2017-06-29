@@ -98,11 +98,25 @@ formatFullStruct (SearchLog s xs) =
                              \  { %s } }; // pages\n"
                              s
                              (length xs)
-                             (intercalate ", " $ map (show . length) xs)
-                             (intercalate ", "
+                             (intercalateAndBreak ", " 80
+                                        $ map (show . length) xs)
+                             (intercalateAndBreak ", " 80
                                         $ foldMap (foldr ((:) . formatRect) []) xs)
-                             (intercalate ", " $ foldMap (foldr ((:) . (show . getPage)) []) xs)
+                             (intercalateAndBreak ", " 80
+                                        $ foldMap (foldr ((:) . (show . getPage)) []) xs)
   where getPage (PageRect p _) = p
+
+intercalateAndBreak :: String -> Int -> [String] -> String
+intercalateAndBreak sep width = go 0
+  where length_sep = length sep
+        go _ [] = []
+        go _ [x] = x
+        go w (x:xs) = let extra = length x + length_sep
+                      in if w + extra >= width
+                         then "\n  " ++ x ++ sep ++ go (extra + 2) xs
+                         else x ++ sep ++ go (w + extra) xs
+  -- where maybeBreak (soFar, w) next | w + length next > width = (soFar ++ sep ++ "\n    " ++ next, 4 + length next)
+  --                                  | otherwise = (soFar ++ sep ++ next, w + length sep + length next)
 
 fullParser = do
   searchString <- searchForXinY
