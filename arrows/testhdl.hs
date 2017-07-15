@@ -20,6 +20,22 @@ setReset = let q = False in loop (ff >>> (delay (q, (q, not q))))
              >>> second nor
              >>> outRoute
 
+-- not tested, but compiles
+fullAdder1 :: Arrow a => a (Bool, Bool) (Bool, Bool)
+fullAdder1 =
+  pure $ \(x, y) -> ( x && y -- carry)
+                    , (x && not y) || (not x && y))
+
+-- not tested, but compiles
+adderWithCarry :: Arrow a
+               => a (Bool, Bool, Bool) (Bool, Bool)
+adderWithCarry =
+      pure (\(x, y, z) -> ((x, y), z))
+  >>> first fullAdder1
+  >>> pure (\((c1, s), z) -> (c1, (s, z)))
+  >>> second fullAdder1
+  >>> pure (\(c1, (c2, s)) -> (c1 || c2, s))
+
 main :: IO ()
 main = do
   putStrLn "slow="
