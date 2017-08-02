@@ -3,6 +3,7 @@ module Categories (
   NarrowestCategory(..),
   broadCategory,
   narrowestCategory,
+  toNarrowCategoriesArray,
   widen
 )
 
@@ -368,3 +369,7 @@ broadCategory Et_PD = PackedDecimal -- heuristic 3
 broadCategory Et = EBCDICText
 broadCategory Et_PP = PackedDecimal -- heuristic 3
 broadCategory Ed_Et = EBCDICNum -- heuristic 1
+
+toNarrowCategoriesArray :: (CodePoint c, Foldable f) => f c -> Array Int NarrowestCategory
+toNarrowCategoriesArray s = listArray (0, length s - 1)
+                          $ foldr ((:) . narrowestCategory) [] s -- `map' written as foldr

@@ -20,3 +20,4 @@ executable record-size
   build-depends:       base >= 4.7 && < 5
                      , array >= 0.5
   other-modules:       Categories
+                     , Chunked
