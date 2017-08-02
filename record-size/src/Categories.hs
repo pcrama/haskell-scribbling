@@ -1,7 +1,11 @@
 module Categories (
   BroadCategory(..),
   NarrowestCategory(..),
+  NumTextPref(..),
+  SystemPref(..),
   broadCategory,
+  canBeNumeric,
+  canBeTextual,
   narrowestCategory,
   toNarrowCategoriesArray,
   widen
@@ -13,6 +17,7 @@ import Data.Array ((!), Array, bounds, elems, listArray)
 import Data.List (nub, intercalate)
 import Data.Char (ord, chr)
 import Data.Bits
+import Data.Word (Word8)
 
 type CP = Char
 
@@ -33,6 +38,23 @@ instance CodePoint Char where
                                 && (0 <= lo) && (lo <= 9))
   isPackedDecimalPadded x = let hi = ord x `shiftR` 4
                                 lo = ord x .&. 0xf
+                            in ((0 <= hi) && (hi <= 9)
+                             && (lo == 12) || (lo == 13) || (lo == 14))
+
+instance CodePoint Word8 where
+  isASCIItext x = (0x20 <= x) && (x <= 0x7f)
+  isEBCDICtext x = (0x40 <= x) && (x < 0xff) -- https://en.wikipedia.org/wiki/EBCDIC says "... Characters 00–3F and FF are controls ..."
+  isASCIIdigit x = (0x30 <= x) && (x <= 0x39)
+  isEBCDICdigit x = (0xf0 <= x) && (x <= 0xf9)
+  -- Never heard about packed decimal (I only know binary coded decimal),
+  -- but given Raincode lab's Cobol ties, I hope that this definition is OK:
+  -- http://simotime.com/datapk01.htm
+  isPackedDecimalNoPadding x = let hi = x `shiftR` 4
+                                   lo = x .&. 0xf
+                               in ((0 <= hi) && (hi <= 9)
+                                && (0 <= lo) && (lo <= 9))
+  isPackedDecimalPadded x = let hi = x `shiftR` 4
+                                lo = x .&. 0xf
                             in ((0 <= hi) && (hi <= 9)
                              && (lo == 12) || (lo == 13) || (lo == 14))
 
@@ -73,6 +95,36 @@ data NarrowestCategory = PD
                        | Et_PP
                        | Ed_Et
   deriving (Eq, Show)
+
+canBeNumeric PD       = True
+canBeNumeric Binary   = False
+canBeNumeric PP       = True
+canBeNumeric At_PD    = True
+canBeNumeric At       = False
+canBeNumeric At_PP    = True
+canBeNumeric Ad_At_PD = True
+canBeNumeric At_Et_PD = True
+canBeNumeric At_Et    = False
+canBeNumeric At_Et_PP = True
+canBeNumeric Et_PD    = True
+canBeNumeric Et       = False
+canBeNumeric Et_PP    = True
+canBeNumeric Ed_Et    = True
+
+canBeTextual PD       = False
+canBeTextual Binary   = False
+canBeTextual PP       = False
+canBeTextual At_PD    = True
+canBeTextual At       = True
+canBeTextual At_PP    = True
+canBeTextual Ad_At_PD = True
+canBeTextual At_Et_PD = True
+canBeTextual At_Et    = True
+canBeTextual At_Et_PP = True
+canBeTextual Et_PD    = True
+canBeTextual Et       = True
+canBeTextual Et_PP    = True
+canBeTextual Ed_Et    = True
 
 -- Test this with (should return empty list)
 -- let all = map chr [0..255] ; dup f g x = (f x, g x) in filter (uncurry (/=)) $ map (dup generateIsXXXInfo $ show . narrowestCategory) all
@@ -351,24 +403,38 @@ data BroadCategory = ASCIIText
                    | BLOB
   deriving (Eq, Show)
 
--- heuristic:
--- 1. prefer xxxNum over xxxText
--- 2. prefer EBCDICText over ASCIIText
--- 3. prefer PackedDecimal over xxxText
-broadCategory PD = PackedDecimal
-broadCategory Binary = BLOB
-broadCategory PP = PackedDecimal
-broadCategory At_PD = PackedDecimal -- heuristic 3
-broadCategory At = ASCIIText
-broadCategory At_PP = PackedDecimal -- heuristic 3
-broadCategory Ad_At_PD = ASCIINum -- heuristic 1
-broadCategory At_Et_PD = PackedDecimal -- heuristic 3
-broadCategory At_Et = EBCDICText -- heuristic 2
-broadCategory At_Et_PP = PackedDecimal -- heuristic 3
-broadCategory Et_PD = PackedDecimal -- heuristic 3
-broadCategory Et = EBCDICText
-broadCategory Et_PP = PackedDecimal -- heuristic 3
-broadCategory Ed_Et = EBCDICNum -- heuristic 1
+-- heuristics
+data NumTextPref = PreferNumeric | PreferTextual
+data SystemPref = PreferASCII | PreferEBCDIC
+
+broadCategory _             _            PD       = PackedDecimal
+broadCategory _             _            Binary   = BLOB
+broadCategory _             _            PP       = PackedDecimal
+broadCategory PreferTextual _            At_PD    = ASCIIText
+broadCategory PreferNumeric _            At_PD    = PackedDecimal
+broadCategory _             PreferEBCDIC At       = BLOB
+broadCategory _             PreferASCII  At       = ASCIIText
+broadCategory PreferNumeric _            At_PP    = PackedDecimal
+broadCategory PreferTextual _            At_PP    = ASCIIText
+broadCategory PreferTextual _            Ad_At_PD = ASCIIText
+broadCategory PreferNumeric PreferASCII  Ad_At_PD = ASCIINum
+broadCategory PreferNumeric PreferEBCDIC Ad_At_PD = PackedDecimal
+broadCategory PreferNumeric _            At_Et_PD = PackedDecimal
+broadCategory PreferTextual PreferEBCDIC At_Et_PD = EBCDICText
+broadCategory PreferTextual PreferASCII  At_Et_PD = ASCIIText
+broadCategory _             PreferEBCDIC At_Et    = EBCDICText
+broadCategory _             PreferASCII  At_Et    = ASCIIText
+broadCategory PreferNumeric _            At_Et_PP = PackedDecimal
+broadCategory PreferTextual PreferEBCDIC At_Et_PP = EBCDICText
+broadCategory PreferTextual PreferASCII  At_Et_PP = ASCIIText
+broadCategory PreferNumeric _            Et_PD    = PackedDecimal
+broadCategory PreferTextual _            Et_PD    = EBCDICText
+broadCategory _             PreferEBCDIC Et       = EBCDICText
+broadCategory _             PreferASCII  Et       = BLOB
+broadCategory PreferNumeric _            Et_PP    = PackedDecimal
+broadCategory PreferTextual _            Et_PP    = EBCDICText
+broadCategory PreferNumeric _            Ed_Et    = EBCDICNum
+broadCategory PreferTextual _            Ed_Et    = EBCDICText
 
 toNarrowCategoriesArray :: (CodePoint c, Foldable f) => f c -> Array Int NarrowestCategory
 toNarrowCategoriesArray s = listArray (0, length s - 1)
