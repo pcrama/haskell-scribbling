@@ -4,9 +4,12 @@ module Categories (
   NumTextPref(..),
   SystemPref(..),
   broadCategory,
+  byteStringOps,
   canBeNumeric,
   canBeTextual,
+  loadFile,
   narrowestCategory,
+  stringOps,
   toNarrowCategoriesArray,
   widen
 )
@@ -14,9 +17,10 @@ module Categories (
 where
 
 import Data.Array ((!), Array, bounds, elems, listArray)
-import Data.List (nub, intercalate)
-import Data.Char (ord, chr)
 import Data.Bits
+import qualified Data.ByteString as B
+import Data.Char (ord, chr)
+import Data.List (nub, intercalate)
 import Data.Word (Word8)
 
 type CP = Char
@@ -436,6 +440,27 @@ broadCategory PreferTextual _            Et_PP    = EBCDICText
 broadCategory PreferNumeric _            Ed_Et    = EBCDICNum
 broadCategory PreferTextual _            Ed_Et    = EBCDICText
 
-toNarrowCategoriesArray :: (CodePoint c, Foldable f) => f c -> Array Int NarrowestCategory
-toNarrowCategoriesArray s = listArray (0, length s - 1)
-                          $ foldr ((:) . narrowestCategory) [] s -- `map' written as foldr
+data BasicFoldable c e = BasicFoldOps {
+         _bfLength :: c -> Int
+         -- I can get away with this very specific type rather than having
+         -- a `forall b . (e -> b -> b) -> b -> c -> b' but then needing
+         -- to enable a language extension:
+       , _bfFoldr :: (e -> [NarrowestCategory] -> [NarrowestCategory])
+                  -> [NarrowestCategory]
+                  -> c
+                  -> [NarrowestCategory]
+       }
+
+stringOps :: BasicFoldable [Char] Char
+stringOps = BasicFoldOps length foldr
+
+byteStringOps :: BasicFoldable B.ByteString Word8
+byteStringOps = BasicFoldOps B.length B.foldr
+
+toNarrowCategoriesArray :: (CodePoint c) => BasicFoldable f c -> f -> Array Int NarrowestCategory
+toNarrowCategoriesArray BasicFoldOps { _bfLength = length', _bfFoldr = foldr' } s
+  = listArray (0, length' s - 1)
+  $ foldr' ((:) . narrowestCategory) [] s -- `map' written as foldr
+
+loadFile :: FilePath -> IO (Array Int NarrowestCategory)
+loadFile = fmap (toNarrowCategoriesArray byteStringOps) . B.readFile

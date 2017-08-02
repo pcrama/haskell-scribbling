@@ -20,6 +20,7 @@ executable record-size
   build-depends:       base >= 4.7 && < 5
                      , array >= 0.5
                      , bytestring >= 0.10
+                     , directory >= 1.3
                      , random >= 1.1
   other-modules:       Categories
                      , Chunked

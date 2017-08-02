@@ -2,22 +2,18 @@ module Main where
 
 import Control.Monad (guard)
 import Data.Array (elems)
+import Data.Monoid (First(..), getFirst)
+import System.Directory (listDirectory)
 
 import Categories
 import Chunked
 import Utils
 
--- plausibleRecordSizes :: (CodePoint c, Foldable f) => Int -> f c -> [Interpretation]
-plausibleRecordSizes maxSize s = do
-  let cats = toNarrowCategoriesArray s
-  -- heuristic: first try record sizes that are multiples of 4
-  recordSize <- [4, 8..maxSize] ++ [x | x <- [2..maxSize], x `mod` 4 /= 0]
-  let narrowInfo = mapFoldr1Chunked recordSize widen cats
-  -- backtrack if narrowInfo is Nothing:
-  guard $ maybe False (const True) narrowInfo
-  let rle = maybe []
-                  (rleCompress . elems)
-                  narrowInfo
+type Interpretation = [(NarrowestCategory, Int)]
+
+plausibleRecordSize cats recordSize = do
+  narrowInfo <- mapFoldr1Chunked recordSize widen cats
+  let rle = rleCompress $ elems narrowInfo
   -- Break if there are less than two possible categories or if there
   -- isn't both at least one possible number field and one possible
   -- text field:
@@ -27,15 +23,27 @@ plausibleRecordSizes maxSize s = do
             otherwise -> False
   return rle
 
+guessRecordSize maxSize cats = getFirst
+                             $ mconcat
+                             $ map (First . plausibleRecordSize cats) [2..maxSize]
+
+workWithFile :: FilePath -> IO Interpretation
+workWithFile f = do
+  content <- loadFile f
+  return $ maybe [] id $ guessRecordSize 256 content
+
+showInterpretation :: Interpretation -> String
+showInterpretation x = (show $ sum $ map snd x) ++ ": " ++ show x
+
+outputForFile :: FilePath -> Interpretation -> IO ()
+outputForFile f i = do
+  putStr f
+  putStr ": "
+  putStrLn $ case i of
+               [] -> "No solution found.  Increase max size?"
+               otherwise -> showInterpretation i
+
 main :: IO ()
-main = mapM_ (putStrLn . showRLE)
-     $ removeMultiples
-     $ plausibleRecordSizes 25
-                            "hello, world123\
-                            \world, hello456\
-                            \five5_+sizty789\
-                            \HELL WOOR,LD123\
-                            \WORLD, HELLO456\
-                            \FIVE5_+SIXTY789\
-                            \tuvwxyz/{|}=131"
-  where showRLE x = show (sum $ map snd x) ++ ": " ++ show x
+main = do
+  files <- listDirectory "./"
+  mapM_ (\f -> workWithFile f >>= outputForFile f) files
