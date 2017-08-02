@@ -1,8 +1,50 @@
 * record-size
 
+** Purpose
 Guess the record size from data
 - Input is a block of bytes (up to 1MiB)
 - There is no separator between records, they are all of the same unknown length
 - Input length is not necessarily a multiple of the record length
 - Input can be ASCII (text or numeric), EBCDIC (text or numeric), ...
 - Each record contains at least one numeric and one text field
+
+** How to use
+1. Compile
+   #+BEGIN_SRC shell :exports code
+     stack build
+   #+END_SRC
+2. Run in the =testdata= directory: the program automatically tries to
+   detect the record size (up to records of 256 bytes) for all files
+   in the current directory.
+   #+BEGIN_SRC shell :exports code
+     cd testdata/
+     stack exec record-size
+   #+END_SRC
+3. Expected output:
+   #+BEGIN_EXAMPLE
+   Et40_Ad5_PD3_10000.dat: 48: [(Et,40),(Ad_At_PD,5),(PD,3)]
+   Et32_Ed8_At22_Ad4_PD8_500123.dat: 74: [(Et,32),(Ed_Et,8),(At,22),(Ad_At_PD,4),(PD,8)]
+   At40_Ad5_100000.dat: 45: [(At,40),(Ad_At_PD,5)]
+   Et40_Ad5_PD6_100000.dat: 51: [(Et,40),(Ad_At_PD,5),(PD,6)]
+   Et32_Ed8_Bin23_Ad4_PD8_500123.dat: 75: [(Et,32),(Ed_Et,8),(Binary,23),(Ad_At_PD,4),(PD,8)]
+   At40_Ad5_10000.dat: 45: [(At,40),(Ad_At_PD,5)]
+   Et64_Ed8_Bin56_100007.dat: 128: [(Et,64),(Ed_Et,8),(Binary,56)]
+   #+END_EXAMPLE
+   As an example, the last line means that the record size in
+   =Et64_Ed8_Bin56_100007.dat= is 128 bytes, with these fields
+   - EBCDIC text (64 characters in 64 bytes)
+   - EBCDIC digits (8 digits in 8 bytes)
+   - A binary BLOB of 56 bytes
+
+   The test data was produced automatically from a record definition.
+   This definition is encoded in the filename.  The detected record
+   size and record fields are correct for all examples included here.
+
+** Limitations
+1. The data generator I hacked together to test this is unable to
+   generate packed decimals with padding.
+2. The algorithm uses brute force and might be too slow for larger
+   maximum record sizes.
+3. The test data I generated has a lot of entropy.  I am not sure that
+   this would still work as well if I used only dictionary words (with
+   the proper encoding) for the text fields.
