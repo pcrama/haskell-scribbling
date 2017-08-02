@@ -73,20 +73,48 @@ text = "morbi mattis in scripts/loremipsum.pdf\n\
        \total=2\n\
        \Time: 1513.24ms\n"
 
--- matches = 2; // how many matches in total
--- rectCounts = {1, 2}; // match 1 has one rect, match 2 has two rects
--- rects = {{287, 250, 62, 14},
---          {488, 609, 31, 14},
---          {56, 57, 30, 14}}
--- pages = {1, 1, 2}
+-- struct RegressSearchInfo {
+--     WCHAR *searchPhrase;
+--     int count; // how many times it is found in the test document
+--     int rectCounts[]; // how many rects or pages (see next struct members) are needed to locate each hit [count elements]
+--     RectI rects[]; // rectangles covering the hits [sum(rectCounts) elements]
+--     int pages[]; // pages on which the hist are found [sum(rectCounts) elements
+-- };
 --
--- struct expectedResult {
---   int matches; // how many matches in the document
---   int rectCounts[]; // how many elements in pages[] and rects[] are for 1 match
---   Rect rects[]; // rectangles covering the matches
---   int pages[]; // pages on which the matches were found
--- }
+-- Use it like this:
+-- expected =
+-- /*
+-- struct TextSel {
+-- int len;
+-- int *pages;
+-- RectI *rects;
+-- };
+--
+-- int lili[] = { 1                   , 2                   , 2 };
+-- RectI riri[] = { { 293, 126, 58, 14 },{ 335, 130, 59, 14 },{ 56, 671, 59, 14 } };
+--
+-- const TextSel expected[] = {
+-- { 1, lili, riri },
+-- { 1, &lili[1], &riri[1] },
+-- { 1, &lili[2], &riri[2] },
+-- { 0, nullptr, nullptr } // sentinel object to close the list
+-- };
+-- */
 
+formatUsage :: SearchLog -> String
+formatUsage (SearchLog s xs) =
+  printf "const TextSel expected[%d] = { // %s\n\
+         \  %s\
+         \  { 0, nullptr, nullptr }\n\
+         \};\n"
+         (1 + len xs)
+         s
+         formatTextSel xs
+
+formatTextSel :: [NonEmptyList PageRect] -> String
+formatTextSel = intercalateAndBreak ", " 80 . snd . go (0, [])
+  where go (count, result) xs =
+    printf "{ %d, &(data.pages
 formatRect :: PageRect -> String
 formatRect (PageRect _ (x, y, w, h)) = printf "{%d, %d, %d, %d}" x y w h
 
@@ -94,11 +122,13 @@ formatRect (PageRect _ (x, y, w, h)) = printf "{%d, %d, %d, %d}" x y w h
 
 formatFullStruct :: SearchLog -> String
 formatFullStruct (SearchLog s xs) =
-                     printf "// %s\n\
-                             \{ %d, // matches\n\
+                     printf "const RegressSearchInfo data_ = {// %s\n\
+                             \{ L\"%s\", // searchPhrase\n\
+                             \  %d, // count\n\
                              \  { %s }, // rectCounts\n\
                              \  { %s }, // rects\n\
                              \  { %s } }; // pages\n"
+                             s
                              s
                              (length xs)
                              (intercalateAndBreak ", " 80
