@@ -1,0 +1,8 @@
+* record-size
+
+Guess the record size from data
+- Input is a block of bytes (up to 1MiB)
+- There is no separator between records, they are all of the same unknown length
+- Input length is not necessarily a multiple of the record length
+- Input can be ASCII (text or numeric), EBCDIC (text or numeric), ...
+- Each record contains at least one numeric and one text field
