@@ -7,6 +7,8 @@ module S5sim (
   , Time
   , causal
   , cutOff
+  , delay
+  , delayFirst
   , infinity
   , lift
   , message
@@ -94,16 +96,43 @@ data State m a b =
     -- next state
   | Wait Time (State m a b) (Event a -> State m a b)
 
-nubA :: (Monad m, Eq a) => Sim m a a -> Sim m a a
-nubA (Sim f) = Sim $ \a -> do
+delayFirst :: (Monad m, Eq a)
+           => Time -> Sim m (a, b) (a, b)
+delayFirst dt = sim $ \(a, b) -> return ((a, b), delayState a)
+  where enqueue a evs ev@(Event t (v, w)) =
+          ready (Event t (a, w))
+              $ wait (t + dt)
+                     (ready (Event (t + dt) (v, w))
+                          $ case evs of
+                              [] -> delayState v
+                              ((Event t' v'):evs') -> enqueue v
+                                                              evs'
+                                                            $ Event t' (v', w))
+                   $ enqueue a (evs ++ [Event t v])
+        delayState a =
+          waitInput $ \ev@(Event t (v, w)) ->
+            if a == v
+            then ready ev $ delayState a
+            else enqueue a [] ev
+
+delay :: (Monad m, Eq a)
+      => Time -> Sim m a b -> Sim m a b
+delay delay (Sim f) = Sim $ \a -> do
     (b, s) <- f a
-    return (b, nubState b s)
-  where nubState x (Ready e@(Event _ v) s)
-          | x == v    = nubState x s
-          | otherwise = ready e $ nubState v s
-        nubState x (Lift m) = lift $ liftM (nubState x) m
-        nubState x (Wait t d k) =
-            wait t (nubState x d) $ nubState x . k
+    return (b, loop delay s)
+  where loop delay (Ready e@(Event t v) s) =
+          ready (Event (delay + t) v) $ loop delay s
+        loop delay (Lift m) =
+          lift $ liftM (loop delay) m
+        loop delay (Wait t dflt k) =
+          wait t (loop delay dflt) $ loop delay . k
+
+nubA :: (Monad m, Eq a) => Sim m a a
+nubA = sim $ \a -> return (a, nubState a)
+  where nubState a = waitInput $ \ev@(Event _ v) ->
+                       if a == v
+                       then nubState a
+                       else ready ev $ nubState v
 
 stateComp :: Monad m
           => State m a i -> State m i b -> State m a b
@@ -136,9 +165,9 @@ printA :: (Show a, Message m, Monad m)
 printA prefix = Sim $ \a -> do
     message $ prefix ++ ": " ++ show a ++ "@init"
     return $ (a, s)
-  where s = waitInput $ \e -> Ready e $ Lift $ do
+  where s = waitInput $ \e -> lift $ do
               message $ prefix ++ ": " ++ show e
-              return s
+              return $ ready e s
 
 runSim :: Monad m => Sim m a b -> a -> [Event a] -> m ()
 runSim (Sim f) a as = do
