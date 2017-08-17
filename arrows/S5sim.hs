@@ -26,6 +26,7 @@ where
 -- `fmap' is just as good and the more modern name, but
 -- the original paper uses `liftM`
 import Control.Monad (liftM)
+import Data.Monoid ((<>))
 
 import Arrows (
     (>>>)
@@ -33,6 +34,7 @@ import Arrows (
   , first
   , Arrow
   )
+import DList
 
 type Time = Double
 
@@ -103,17 +105,16 @@ delayFirst dt = sim $ \(a, b) -> return ((a, b), delayState a)
           ready (Event t (a, w))
               $ wait (t + dt)
                      (ready (Event (t + dt) (v, w))
-                          $ case evs of
-                              [] -> delayState v
-                              ((Event t' v'):evs') -> enqueue v
-                                                              evs'
-                                                            $ Event t' (v', w))
-                   $ enqueue a (evs ++ [Event t v])
+                          $ case dlDeconstruct evs of
+                              Nothing -> delayState v
+                              Just (Event t' v', evs') ->
+                                  enqueue v evs' $ Event t' (v', w))
+                   $ enqueue a (evs <> (dList1 $ Event t v))
         delayState a =
           waitInput $ \ev@(Event t (v, w)) ->
             if a == v
             then ready ev $ delayState a
-            else enqueue a [] ev
+            else enqueue a dlNull ev
 
 delay :: (Monad m, Eq a)
       => Time -> Sim m a b -> Sim m a b
