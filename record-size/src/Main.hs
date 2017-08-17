@@ -2,8 +2,8 @@ module Main where
 
 import Control.Monad (guard)
 import Data.Array (elems)
-import Data.Monoid (First(..), getFirst)
-import System.Directory (listDirectory)
+import Data.Monoid (First(..), getFirst, mconcat)
+import System.Directory (getDirectoryContents) -- (listDirectory) -- GHC 8.0.1 only?
 
 import Categories
 import Chunked
@@ -42,6 +42,14 @@ outputForFile f i = do
   putStrLn $ case i of
                [] -> "No solution found.  Increase max size?"
                otherwise -> showInterpretation i
+
+listDirectory :: FilePath -> IO [FilePath]
+listDirectory f = do
+    contents <- getDirectoryContents f
+    return [x | x <- contents, not $ dotOrDotDot x]
+  where dotOrDotDot "." = True
+        dotOrDotDot ".." = True
+        dotOrDotDot _ = False
 
 main :: IO ()
 main = do

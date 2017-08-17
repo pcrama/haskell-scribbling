@@ -10,6 +10,7 @@ import qualified Data.ByteString as B
 
 import Data.Array ((!), Array, bounds, listArray)
 import Data.Char (chr)
+import qualified Data.Foldable as F
 import Data.Ord (comparing)
 import Data.List (unfoldr, sortBy)
 import Data.Word (Word8)
@@ -17,8 +18,8 @@ import System.Random (RandomGen, mkStdGen, randomR, split)
 
 import Categories
 
-rleCompress :: (Foldable f, Eq a) => f a -> [(a, Int)]
-rleCompress = foldr updateCountIfEqualOtherwisePrepend []
+rleCompress :: (F.Foldable f, Eq a) => f a -> [(a, Int)]
+rleCompress = F.foldr updateCountIfEqualOtherwisePrepend []
   where updateCountIfEqualOtherwisePrepend x [] = [(x, 1)]
         updateCountIfEqualOtherwisePrepend x z@((y, c):xs) | x == y    = (y, c + 1):xs
                                                            | otherwise = (x, 1):z
