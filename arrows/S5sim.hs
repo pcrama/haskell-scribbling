@@ -30,7 +30,7 @@ import Data.Monoid ((<>))
 
 import Arrows (
     (>>>)
-  , pure
+  , arr
   , first
   , Arrow
   )
@@ -55,8 +55,8 @@ instance (Show a) => Show (Event a) where
 newtype Sim m a b = Sim (a -> m (b, State m a b))
 
 instance Monad m => Arrow (Sim m) where
-  -- pure :: (a -> b) -> Sim (a -> m (b, State m a b))
-  pure f = Sim $ \a -> return (f a, s)
+  -- arr :: (a -> b) -> Sim (a -> m (b, State m a b))
+  arr f = Sim $ \a -> return (f a, s)
     where s = waitInput $ \(Event t a) ->
                 ready (Event t $ f a) s
   -- (>>>) :: Sim m a b -> Sim m b c -> Sim m a c
