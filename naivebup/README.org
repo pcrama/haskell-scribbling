@@ -1,0 +1,7 @@
+* naivebup
+
+** Creation
+#+BEGIN_SRC shell :exports code
+  stack new naivebup simple --resolver=lts-9.2 \
+            -p "category:script" -p "copyright:2017"
+#+END_SRC
