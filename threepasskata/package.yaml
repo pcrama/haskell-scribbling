@@ -1,0 +1,51 @@
+name:                threepasskata
+version:             0.1.0.0
+github:              "pcrama/threepasskata"
+license:             BSD3
+author:              "Philippe Crama"
+maintainer:          "pcfeb0009@gmx.com"
+copyright:           "2018 Philippe Crama"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            kata
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on Github at <https://github.com/pcrama/threepasskata#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+
+library:
+  source-dirs: src
+
+executables:
+  threepasskata-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - threepasskata
+
+tests:
+  threepasskata-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - threepasskata
+    - hspec
+    - HUnit
+    - QuickCheck
