@@ -47,5 +47,6 @@ tests:
     dependencies:
     - threepasskata
     - hspec
+    - hspec-core
     - HUnit
     - QuickCheck

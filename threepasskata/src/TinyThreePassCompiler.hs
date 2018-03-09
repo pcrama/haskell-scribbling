@@ -1,6 +1,5 @@
 module TinyThreePassCompiler
-    ( ASTa(..)
-    , AST
+    ( AST(..)
     , compile
     , parseExpr
     , pass1
@@ -16,74 +15,105 @@ import Data.Char (
 import Data.List (foldl')
 import Text.ParserCombinators.ReadP
 
-data ASTa a = Imm Int
-            | Arg a
-            | Add (ASTa a) (ASTa a)
-            | Sub (ASTa a) (ASTa a)
-            | Mul (ASTa a) (ASTa a)
-            | Div (ASTa a) (ASTa a)
+data ASTparsed = ImmP Int
+               | ArgP String
+               | AddP ASTparsed ASTparsed
+               | SubP ASTparsed ASTparsed
+               | MulP ASTparsed ASTparsed
+               | DivP ASTparsed ASTparsed
   deriving (Eq, Show)
 
-type AST = ASTa Int
+data AST = Imm Int
+         | Arg Int
+         | Add AST AST
+         | Sub AST AST
+         | Mul AST AST
+         | Div AST AST
+  deriving (Eq, Show)
 
 reduceAST r@(Imm _) = r
 reduceAST r@(Arg _) = r
-reduceAST (Add (Imm x) (Imm y)) = Imm $ x + y
-reduceAST (Sub (Imm x) (Imm y)) = Imm $ x - y
-reduceAST (Mul (Imm x) (Imm y)) = Imm $ x * y
-reduceAST (Div (Imm x) (Imm y)) = Imm $ x `div` y
-reduceAST (Add x y) = Add (reduceAST x) (reduceAST y)
-reduceAST (Sub x y) = Sub (reduceAST x) (reduceAST y)
-reduceAST (Mul x y) = Mul (reduceAST x) (reduceAST y)
-reduceAST (Div x y) = Div (reduceAST x) (reduceAST y)
+reduceAST (Add x y) =
+  case (reduceAST x, reduceAST y) of
+    (Imm lft, Imm rgt) -> Imm $ lft + rgt
+    (Imm 0, rgt) -> rgt
+    (lft, Imm 0) -> lft
+    (lft, rgt) -> Add lft rgt
+reduceAST (Sub x y) =
+  case (reduceAST x, reduceAST y) of
+    (Imm lft, Imm rgt) -> Imm $ lft - rgt
+    (lft, Imm 0) -> lft
+    -- Add reduces slightly better, so try to get more of it instead of Sub
+    (lft, Imm imm) -> reduceAST $ Add lft $ Imm $ 0 - imm
+    (lft, Sub imm@(Imm _) rgt) -> reduceAST $ Add imm $ Add lft rgt
+    (Sub lft imm@(Imm _), rgt) -> reduceAST $ Sub lft $ Add imm rgt
+    (lft, rgt) -> Sub lft rgt
+reduceAST (Mul x y) =
+  case (reduceAST x, reduceAST y) of
+    (Imm lft, Imm rgt) -> Imm $ lft * rgt
+    (Imm 0, _) -> Imm 0
+    (_, Imm 0) -> Imm 0
+    (Imm 1, rgt) -> rgt
+    (lft, Imm 1) -> lft
+    (Imm lft, Mul (Imm rgtLft) rgt) -> reduceAST $ Mul rgt $ Imm $ lft * rgtLft
+    (Imm lft, Mul rgt (Imm rgtRgt)) -> reduceAST $ Mul rgt $ Imm $ lft * rgtRgt
+    (Mul (Imm lftLft) lft, Imm rgt) -> reduceAST $ Mul lft $ Imm $ lftLft * rgt
+    (Mul lft (Imm lftRgt), Imm rgt) -> reduceAST $ Mul lft $ Imm $ lftRgt * rgt
+    (lft, rgt) -> Mul lft rgt
+reduceAST (Div x y) =
+  case (reduceAST x, reduceAST y) of
+    (Imm lft, Imm rgt) -> Imm $ lft `div` rgt
+    (Imm 0, _) -> Imm 0
+    (lft, Imm 1) -> lft
+    (lft, rgt) -> Div lft rgt
 
-imm :: ReadP (ASTa String)
+imm :: ReadP ASTparsed
 imm = skipSpaces
-   >> (fmap (Imm . read) (munch1 isDigit)
+   >> (fmap (ImmP . read) (munch1 isDigit)
        +++ ((char '(' >> skipSpaces) *> expr <* (skipSpaces >> char ')'))
        +++ arg)
 
 argName :: ReadP String
 argName = munch1 isAlpha
 
-arg :: ReadP (ASTa String)
+arg :: ReadP ASTparsed
 arg =
      skipSpaces
-  *> fmap Arg argName
+  *> fmap ArgP argName
 
-addsub :: ReadP (ASTa a -> ASTa a -> ASTa a)
+addsub :: ReadP (ASTparsed -> ASTparsed -> ASTparsed)
 addsub = do
   skipSpaces
   c <- satisfy (`elem` "+-")
   case c of
-    '+' -> return Add
-    '-' -> return Sub
+    '+' -> return AddP
+    '-' -> return SubP
     _ -> pfail -- not reached
 
 muldiv = do
   skipSpaces
   c <- satisfy (`elem` "*/")
   case c of
-    '*' -> return Mul
-    '/' -> return Div
+    '*' -> return MulP
+    '/' -> return DivP
     _ -> pfail -- not reached
 
 factor = chainl1 imm muldiv
 
 expr = chainl1 factor addsub
 
-data Function a = Function [String] (ASTa a)
+data Function a = Function [String] ASTparsed
   deriving (Eq, Show)
 
-cataAST :: Applicative f => (Int -> f (ASTa o)) -> (a -> f (ASTa o)) -> ASTa a -> f (ASTa o)
-cataAST fImm _ (Imm x) = fImm x
-cataAST _ fArg (Arg a) = fArg a
-cataAST fImm fArg (Add x y) = Add <$> (cataAST fImm fArg x) <*> (cataAST fImm fArg y)
-cataAST fImm fArg (Sub x y) = Sub <$> (cataAST fImm fArg x) <*> (cataAST fImm fArg y)
-cataAST fImm fArg (Mul x y) = Mul <$> (cataAST fImm fArg x) <*> (cataAST fImm fArg y)
-cataAST fImm fArg (Div x y) = Div <$> (cataAST fImm fArg x) <*> (cataAST fImm fArg y)
+cataAST :: Applicative f => (Int -> f AST) -> (String -> f AST) -> ASTparsed -> f AST
+cataAST fImm _ (ImmP x) = fImm x
+cataAST _ fArg (ArgP a) = fArg a
+cataAST fImm fArg (AddP x y) = Add <$> (cataAST fImm fArg x) <*> (cataAST fImm fArg y)
+cataAST fImm fArg (SubP x y) = Sub <$> (cataAST fImm fArg x) <*> (cataAST fImm fArg y)
+cataAST fImm fArg (MulP x y) = Mul <$> (cataAST fImm fArg x) <*> (cataAST fImm fArg y)
+cataAST fImm fArg (DivP x y) = Div <$> (cataAST fImm fArg x) <*> (cataAST fImm fArg y)
 
-validateAST :: [String] -> ASTa String -> Either String AST
+validateAST :: [String] -> ASTparsed -> Either String AST
 validateAST args =
     cataAST (Right . Imm) (getIndex 0 args)
   where getIndex :: Int -> [String] -> String -> Either String AST
@@ -107,11 +137,12 @@ parseExpr s = case readP_to_S (function <* skipSpaces) s of
                     [] -> Left $ "Unable to parse '" ++ s ++ "': " ++ (show $ length parses) ++ " incomplete parses"
                     (Function args astString, _):_ -> case validateAST args astString of
                                                         Left err -> Left err
-                                                        Right astInt -> Right $ Function args astInt
+                                                        Right astInt -> Right $ astInt
 
 pass1 :: String -> AST
 pass1 s = case parseExpr s of
-            Right (Function _ result) -> result
+            Right result
+              -> result
             r -> error $ show r
 
 pass2 :: AST -> AST
