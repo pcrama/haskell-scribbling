@@ -1,0 +1,55 @@
+name:                SimulEpargneLongTerme
+version:             0.1.0.0
+github:              "pcrama/haskell-scribbling/SimulEpargneLongTerme"
+license:             BSD3
+author:              "Philippe Crama"
+maintainer:          "pcfeb0009@gmx.com"
+copyright:           "2018"
+
+extra-source-files:
+- README.org
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            finance,simulation
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on Github at <https://github.com/pcrama/haskell-scribbling/SimulEpargneLongTerme#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+
+library:
+  source-dirs: src
+  dependencies:
+  - time >= 1.6
+
+executables:
+  SimulEpargneLongTerme-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - SimulEpargneLongTerme
+    - time >= 1.6
+
+tests:
+  SimulEpargneLongTerme-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - SimulEpargneLongTerme
+    - hspec
+    - hspec-core
+    - HUnit
+    - QuickCheck
+    - time >= 1.6
