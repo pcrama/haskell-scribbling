@@ -3,7 +3,7 @@ module Banking
   , FixedInterestAccount
   , Transaction(..)
   , Comment
-  , _Comment(..)
+  , XComment(..)
   , compound
   , fiaBalance
   , fiaDeposit
@@ -26,18 +26,24 @@ instance Monoid Amount where
   mempty = Amount 0
   mappend (Amount a) (Amount b) = Amount $ a + b
 
+scaleAmount :: Double -> Amount -> Amount
+scaleAmount scale (Amount amount) = Amount $ round $ fromIntegral amount * scale
+
+addTax :: Double -> Amount -> Amount
+addTax = scaleAmount . (1.0 +)
+
 compound :: Amount -> Double -> Day -> Day -> Amount
 compound amount@(Amount 0) _ _ _ = amount
 compound amount 0.0 _ _ = amount
-compound (Amount money) yearlyRate from to =
+compound amount yearlyRate from to =
   let diff = to `diffDays` from
-      mult = (1.0 + yearlyRate) ** (fromInteger diff / 365.0)
-  in Amount $ round $ fromIntegral money * mult
+      mult = (1.0 + yearlyRate) ** (fromInteger diff / 365.25)
+  in scaleAmount mult amount
 
-data _Comment = Deposit | ManagementFee | TaxRefund
+data XComment = Deposit | ManagementFee | TaxRefund | Withdrawal
   deriving (Show, Eq)
 
-data Comment = Comment _Comment String
+data Comment = Comment XComment String
   deriving (Show, Eq)
 
 data Transaction = Transaction { _amount :: Amount, _date :: Day, _comment :: Comment }
@@ -49,17 +55,39 @@ data FixedInterestAccount = FIA {
   }
   deriving (Show)
 
+fiaNew :: Double -> FixedInterestAccount
 fiaNew r = FIA { _ledger=[], _rate=r }
 
-fiaBalance (FIA { _ledger=ledger, _rate=r }) date =
+fiaBalance date (FIA { _ledger=ledger, _rate=r }) =
   let updateBalance :: Amount -> Transaction -> Amount
       updateBalance prevAmount (Transaction { _amount=a, _date=d })
         | d > date = prevAmount
         | otherwise = compound a r d date <> prevAmount
   in foldl' updateBalance mempty ledger
 
-fiaDeposit fia@(FIA { _ledger=ledger }) transaction =
+fiaAddTransaction fia@(FIA { _ledger=ledger }) transaction =
   fia { _ledger=transaction:ledger }
+
+fiaDeposit t fia amount s =
+  fiaAddTransaction fia $ Transaction { _amount=amount, _date=t, _comment = Comment Deposit s }
+
+fiaTopUp t fia (Amount target) =
+  let Amount balance = fiaBalance t fia
+  in if balance > target
+     then fia
+     else fiaDeposit t fia (Amount $ target - balance) $ "Top up to " ++ (show $ fromIntegral target / 100.0)
+
+fiaTaxRefund t fia amountSpentLastYear =
+  let (y, _, _) = toGregorian t
+  in fiaAddTransaction fia $ Transaction { _amount=refund
+                                         , _date=t
+                                         , _comment=Comment TaxRefund
+                                                          $ "Tax refund for " ++ (show $ fromIntegral amountSpentLastYear / 100.0) ++ " saved in " ++ (show $ y - 1) }
+
+fiaWithdraw t fia (Amount amount) xcomment s =
+  fiaAddTransaction fia $ Transaction { _amount=Amount $ 0 - (abs amount)
+                                      , _date=t
+                                      , _comment=Comment xcomment s }
 
 -- Local Variables:
 -- intero-targets: "SimulEpargneLongTerme:library"
