@@ -25,6 +25,7 @@ library:
   source-dirs: src
   dependencies:
   - time >= 1.6
+  - transformers
 
 executables:
   SimulEpargneLongTerme-exe:
@@ -37,6 +38,7 @@ executables:
     dependencies:
     - SimulEpargneLongTerme
     - time >= 1.6
+    - transformers
 
 tests:
   SimulEpargneLongTerme-test:

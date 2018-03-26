@@ -1,93 +1,181 @@
-module Banking
-  ( Amount(..)
-  , FixedInterestAccount
-  , Transaction(..)
-  , Comment
+module Banking (
+  ContractInfo(..)
+  , ContractState(..)
+  , runSimulation
+  , Amount(..)
+  , Simulation(..)
+  , Account(..)
   , XComment(..)
-  , compound
-  , fiaBalance
-  , fiaDeposit
-  , fiaNew
-  ) where
+  , Transaction(..)
+  , Comment(..)
+  , makeTransaction
+  , scaleAmount
+  , addTax
+  , showAmount
+  , compoundAmount
+  -- actions
+  , balance
+  , topUp
+  , refundTax
+  , depositLongTerm
+  , taxAt60
+  , deductFees
+  ) 
+where
 
+import Data.Time.Calendar
 import Data.List (foldl')
 import Data.Monoid ((<>))
-import Data.Time.Calendar
-  ( Day
-  , diffDays
-  , fromGregorian
-  , toGregorian
-  )
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.Reader
+import Control.Monad.Trans.State
+
+data ContractInfo = ContractInfo {
+  _normalRate :: Double -- interest rate on `normal' account
+  , _longRate :: Double -- interest rate on long term contract
+  , _entryFee :: Double -- ratio of fees deduced when putting money in long term contract
+  , _60th :: Day -- when the contract owner turns 60 some taxation is levied
+  , _yearlyMgmtFee :: Double -- management fee for the long term contract
+  , _yearlyMgmtCap :: Amount -- management fees are capped
+  , _end :: Day
+}
+
+argentaContract = ContractInfo {
+  _normalRate=0.005
+  , _longRate=0.0105
+  , _entryFee=0.06 -- 2% tax and 4% for Argenta
+  , _60th=undefined
+  , _yearlyMgmtFee=0.0027
+  , _yearlyMgmtCap=Amount $ round $ 100.0 * 7500.0 * 0.0027
+  , _end=undefined
+}
+
+mkContractInfo :: Integer -> Int -> Int -> ContractInfo
+mkContractInfo y m d = argentaContract {
+  _60th=fromGregorian (y + 60) m d
+  , _end=fromGregorian (y + 65) m d
+  }
 
 newtype Amount = Amount Int
   deriving (Show, Eq, Ord)
+
+showAmount :: Amount -> String
+showAmount (Amount a) = let eur = a `div` 100
+                            cents = a `mod` 100
+                        in show eur ++ case cents of
+                                        x | x == 0 -> ""
+                                          | x < 10 -> ".0" ++ show x
+                                          | otherwise -> "." ++ show x
 
 instance Monoid Amount where
   mempty = Amount 0
   mappend (Amount a) (Amount b) = Amount $ a + b
 
-scaleAmount :: Double -> Amount -> Amount
-scaleAmount scale (Amount amount) = Amount $ round $ fromIntegral amount * scale
+data Account = Normal | LongTerm
+  deriving (Show, Eq)
 
-addTax :: Double -> Amount -> Amount
-addTax = scaleAmount . (1.0 +)
-
-compound :: Amount -> Double -> Day -> Day -> Amount
-compound amount@(Amount 0) _ _ _ = amount
-compound amount 0.0 _ _ = amount
-compound amount yearlyRate from to =
-  let diff = to `diffDays` from
-      mult = (1.0 + yearlyRate) ** (fromInteger diff / 365.25)
-  in scaleAmount mult amount
-
-data XComment = Deposit | ManagementFee | TaxRefund | Withdrawal
+data XComment = Deposit | Withdrawal | TaxRefund | Fee
   deriving (Show, Eq)
 
 data Comment = Comment XComment String
   deriving (Show, Eq)
 
-data Transaction = Transaction { _amount :: Amount, _date :: Day, _comment :: Comment }
-  deriving (Show)
+data Transaction = Transaction {
+  _account :: Account
+  , _date :: Day
+  , _amount :: Amount
+  , _comment :: Comment
+} deriving (Show, Eq)
 
-data FixedInterestAccount = FIA {
-  _ledger :: [Transaction]
-  , _rate :: Double
-  }
-  deriving (Show)
+makeTransaction :: Day -> Account -> Amount -> XComment -> String -> Simulation ()
+makeTransaction date account amount xcomment s = 
+  lift
+  $ modify (ContractState
+          . (Transaction { _account=account
+                         , _date=date
+                         , _amount=amount
+                         , _comment=Comment xcomment s
+                         }:)
+          . _transactions)
 
-fiaNew :: Double -> FixedInterestAccount
-fiaNew r = FIA { _ledger=[], _rate=r }
+scaleAmount x (Amount a) = Amount $ round $ x * fromIntegral a
 
-fiaBalance date (FIA { _ledger=ledger, _rate=r }) =
-  let updateBalance :: Amount -> Transaction -> Amount
-      updateBalance prevAmount (Transaction { _amount=a, _date=d })
-        | d > date = prevAmount
-        | otherwise = compound a r d date <> prevAmount
-  in foldl' updateBalance mempty ledger
+addTax tax = scaleAmount $ 1 + tax
 
-fiaAddTransaction fia@(FIA { _ledger=ledger }) transaction =
-  fia { _ledger=transaction:ledger }
+compoundAmount t0 rate t1=
+  scaleAmount $ (1 + rate) ** ((fromIntegral $ t1 `diffDays` t0) / 365.25)
 
-fiaDeposit t fia amount s =
-  fiaAddTransaction fia $ Transaction { _amount=amount, _date=t, _comment = Comment Deposit s }
+newtype ContractState = ContractState { _transactions :: [Transaction] }
+  deriving Show
 
-fiaTopUp t fia (Amount target) =
-  let Amount balance = fiaBalance t fia
-  in if balance > target
-     then fia
-     else fiaDeposit t fia (Amount $ target - balance) $ "Top up to " ++ (show $ fromIntegral target / 100.0)
+type Simulation f = ReaderT ContractInfo (State ContractState) f
 
-fiaTaxRefund t fia amountSpentLastYear =
-  let (y, _, _) = toGregorian t
-  in fiaAddTransaction fia $ Transaction { _amount=refund
-                                         , _date=t
-                                         , _comment=Comment TaxRefund
-                                                          $ "Tax refund for " ++ (show $ fromIntegral amountSpentLastYear / 100.0) ++ " saved in " ++ (show $ y - 1) }
+balance :: Day -> Account -> Simulation Amount
+balance date account =
+  let isRelevantTransaction (Transaction { _account=a, _date=d }) =
+        (a == account) && (d <= date)
+  in do
+       rate <- asks (case account of
+                       Normal -> _normalRate
+                       LongTerm -> _longRate)
+       let compound (Transaction { _amount=a, _date=d }) = compoundAmount d rate date a
+       transactions <- lift $ gets _transactions
+       return $ foldl' (\acc trnsctn -> acc <> compound trnsctn)
+                       (Amount 0)
+                     $ filter isRelevantTransaction transactions
 
-fiaWithdraw t fia (Amount amount) xcomment s =
-  fiaAddTransaction fia $ Transaction { _amount=Amount $ 0 - (abs amount)
-                                      , _date=t
-                                      , _comment=Comment xcomment s }
+topUp :: Day -> Amount -> Simulation ()
+topUp date target = do
+  blnc <- balance date Normal
+  if blnc < target
+  then makeTransaction date Normal (target <> scaleAmount (-1.0) blnc) Deposit $ "Top up to " ++ showAmount target
+  else return ()
+
+taxRefundableLongTermDeposit = Amount 226000
+
+refundTax :: Day -> Simulation ()
+refundTax date =
+  let (y, _, _) = toGregorian date
+      longTermDepositInPreviousYear (Transaction { _account=a, _date=d, _comment=Comment x _ }) =
+        (a == LongTerm)
+        && (x == Deposit)
+        && (let (depositYear, _, _) = toGregorian d in depositYear + 1 == y)
+  in do
+    longDeposits <- fmap (filter longTermDepositInPreviousYear)
+                       $ lift $ gets _transactions
+    let amountSpentLastYear = foldMap _amount longDeposits
+    if amountSpentLastYear > mempty
+      then let refund = scaleAmount 0.32 $ min amountSpentLastYear taxRefundableLongTermDeposit
+           in makeTransaction date Normal refund TaxRefund $ "Refund for " ++ showAmount amountSpentLastYear ++ " in " ++ show (y - 1)
+      else return ()
+
+taxAt60 :: Simulation ()
+taxAt60 = do
+  sixtieth <- asks _60th
+  blnc <- balance sixtieth LongTerm
+  makeTransaction sixtieth LongTerm (scaleAmount (-0.1) blnc) Withdrawal "Tax at 60"
+
+depositLongTerm :: Day -> Simulation ()
+depositLongTerm day = do
+  amount <- fmap (\rate -> addTax rate taxRefundableLongTermDeposit)
+          $ asks _entryFee
+  topUp day amount
+  makeTransaction day Normal (scaleAmount (-1.0) amount) Withdrawal "Long term + fees"
+  makeTransaction day LongTerm taxRefundableLongTermDeposit Deposit $ show day
+
+deductFees :: Day -> Simulation ()
+deductFees day = do
+  feeCap <- asks _yearlyMgmtCap
+  feeRate <- asks _yearlyMgmtFee
+  blnc <- balance day LongTerm
+  makeTransaction day
+                  LongTerm
+                  (scaleAmount (-1.0) $ min feeCap $ scaleAmount feeRate blnc)
+                  Fee
+                $ "Fee for " ++ showAmount blnc
+
+runSimulation :: Simulation f -> Integer -> Int -> Int -> (f, ContractState)
+runSimulation s y m d = runState (runReaderT s $ mkContractInfo y m d) $ ContractState []
 
 -- Local Variables:
 -- intero-targets: "SimulEpargneLongTerme:library"

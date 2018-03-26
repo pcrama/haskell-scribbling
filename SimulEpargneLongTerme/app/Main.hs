@@ -1,9 +1,5 @@
 module Main where
 
-import Data.Monad.State
-
-import Data.List (find)
-
 import Data.Time.Calendar
   ( Day
   , addDays
@@ -11,30 +7,10 @@ import Data.Time.Calendar
   , fromGregorian
   , toGregorian
   )
-
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Reader (asks)
+import Control.Monad.Trans.State (gets)
 import Banking
-
-data SavingsCombo = SavingsCombo {
-  _normalAccount :: FixedInterestAccount
-  , _longTerm :: FixedInterestAccount
-  , _birthday :: Day -- contract terminates at a given age
-  , _feeRate :: Double -- management fee for _longTerm
-  , _feeCap :: Amount -- management fee is capped
-  , _longTermTaxRate :: Double -- deposits are taxed
-  , _now :: Day
-  }
-  deriving (Show, Eq)
-
-advanceTime :: Int -> Int -> State SavingsCombo ()
-advanceTime month day = modify updateDay
-  where updateDay :: SavingsCombo -> SavingsCombo
-        updateDay combo@(SavingsCombo { _now=now }) =
-          combo { _now=after now month day }
-
-topUpNormalAccount :: State SavingsCombo ()
-topUpNormalAccount = do
-  now <- gets _now
-  
   
 after :: Day -> Int -> Int -> Day
 after t month day =
@@ -43,48 +19,45 @@ after t month day =
       nextYear = fromGregorian (y + 1) month day
   in if sameYear <= t then nextYear else sameYear
 
-doBeforeStopAfter :: Day -> (Day -> a -> a) -> Day -> a -> a
-doBeforeStopAfter deadline f now x
-  | now > deadline = x
-  | otherwise = f now x
+simulation :: Day -> Simulation (Amount, [Transaction], Day)
+simulation start = do
+    end <- asks _end
+    sixtieth <- asks _60th
+    loop start end sixtieth $ addGregorianYearsClip 1 sixtieth
+    normal <- balance end Normal
+    long <- balance end LongTerm
+    transactions <- lift $ gets _transactions
+    return $ (normal `mappend` long
+             , filter (\Transaction { _account=a, _comment=Comment x _ } ->
+                         (a == Normal) && (x == Deposit))
+                      transactions
+             , end)
+  where loop start end sixtieth sixtyFirst = do
+          if start > end
+            then return ()
+            else let depositDate = after start 1 1
+                     taxDate = after depositDate 5 1
+                     feeDate = after taxDate 12 31
+                 in do
+                      depositLongTerm depositDate
+                      refundTax taxDate
+                      if (sixtieth == taxDate) || (sixtieth < taxDate && taxDate < sixtyFirst)
+                        then taxAt60
+                        else return ()
+                      deductFees feeDate
+                      loop feeDate end sixtieth sixtyFirst
 
-yearlyDeposit :: Double -> Amount -> Day -> Day -> FixedInterestAccount
-yearlyDeposit rate amount = go (fiaNew rate)
-  where go :: FixedInterestAccount -> Day -> Day -> FixedInterestAccount
-        go account from to
-          | from > to = account
-          | otherwise = go (fiaDeposit account $ Transaction amount from $ "Deposit " ++ show amount)
-                           (addGregorianYearsClip 1 from)
-                           to
-
-simul rate birth start end = go (fiaNew rate) (after start 1 1)
-  where after t month day = let (y, m , r) = toGregorian t
-                                d1 = fromGregorian y month day
-                                d2 = fromGregorian (y + 1) month day
-                            in if d1 > t then d1 else d2
-        deductFee t (Amount x) =
-          Transaction (Amount $ round $ fromInteger * 0.96)
-                      t
-                    $ Comment Deposit $ "Deposit " ++ show x ++ "-fees"
-        go account t
-           | t > end = account
-           | otherwise = goTaxRefund (fiaDeposit account $ deductFee t $ Amount 213000)
-                                   $ after t 5 1
-        canDeduct targetYear (Transaction { _date=d, _comment=Comment typ _ }) =
-          let (y, _, _) = fromGregorian d
-          in y == targetYear && typ == Deposit
-        taxRefund t (Transaction { _amount=Amount a }) =
-          Transaction { _amount=Amount . round $ fromInteger a * 0.3
-                        ,  _date=t
-                        , _comment=Comment TaxRefund $ "Refund " ++ show a }
-        goTaxRefund account@(FIA { _ledger=ledger }) t
-           | t > end = account
-           | otherwise = let (y, _, _) = fromGregorian t
-                             mbTransaction = find (canDeduct $ y - 1) ledger
-                         in go (maybe account
-                                      (fiaDeposit account . taxRefund t)
-                                      mbTransaction)
-                               (after t 1 1)
-
+balanceAtRate :: Day -> Double -> [Transaction] -> Amount
+balanceAtRate date rate = foldMap (\(Transaction { _amount=a, _date=d }) ->
+                                     compoundAmount d rate date a)
+  
 main :: IO ()
-main = putStrLn . show $ yearlyDeposit 0.01 (Amount 100) (fromGregorian 2012 1 1) (fromGregorian 2015 1 1)
+main =
+  flip mapM_ [1965, 1969, 1973, 1977, 1981, 1985] $ \y -> do
+    putStrLn $ "\n----- " ++ show y ++ " -----"
+    let (finalTotal, s, end) = fst $ runSimulation (simulation $ fromGregorian 2018 5 1) y 1 1
+    putStrLn $ "final total == " ++ showAmount finalTotal
+    flip mapM_ [15, 20, 25, 30, 35] $ \rate1000 ->
+      putStrLn $ "fixed 0.0"
+                 ++ show rate1000 ++ "%-> "
+                 ++ (showAmount $ balanceAtRate end (fromIntegral rate1000 / 1000.0) s)
