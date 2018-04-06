@@ -4,7 +4,8 @@
 module Main where
 
 import Control.Applicative (Applicative(..), Alternative(..))
-import SimpleParser
+-- import SimpleParser
+import MTParser
 
 data Nesting = One Char | Many [Nesting] deriving (Show, Eq)
 
@@ -19,9 +20,13 @@ element = char <|> level
 
 parseNest = many element
 
+p :: Parser a (a, a)
 p = (,) <$> item <*> item
+
+q :: Eq a => a -> Parser a (a, a)
 q x = item >>= (\y -> if x == y then return (x, x) else fmap ((,) y) item)
 
+testParser :: (Show t, Show a) => String -> Parser t a -> [t] -> IO ()
 testParser s p ts =
   putStrLn $ s ++ " " ++ show ts ++ " = " ++ (show $ getParser p ts)
 
