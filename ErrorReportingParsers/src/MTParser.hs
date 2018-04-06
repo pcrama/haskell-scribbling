@@ -11,6 +11,7 @@ module MTParser
   , satisfy
   , check
   , literal
+  , woof
   )
 
 where
@@ -31,7 +32,7 @@ item = get >>= \xs -> case xs of
 satisfy :: (MonadState [t] m, Alternative m) => (t -> Bool) -> m t
 satisfy = flip check item
 
-check :: (MonadState [t] m, Alternative m) => (t -> Bool) -> m t -> m t
+check :: (MonadState [t] m, Alternative m) => (a -> Bool) -> m a -> m a
 check = S.check
 
 literal :: (Eq t, MonadState [t] m, Alternative m) => t -> m t
@@ -64,14 +65,12 @@ data AST -- pg 48
 getParser :: Parser t a -> [t] -> Maybe (a, [t])
 getParser = runStateT
 
-opencurly, closecurly :: Parser Char Char
-opencurly = literal '{'
-closecurly = literal '}'
+-- Auxiliary functions
+junk :: Parser Char [[Char]]
+junk = many $ whitespace <|> comment
 
-whitespace, comment :: Parser Char [Char]
-whitespace = some $ satisfy (`elem` " \n\t\r\f")
-
-comment = pure (:) <*> literal ';' <*> many (not1 $ literal '\n')
+tok :: Parser Char a -> Parser Char a
+tok p = p <* junk
 
 class Switch f where
   switch :: f a -> f ()
@@ -90,3 +89,58 @@ instance (Functor m, Switch m) => Switch (StateT s m) where
 
 not1 :: (MonadState [t] m, Alternative m, Switch m) => m a -> m t
 not1 p = switch p *> item
+
+endCheck :: Parser t ()
+endCheck = switch item
+
+-- Token parsers (pp 48--50)
+opencurly, closecurly, openparen, closeparen :: Parser Char Char
+opencurly = tok $ literal '{'
+closecurly = tok $ literal '}'
+openparen = tok $ literal '('
+closeparen = tok $ literal ')'
+
+whitespace, comment :: Parser Char [Char]
+whitespace = some $ satisfy (`elem` " \n\t\r\f")
+
+comment = pure (:) <*> literal ';' <*> many (not1 $ literal '\n')
+
+symbol :: Parser Char [Char]
+symbol = tok $ some char
+  where char = satisfy (`elem` (['a'..'z'] ++ ['A'..'Z']))
+
+--Syntactic structures (pp 50--ff)
+form, application, special, define, lambda :: Parser Char AST
+application =
+  openparen  *>
+  pure AApp <*>
+  form      <*>
+  many form <*
+  closeparen
+
+special =
+  opencurly *> (define <|> lambda) <* closecurly
+
+define =
+  check (== "define") symbol *>
+  pure ADefine              <*>
+  symbol                    <*>
+  form
+
+lambda =
+    check (== "lambda") symbol    *>
+    opencurly                     *>
+    pure ALambda                 <*>
+    check distinct (many symbol) <*>
+    (closecurly                   *>
+    many form)
+  where distinct :: (Eq a, Foldable f) => f a -> Bool
+        distinct = fst . foldr compareAndStore (True, [])
+          where compareAndStore x (False, _) = (False, [])
+                compareAndStore x (True, []) = (True, [x])
+                compareAndStore x (True, xs) = (not $ x `elem` xs, x:xs)
+
+form = application <|> special <|> (fmap ASymbol symbol)
+
+woof :: Parser Char [AST]
+woof = junk *> many form <* endCheck
