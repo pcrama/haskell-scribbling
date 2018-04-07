@@ -5,7 +5,7 @@ module Main where
 
 import Control.Applicative (Applicative(..), Alternative(..))
 -- import SimpleParser
-import MTParser
+import MTParser1
 
 data Nesting = One Char | Many [Nesting] deriving (Show, Eq)
 

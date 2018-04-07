@@ -4,7 +4,7 @@ import Test.Hspec
 import Test.HUnit
 
 import qualified SimpleParser as S
-import qualified MTParser as M1
+import qualified MTParser1 as M1
 
 data Nesting = One Char | Many [Nesting] deriving (Show, Eq)
 

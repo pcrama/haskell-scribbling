@@ -3,7 +3,7 @@
 -- by Matt Fenwick & Jay Vyas following along
 -- https://themonadreader.files.wordpress.com/2013/08/issue221.pdf
 -- pp 47--ff
-module MTParser
+module MTParser1
   ( Parser
   , AST(..)
   , getParser
