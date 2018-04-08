@@ -28,6 +28,7 @@ where
 import Control.Applicative (Alternative(..), some, many)
 import Control.Monad.State (StateT(..))
 import Control.Monad.State (MonadState(..))
+import Control.Monad.Trans.Maybe (MaybeT(..))
 
 import qualified SimpleParser as S
 
@@ -95,6 +96,9 @@ instance Switch [] where
 instance (Functor m, Switch m) => Switch (StateT s m) where
   switch (StateT f) = StateT g
     where g s = fmap (const ((), s)) . switch $ f s
+
+instance (Functor m, Switch m) => Switch (MaybeT m) where
+  switch (MaybeT m) = MaybeT $ fmap switch m
 
 not1 :: (MonadState [t] m, Alternative m, Switch m) => m a -> m t
 not1 p = switch p *> item

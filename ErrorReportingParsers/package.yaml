@@ -21,6 +21,7 @@ description:         Please see the README on Github at <https://github.com/pcra
 dependencies:
 - base >= 4.7 && < 5
 - mtl
+- transformers
 
 library:
   source-dirs: src
