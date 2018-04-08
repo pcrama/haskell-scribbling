@@ -6,12 +6,21 @@
 module MTParser1
   ( Parser
   , AST(..)
+  , Switch(..)
   , getParser
   , item
   , satisfy
   , check
   , literal
+  , not1
+  , endCheck
+  , junk
   , woof
+  , opencurly
+  , openparen
+  , closecurly
+  , closeparen
+  , symbol
   )
 
 where
@@ -66,10 +75,10 @@ getParser :: Parser t a -> [t] -> Maybe (a, [t])
 getParser = runStateT
 
 -- Auxiliary functions
-junk :: Parser Char [[Char]]
+junk :: (MonadState [Char] m, Alternative m, Switch m) => m [[Char]] -- Parser Char [[Char]]
 junk = many $ whitespace <|> comment
 
-tok :: Parser Char a -> Parser Char a
+tok :: (MonadState [Char] m, Alternative m, Switch m) => m a -> m a -- Parser Char a -> Parser Char a
 tok p = p <* junk
 
 class Switch f where
@@ -90,22 +99,23 @@ instance (Functor m, Switch m) => Switch (StateT s m) where
 not1 :: (MonadState [t] m, Alternative m, Switch m) => m a -> m t
 not1 p = switch p *> item
 
-endCheck :: Parser t ()
+endCheck :: (MonadState [t] m, Alternative m, Switch m) => m ()
 endCheck = switch item
 
 -- Token parsers (pp 48--50)
-opencurly, closecurly, openparen, closeparen :: Parser Char Char
+opencurly, closecurly, openparen, closeparen :: (Switch m, MonadState [Char] m, Alternative m) => m Char -- Parser Char Char
 opencurly = tok $ literal '{'
 closecurly = tok $ literal '}'
 openparen = tok $ literal '('
 closeparen = tok $ literal ')'
 
-whitespace, comment :: Parser Char [Char]
+whitespace :: (MonadState [Char] m, Alternative m) => m [Char] -- Parser Char [Char]
 whitespace = some $ satisfy (`elem` " \n\t\r\f")
 
+comment :: (MonadState [Char] m, Alternative m, Switch m) => m [Char] -- Parser Char [Char]
 comment = pure (:) <*> literal ';' <*> many (not1 $ literal '\n')
 
-symbol :: Parser Char [Char]
+symbol :: (Switch m, MonadState [Char] m, Alternative m) => m [Char] -- Parser Char [Char]
 symbol = tok $ some char
   where char = satisfy (`elem` (['a'..'z'] ++ ['A'..'Z']))
 
