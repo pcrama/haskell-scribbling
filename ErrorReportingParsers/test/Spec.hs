@@ -6,6 +6,7 @@ import Test.HUnit
 import qualified SimpleParser as S
 import qualified MTParser1 as M1
 import qualified MTParser2 as M2
+import qualified MTParser3 as M3
 
 data Nesting = One Char | Many [Nesting] deriving (Show, Eq)
 
@@ -69,6 +70,18 @@ testM2Parser s p ts expected =
                  expected
                  parsed
 
+testM3Parser :: (Eq a, Show a, Eq e, Show e)
+  => String -- comment
+  -> M3.Parser e Char a -- parser
+  -> String -- input
+  -> Either (e, M3.Pos) (Maybe ((a, String), M3.Pos)) -- expected value
+  -> Assertion
+testM3Parser s p ts expected =
+  let parsed = M3.getParser p ts
+  in assertEqual (s ++ " " ++ show ts ++ " = " ++ (show $ parsed))
+                 expected
+                 parsed
+
 multiTest assertion descr parser inputAndExpected =
   mapM_ (uncurry $ assertion descr parser) inputAndExpected
 
@@ -92,20 +105,31 @@ m2TestDataValidParses =
                     ,M1.ASymbol "end"]
                    ,""))]
 
-m2TestDataErrorReporting =
-  [ ("()", Left $ M2.eAppOper M2.parserErrorDict)
-  , ("a (", Left $ M2.eAppOper M2.parserErrorDict)
-  , ("(a", Left $ M2.eAppClose M2.parserErrorDict)
-  , ("{define (a b c)}", Left $ M2.eDefSym M2.parserErrorDict)
-  , ("{define a}", Left $ M2.eDefForm M2.parserErrorDict)
-  , ("{lambda (a b c)}", Left $ M2.eLamParam M2.parserErrorDict)
-  , ("{lambda {a b a} (c d)}", Left $ M2.eLamDupe M2.parserErrorDict)
-  , ("{lambda {a ()} (c d)}", Left $ M2.eLamPClose M2.parserErrorDict)
-  , ("{lambda {a b (c d)}", Left $ M2.eLamPClose M2.parserErrorDict)
-  , ("{lambda {a b}}", Left $ M2.eLamBody M2.parserErrorDict)
-  , ("{define x y", Left $ M2.eSpecClose M2.parserErrorDict)
-  , ("{defin x y}", Left $ M2.eSpecial M2.parserErrorDict)
-  , ("a,b", Left $ M2.eWoof M2.parserErrorDict)
+m2TestDataErrorReporting = map m3ToM2Example m3TestDataErrorReporting
+
+m3ToM2Example (input, (Left (e, _))) = (input, Left e)
+m3ToM2Example (input, (Right (Just (r, _)))) = (input, Right r)
+m3ToM2Example (input, (Right Nothing)) = (input, Right Nothing)
+
+m3TestDataErrorReporting =
+  [ ("()", Left (M2.eAppOper M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 2 }))
+  , ("a\n (", Left (M2.eAppOper M2.parserErrorDict, M3.Pos { M3.row = 2, M3.col = 3 }))
+  , ("(a)(a", Left (M2.eAppClose M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 6 }))
+  , ("(a)\n(a\n", Left (M2.eAppClose M2.parserErrorDict, M3.Pos { M3.row = 3, M3.col = 1 }))
+  , ("{define (a b c)}", Left (M2.eDefSym M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 9 }))
+  , ("{define\n (a b c)}", Left (M2.eDefSym M2.parserErrorDict, M3.Pos { M3.row = 2, M3.col = 2 }))
+  , ("{define a}", Left (M2.eDefForm M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 10 }))
+  , ("{lambda (a b c)}", Left (M2.eLamParam M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 9 }))
+  , ("{lambda {a b a} (c d)}", Left (M2.eLamDupe M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 10 }))
+  , -- unfortunately, the starting position of the list is recorded, but for
+    -- this error, it would be better to have the first non-symbol.
+    ("{lambda {a \n()} (c d)}", Left (M2.eLamPClose M2.parserErrorDict, M3.Pos { M3.row = 2, M3.col = 1
+ }))
+  , ("{lambda {a b (c d)}", Left (M2.eLamPClose M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 14 }))
+  , ("{lambda {a b}}", Left (M2.eLamBody M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 14 }))
+  , ("{define x y", Left (M2.eSpecClose M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 12 }))
+  , ("{defin x y}", Left (M2.eSpecial M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 2 }))
+  , ("a,b", Left (M2.eWoof M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 2 }))
   ]
 
 m2ToM1Example (input, expected) = (input, either (const Nothing) id expected)
@@ -208,3 +232,16 @@ main = hspec $ do
       multiTest testM2Parser "M2.woof" M2.woof m2TestDataErrorReporting
     it "should work for some woof examples" $ do
       multiTest testM2Parser "M2.woof" M2.woof m2TestDataValidParses
+  describe "MTParser3" $ do
+    it "should work for minimal example" $ do
+      multiTest testM3Parser
+                "M3.item"
+                -- force type of parser to prove that the error type would be showable, too
+                (M3.item :: M3.Parser String Char Char)
+                [ ("abc", (Right $ Just (('a', "bc"), M3.Pos { M3.row = 1, M3.col = 2 })))
+                , ("\nd", (Right $ Just (('\n', "d"), M3.Pos { M3.row = 2, M3.col = 1 })))
+                , ("", Right Nothing)]
+    it "should report proper errors" $ do
+      multiTest testM3Parser "M3.woof" M3.woof m3TestDataErrorReporting
+    -- it "should work for some woof examples" $ do
+    --   multiTest testM3Parser "M3.woof" M3.woof m3TestDataValidParses

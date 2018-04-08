@@ -17,20 +17,9 @@ module MTParser2
   , closeparen -- re-exported
   , symbol -- re-exported
   , woof
-  , parserErrorDict
   , commit
-  , eAppOper
-  , eAppClose
-  , eDefSym
-  , eDefForm
-  , eLamParam
-  , eLamParamList
-  , eLamDupe
-  , eLamPClose
-  , eLamBody
-  , eSpecClose
-  , eSpecial
-  , eWoof
+  , ErrorDict(..)
+  , parserErrorDict
   )
 
 where
@@ -39,6 +28,7 @@ import Control.Applicative (Alternative(..), some, many)
 import Control.Monad.State (StateT(..), MonadState(..), lift)
 import Control.Monad.Trans.Maybe (MaybeT(..))
 
+import TheirMonadError (MonadError(..))
 import MTParser1
   ( AST(..)
   , Switch(..)
@@ -69,31 +59,7 @@ getParser p xs = runMaybeT (runStateT p xs)
 
 instance (Monoid e) => Switch (Either e) where
   switch (Left _) = Right ()
-  switch (Right _) = Left mempty
-
--- Type Class Preliminaries (pg 55)
--- I went with their type classes instead of the mtl/transformer ones
--- because I needed their `Error' type function for e.g. commit.
-class Monad m => MonadError m where
-  type Error m :: *
-  throwError :: Error m -> m a
-  catchError :: m a -> (Error m -> m a) -> m a
-
-instance MonadError (Either e) where
-  type Error (Either e) = e
-  throwError = Left
-  catchError m f = either f Right m
-
-instance MonadError m => MonadError (StateT s m) where
-  type Error (StateT s m) = Error m
-  throwError = lift . throwError
-  catchError m f = StateT g
-    where g s = catchError (runStateT m s) (\e -> runStateT (f e) s)
-
-instance MonadError m => MonadError (MaybeT m) where
-  type Error (MaybeT m) = Error m
-  throwError = lift . throwError
-  catchError m f = MaybeT $ catchError (runMaybeT m) (runMaybeT . f)
+  switch (Right f) = Left mempty
     
 -- more specialized type: e -> Parser e t a -> Parser e t a
 commit :: (MonadError m, Alternative m) => Error m -> m a -> m a
@@ -146,9 +112,8 @@ application ed =
 
 special ed =
   opencurly *>
-  (commit (eSpecClose ed)
-        $ (commit (eSpecial ed) $ define ed <|> lambda ed) <*
-          closecurly)
+  (commit (eSpecial ed) $ define ed <|> lambda ed) <*
+  (commit (eSpecClose ed) closecurly)
 
 define ed =
   check (== "define") symbol *>
@@ -162,11 +127,11 @@ lambda ed =
     (commit (eLamParam ed) $
      pure ALambda                   <*>
      (opencurly                      *>
-      (commit (eLamPClose ed) $
        (commit (eLamDupe ed)
              $ check distinct
                    $ many symbol)   <*
-       closecurly))                 <*>
+       (commit (eLamPClose ed)
+               closecurly))         <*>
      (commit (eLamBody ed)
            $ some (form ed)))
   where distinct :: (Eq a, Foldable f) => f a -> Bool
