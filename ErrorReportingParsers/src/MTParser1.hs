@@ -133,7 +133,7 @@ lambda =
     pure ALambda                 <*>
     check distinct (many symbol) <*>
     (closecurly                   *>
-    many form)
+    some form)
   where distinct :: (Eq a, Foldable f) => f a -> Bool
         distinct = fst . foldr compareAndStore (True, [])
           where compareAndStore x (False, _) = (False, [])
