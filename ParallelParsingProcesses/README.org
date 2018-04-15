@@ -1,0 +1,4 @@
+* Parallel Parsing Processes
+
+Inspired by reading
+[[http://www.cse.chalmers.se/edu/course/course/afp/Papers/parser-claessen.pdf][Parallel Reading Processes]].

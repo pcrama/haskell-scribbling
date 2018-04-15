@@ -1,0 +1,47 @@
+name:                ParallelParsingProcesses
+version:             0.1.0.0
+github:              "pcrama/ParallelParsingProcesses"
+license:             BSD3
+author:              "Philippe Crama"
+maintainer:          "pcfeb0009@gmx.com"
+copyright:           "Copyright (c) 2018 by Philippe Crama"
+
+extra-source-files:
+- README.org
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            learning
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on Github at <https://github.com/pcrama/ParallelParsingProcesses#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+
+library:
+  source-dirs: src
+
+executables:
+  ParallelParsingProcesses-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - ParallelParsingProcesses
+
+tests:
+  ParallelParsingProcesses-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - ParallelParsingProcesses
