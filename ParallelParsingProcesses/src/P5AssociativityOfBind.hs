@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 -- Section 9 of
 -- http://www.cse.chalmers.se/edu/course/course/afp/Papers/parser-claessen.pdf
 -- Implementation D: Associativity of Bind
@@ -9,45 +10,20 @@ module P5AssociativityOfBind
     ) where
 
 import Control.Applicative (Alternative(..))
+import qualified P4RemovingPlus as P
 
-data P i o = Fail
-           | SymbolBind (i -> P i o)
-           | ReturnPlus o (P i o)
+type Context s a b = a -> P.P s b
 
-parse :: P i o -> [i] -> [([i], o)]
-parse (SymbolBind _) [] = []
-parse (SymbolBind k) (x:xs) = parse (k x) xs
-parse Fail _ = []
-parse (ReturnPlus o p) xs = (xs, o):parse p xs
+type P s a = forall b . Context s a b -> P.P s b
 
-symbol :: P i i
-symbol = SymbolBind pure
+data PP i o
+  = SymbolBind (i -> PP i o)
 
-instance Functor (P i) where
-  fmap f (SymbolBind k) = SymbolBind $ (fmap f) . k
-  fmap _ Fail = Fail
-  fmap f (ReturnPlus o p) = ReturnPlus (f o) (fmap f p)
+-- D4. p === \k -> P.p (P.>>=) k
+-- D5. parse p === P.parse P.p
 
-instance Applicative (P i) where
-  pure = flip ReturnPlus Fail
-  -- P i (a -> b) <*> P i a = P i b
-  p <*> q = p >>= \f -> fmap f q
-
-instance Monad (P i) where
-  fail _ = Fail
-  return = pure
-  (SymbolBind f) >>= k = SymbolBind $ \x -> f x >>= k
-  Fail >>= _ = Fail
-  (ReturnPlus o p) >>= f = f o +++ (p >>= f)
-
-(+++) :: P i o -> P i o -> P i o
-Fail +++ p = p
-p +++ Fail = p
-(SymbolBind k) +++ (SymbolBind k') = SymbolBind $ \c -> k c +++ k' c
-(ReturnPlus a p) +++ (ReturnPlus b q) = ReturnPlus a $ ReturnPlus b $ p +++ q
-(ReturnPlus o p) +++ sb@(SymbolBind _) = ReturnPlus o $ p +++ sb
-sb@(SymbolBind _) +++ (ReturnPlus o p) = ReturnPlus o $ p +++ sb
-
-instance Alternative (P i) where
-  empty = Fail
-  (<|>) = (+++)
+-- symbol = \k -> P.symbol P.>>= k
+--        = \k -> P.SymbolBind return P.>>= k
+--        = \k -> 
+symbol = SymbolBind
+fail = 
