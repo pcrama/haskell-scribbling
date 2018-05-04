@@ -3,7 +3,7 @@
 -- Implementation C: Removing Plus
 module P4RemovingPlus
     ( symbol
-    , P
+    , P(..) -- exporting constructors only for P5AssociativityOfBind
     , parse
     , (+++)
     ) where
@@ -12,7 +12,7 @@ import Control.Applicative (Alternative(..))
 
 data P i o = Fail
            | SymbolBind (i -> P i o)
-           | ReturnPlus o (P i o)
+           | ReturnPlus o (P i o) -- ReturnPlus o p === return o +++ p
 
 parse :: P i o -> [i] -> [([i], o)]
 parse (SymbolBind _) [] = []
