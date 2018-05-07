@@ -1,6 +1,9 @@
 module ParseRipSpec
     ( TrackRipSpec(..)
     , IntOrFollowing(..)
+    , CDRipSpec(..)
+    , parseCRS
+    , Key(..)
     ) where
 
 import Data.Char (isAlpha, toLower, digitToInt)

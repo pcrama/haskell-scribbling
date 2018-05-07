@@ -45,3 +45,7 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - ripandtag
+    - HUnit
+    - QuickCheck
+    - hspec
+    - hspec-core
