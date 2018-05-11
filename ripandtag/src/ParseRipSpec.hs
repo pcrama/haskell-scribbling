@@ -8,7 +8,7 @@ module ParseRipSpec
 
 import Data.Char (isAlpha, toLower, digitToInt)
 import Data.Function (on)
-import Data.List (minimumBy, foldl')
+import Data.List (minimumBy, foldl', dropWhileEnd)
 import Data.List.NonEmpty (NonEmpty(..))
 import Text.ParserCombinators.ReadP
 
@@ -70,7 +70,7 @@ parseKeyString = do
               , ("total", Total)
               , ("album", Album)
               , ("genre", Genre) ] of
-    Just key -> return (key, value)
+    Just key -> return (key, dropWhileEnd (`elem` " \t") value)
     Nothing -> pfail
 
 eol1 = munch1 (`elem` "\r\n")
