@@ -4,6 +4,9 @@ module ParseRipSpec
     , CDRipSpec(..)
     , parseCRS
     , Key(..)
+    , translateSpec
+    , emptyTrackRipSpec
+    , expandOverrides
     ) where
 
 import Data.Char (isAlpha, toLower, digitToInt)
@@ -32,13 +35,13 @@ data CDRipSpec = CRS
   , overrides :: [CDRipSpec]
   } deriving (Show, Eq)
 
-setFromKey :: Key -> String -> TrackRipSpec -> TrackRipSpec
-setFromKey Title s trs = trs { title = Just s }
-setFromKey Artist s trs = trs { artist = Just s }
-setFromKey Album s trs = trs { album = Just s }
-setFromKey Track s trs = trs { track = parseIntOrFollowing s }
-setFromKey Total s trs = trs { total = parseInt s }
-setFromKey Genre s trs = trs { genre = Just s }
+setFromKey :: TrackRipSpec -> (Key, String) -> TrackRipSpec
+setFromKey trs (Title, s) = trs { title = Just s }
+setFromKey trs (Artist, s) = trs { artist = Just s }
+setFromKey trs (Album, s) = trs { album = Just s }
+setFromKey trs (Track, s) = trs { track = parseIntOrFollowing s }
+setFromKey trs (Total, s) = trs { total = parseInt s }
+setFromKey trs (Genre, s) = trs { genre = Just s }
 
 emptyTrackRipSpec = TRS { title = Nothing
                         , artist = Nothing
@@ -51,7 +54,8 @@ expandOverrides :: TrackRipSpec -> CDRipSpec -> [TrackRipSpec]
 expandOverrides base
                 (CRS { info = (k, s) :| kkss
                      , overrides = overrides }) =
-  let expBase = foldr (uncurry setFromKey) base $ (k, s):kkss
+  -- foldl', not foldr so that the last (k, s) can override previous values
+  let expBase = foldl' setFromKey base $ (k, s):kkss
   in case overrides of
        [] -> [expBase]
        xs -> concatMap (expandOverrides expBase) xs
