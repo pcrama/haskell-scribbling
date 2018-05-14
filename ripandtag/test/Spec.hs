@@ -14,11 +14,15 @@ instance Arbitrary CDRipSpec where
     case size of
       0 -> do
              k <- elements [Title, Artist, Album, Track, Total, Genre]
-             v <- elements ["ab", "cd", "efg", "hi"]
+             v <- elements ["ab", "cd", "efg", "hi", "jk", "l", "mn"
+                           , "op", "qrs", "tuvw", "xy", "z a", "bcde"
+                           , "fghi", "jklm", "n op", "Qr s", "TUV"
+                           , "xYz"]
              return CRS { info = (k, v) :| [], overrides = [] }
       _ -> do
-        lftSize <- choose (1, size)
-        let rgtSize = max 0 $ size - lftSize - 1
+        let maxSize = 20
+        lftSize <- choose (1, min maxSize size)
+        let rgtSize = min maxSize $ max 0 $ size - lftSize - 1
         let f (CRS { info = (k, v) :| _ }) = (k, v)
         kvs <- mapM (fmap f . resize 0) $ replicate lftSize arbitrary
         overs <- mapM (resize $ min 3 $ rgtSize `div` 2)
@@ -64,6 +68,12 @@ prop_Idempotent x =
   in and $ [ expandedOnce !! i == (expandedTwice !! i) !! i
            | i <- [0..length expandedOnce - 1] ]
 
+prop_Translate :: [[CDRipSpec]] -> Bool
+prop_Translate x =
+  let concatThenTranslate = translateSpec $ concat x
+      translateThenConcat = concatMap translateSpec x
+  in concatThenTranslate == translateThenConcat
+
 testParseCRS indent s exp =
   it ("should work for '" ++ s ++ "'")
    $ assertEqual ("testParseCRS of " ++ s)
@@ -105,3 +115,6 @@ main = hspec $ do
       property prop_Reorder
     it "is idempotent" $
       property prop_Idempotent
+  describe "translateSpec" $
+    it "handles a list of specs" $
+      property prop_Translate
