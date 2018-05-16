@@ -68,10 +68,11 @@ prop_Idempotent x =
   in and $ [ expandedOnce !! i == (expandedTwice !! i) !! i
            | i <- [0..length expandedOnce - 1] ]
 
-prop_Translate :: [[CDRipSpec]] -> Bool
-prop_Translate x =
-  let concatThenTranslate = translateSpec $ concat x
-      translateThenConcat = concatMap translateSpec x
+prop_Translate :: Int -> [[CDRipSpec]] -> Bool
+prop_Translate maxLen x =
+  let xShortened = take maxLen $ map (take maxLen) x
+      concatThenTranslate = translateSpec $ concat xShortened
+      translateThenConcat = concatMap translateSpec xShortened
   in concatThenTranslate == translateThenConcat
 
 testParseCRS indent s exp =
@@ -117,4 +118,4 @@ main = hspec $ do
       property prop_Idempotent
   describe "translateSpec" $
     it "handles a list of specs" $
-      property prop_Translate
+      property $ prop_Translate 10
