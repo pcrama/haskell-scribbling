@@ -116,6 +116,16 @@ main = hspec $ do
       property prop_Reorder
     it "is idempotent" $
       property prop_Idempotent
+    it "handles an example found (& fixed) by prop_NestedOrFlat" $
+      let input = CRS { info = (Title, "discarded") :| [(Title, "kept")]
+                      , overrides = [] }
+          result = expandOverrides emptyTrackRipSpec input
+          expected = expandOverrides emptyTrackRipSpec
+                                   $ CRS { info = (Title, "kept") :| []
+                                         , overrides = [] }
+      in assertEqual "Latest key overrules prior keys"
+                     expected
+                     result
   describe "translateSpec" $
     it "handles a list of specs" $
       property $ prop_Translate 10
