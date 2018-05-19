@@ -4,6 +4,7 @@ import Test.QuickCheck
 import Test.Hspec
 import Test.Hspec.Core.QuickCheck (modifyMaxSize, modifyMaxSuccess)
 
+import Data.List (intercalate)
 import Data.List.NonEmpty (NonEmpty(..))
 import Text.ParserCombinators.ReadP
 
@@ -38,6 +39,43 @@ instance Arbitrary CDRipSpec where
            where shrunkOvers = input { overrides = [] }
                  shrunkTail = input { info = hd :| [] }
                  shrunkBoth = CRS { info = hd :| [], overrides = [] }
+
+safeTrackName x = intercalate "-"
+                $ map (maybe "" id)
+                $ filter (maybe False $ const True)
+                $ [ artist x
+                  , album x
+                  , title x ]
+
+instance Arbitrary TrackRipSpec where
+  arbitrary = do
+      tit <- arbString 9
+      art <- arbString 9
+      tra <- fmap TheInt $ arbitrary `suchThat` (0 <)
+      tot <- arbTotal
+      alb <- arbString 5
+      gen <- arbString 2
+      return $ TRS { title = tit
+                   , artist = art
+                   , track = tra
+                   , total = tot
+                   , album = alb
+                   , genre = gen
+                   }
+    where -- arbString :: Int -> Gen (Maybe String)
+          arbString p = do
+            -- 1 x Nothing, p x Just String
+            pickJust <- elements $ False:replicate p True
+            if pickJust
+            then fmap Just $ (arbitrary `suchThat` ((1 <) . length) :: Gen String)
+            else return Nothing
+          -- arbTotal :: Gen (Maybe Int)
+          arbTotal = do
+            -- 10% Nothing, 90% Just Int
+            pickJust <- elements $ False:replicate 9 True
+            if pickJust
+            then fmap Just $ arbitrary `suchThat` (\x -> (0 < x) && (x < 1000))
+            else return Nothing
 
 -- Property: expanding (A) or (B) generates the same list.
 -- (A) - Title : t            (B) - Title : t
@@ -74,6 +112,10 @@ prop_Translate maxLen x =
       concatThenTranslate = translateSpec $ concat xShortened
       translateThenConcat = concatMap translateSpec xShortened
   in concatThenTranslate == translateThenConcat
+
+prop_OnlySafeNames :: TrackRipSpec -> Bool
+prop_OnlySafeNames = and . map isSafeCharForShell . safeTrackName
+  where isSafeCharForShell = not . (`elem` " \n\t|&;()<>'\"[]{}")
 
 testParseCRS indent s exp =
   it ("should work for '" ++ s ++ "'")
@@ -129,3 +171,6 @@ main = hspec $ do
   describe "translateSpec" $
     it "handles a list of specs" $
       property $ prop_Translate 10
+  describe "safe file name" $
+    it "generates only safe names" $
+      property prop_OnlySafeNames
