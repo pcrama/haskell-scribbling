@@ -1,12 +1,16 @@
 -- stack exec --package QuickCheck -- ghci test/Spec.hs import Test.Hspec
+import Debug.Trace
 import Data.List.NonEmpty (NonEmpty(..))
+import Text.ParserCombinators.ReadP (readP_to_S)
 import Test.HUnit
 import Test.QuickCheck
 import Test.Hspec
 
-import Text.ParserCombinators.ReadP
-
 import ParseRipSpec
+import Shell
+
+trSh :: Show a => String -> a -> a
+trSh p x = trace (p ++ "=<" ++ show x ++ ">") x
 
 -- Property: expanding (A) or (B) generates the same list.
 -- (A) - Title : t            (B) - Title : t
@@ -43,6 +47,44 @@ prop_Translate maxLen x =
       concatThenTranslate = translateSpec $ concat xShortened
       translateThenConcat = concatMap translateSpec xShortened
   in concatThenTranslate == translateThenConcat
+
+prop_OnlySafeNames :: TrackRipSpec -> Bool
+prop_OnlySafeNames = and . map isSafeCharForShell . safeTrackName
+  where isSafeCharForShell = not . (`elem` " \n\t|&;()<>'\"[]{}")
+
+makeCharPredicate :: [Char] -> (Char -> Bool)
+makeCharPredicate [] x = x < 'W'
+makeCharPredicate [x] y = x < y
+makeCharPredicate [x, y] z
+  | x <= y = x <= z && z <= y
+  | otherwise = z < y || x < z
+makeCharPredicate (x:y:_) z = makeCharPredicate [x, y] z
+
+prop_breakOnPredicateReassemble :: [Char] -> [Char] -> Bool
+prop_breakOnPredicateReassemble p s =
+    let predicate = makeCharPredicate p
+        broken = breakOnPredicate predicate s
+    in concat broken == s
+
+prop_breakOnPredicateAlternatingPredForParts :: [Char] -> [Char] -> Bool
+prop_breakOnPredicateAlternatingPredForParts p s =
+    let predicate = makeCharPredicate p
+        broken = breakOnPredicate predicate s
+        predResult = map (map predicate) broken
+    in (   (not $ or $ map (== []) broken)
+        && (and $ map constantPredResult predResult)
+        && alternatingPredResult predResult)
+  where constantPredResult [] = False -- empty lists are not allowed
+        constantPredResult [_] = True
+        constantPredResult xs = allTrue xs || allFalse xs
+        allTrue = and
+        allFalse = not . or
+        alternatingPredResult [] = True
+        alternatingPredResult [_] = True
+        alternatingPredResult ((x:_):ys@((y:_):_)) = x /= y && alternatingPredResult ys
+        -- input should never contain empty sublists, but the
+        -- compiler doesn't know
+        alternatingPredResult _ = False
 
 testParseCRS :: Int -> [Char] -> CDRipSpec -> SpecWith ()
 testParseCRS indent s expected =
@@ -100,3 +142,11 @@ main = hspec $ do
   describe "translateSpec" $
     it "handles a list of specs" $
       property $ prop_Translate 10
+  describe "safe file name" $
+    it "generates only safe names" $
+      property prop_OnlySafeNames
+  describe "breakOnPredicate" $ do
+    it "breaks into parts that can be reassembled without loss" $
+      property prop_breakOnPredicateReassemble
+    it "results in parts with alternating truth values for the predicate" $
+      property prop_breakOnPredicateAlternatingPredForParts
