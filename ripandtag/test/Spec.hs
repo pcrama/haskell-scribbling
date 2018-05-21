@@ -1,90 +1,21 @@
 -- stack exec --package QuickCheck -- ghci test/Spec.hs import Test.Hspec
+import Data.List.NonEmpty (NonEmpty(..))
 import Test.HUnit
 import Test.QuickCheck
 import Test.Hspec
-import Test.Hspec.Core.QuickCheck (modifyMaxSize, modifyMaxSuccess)
 
-import Data.List (intercalate)
-import Data.List.NonEmpty (NonEmpty(..))
 import Text.ParserCombinators.ReadP
 
 import ParseRipSpec
-
-instance Arbitrary CDRipSpec where
-  arbitrary = sized $ \size ->
-    case size of
-      0 -> do
-             k <- elements [Title, Artist, Album, Track, Total, Genre]
-             v <- elements ["ab", "cd", "efg", "hi", "jk", "l", "mn"
-                           , "op", "qrs", "tuvw", "xy", "z a", "bcde"
-                           , "fghi", "jklm", "n op", "Qr s", "TUV"
-                           , "xYz"]
-             return CRS { info = (k, v) :| [], overrides = [] }
-      _ -> do
-        let maxSize = 20
-        lftSize <- choose (1, min maxSize size)
-        let rgtSize = min maxSize $ max 0 $ size - lftSize - 1
-        let f (CRS { info = (k, v) :| _ }) = (k, v)
-        kvs <- mapM (fmap f . resize 0) $ replicate lftSize arbitrary
-        overs <- mapM (resize $ min 3 $ rgtSize `div` 2)
-                    $ replicate rgtSize arbitrary
-        return $ CRS { info = head kvs :| tail kvs
-                     , overrides = overs }
-  shrink input@(CRS { info = hd :| tl, overrides = overs }) =
-             case (null tl, null overs) of
-               (True, True) -> []
-               (True, False) -> [shrunkOvers]
-               (False, True) -> [shrunkTail]
-               (False, False) -> [shrunkBoth, shrunkOvers, shrunkTail]
-           where shrunkOvers = input { overrides = [] }
-                 shrunkTail = input { info = hd :| [] }
-                 shrunkBoth = CRS { info = hd :| [], overrides = [] }
-
-safeTrackName x = intercalate "-"
-                $ map (maybe "" id)
-                $ filter (maybe False $ const True)
-                $ [ artist x
-                  , album x
-                  , title x ]
-
-instance Arbitrary TrackRipSpec where
-  arbitrary = do
-      tit <- arbString 9
-      art <- arbString 9
-      tra <- fmap TheInt $ arbitrary `suchThat` (0 <)
-      tot <- arbTotal
-      alb <- arbString 5
-      gen <- arbString 2
-      return $ TRS { title = tit
-                   , artist = art
-                   , track = tra
-                   , total = tot
-                   , album = alb
-                   , genre = gen
-                   }
-    where -- arbString :: Int -> Gen (Maybe String)
-          arbString p = do
-            -- 1 x Nothing, p x Just String
-            pickJust <- elements $ False:replicate p True
-            if pickJust
-            then fmap Just $ (arbitrary `suchThat` ((1 <) . length) :: Gen String)
-            else return Nothing
-          -- arbTotal :: Gen (Maybe Int)
-          arbTotal = do
-            -- 10% Nothing, 90% Just Int
-            pickJust <- elements $ False:replicate 9 True
-            if pickJust
-            then fmap Just $ arbitrary `suchThat` (\x -> (0 < x) && (x < 1000))
-            else return Nothing
 
 -- Property: expanding (A) or (B) generates the same list.
 -- (A) - Title : t            (B) - Title : t
 --       - Album : a                Album : a
 --         - Genre : g              Genre : g
 prop_NestedOrFlat :: CDRipSpec -> Bool
-prop_NestedOrFlat x =
-    let tFlat = expandOverrides emptyTrackRipSpec x
-        deepened = deepen x
+prop_NestedOrFlat cdRS =
+    let tFlat = expandOverrides emptyTrackRipSpec cdRS
+        deepened = deepen cdRS
         tDeep = expandOverrides emptyTrackRipSpec deepened
     in tFlat == tDeep
   where deepen :: CDRipSpec -> CDRipSpec -- transform (B) to (A)
@@ -113,16 +44,14 @@ prop_Translate maxLen x =
       translateThenConcat = concatMap translateSpec xShortened
   in concatThenTranslate == translateThenConcat
 
-prop_OnlySafeNames :: TrackRipSpec -> Bool
-prop_OnlySafeNames = and . map isSafeCharForShell . safeTrackName
-  where isSafeCharForShell = not . (`elem` " \n\t|&;()<>'\"[]{}")
-
-testParseCRS indent s exp =
+testParseCRS :: Int -> [Char] -> CDRipSpec -> SpecWith ()
+testParseCRS indent s expected =
   it ("should work for '" ++ s ++ "'")
    $ assertEqual ("testParseCRS of " ++ s)
-                 [(exp, "")]
+                 [(expected, "")]
                $ readP_to_S (parseCRS indent) s
 
+testParseCRSfail :: Int -> [Char] -> SpecWith ()
 testParseCRSfail indent s =
   it ("should fail for '" ++ s ++ "'")
    $ assertEqual ("testParseCRS of " ++ s)
@@ -171,6 +100,3 @@ main = hspec $ do
   describe "translateSpec" $
     it "handles a list of specs" $
       property $ prop_Translate 10
-  describe "safe file name" $
-    it "generates only safe names" $
-      property prop_OnlySafeNames
