@@ -2,7 +2,7 @@
 noTrailingSlash="${1%/}"
 scriptDir="$(dirname "$0")"
 if [ -n "$1" -a -r "$noTrailingSlash" ] ; then
-    # "Subtle" bug: in hierarchies of a certain depth all file with
+    # "Subtle" bug: in hierarchies of a certain depth all files with
     # names starting with 4 hex digits get deleted:
     for d in "$noTrailingSlash"/*/*/*/ ; do
         find "$1" -type f -iname '[0-9a-f][0-9a-f][0-9a-f][0-9a-f]*' -print0 | xargs -0 rm -f
