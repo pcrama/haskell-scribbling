@@ -7,13 +7,14 @@ _new="$5"
 currentarchopt="$6"
 cleanName="$_root/$_path"
 if [ -n "$currentarchopt" ] ; then
-    diff3 -m "$current1" "$currentarchopt" "$current2" > "_$new"
+    diff3 -m "$current1" "$currentarchopt" "$current2" > "$_new"
 else
-    if [ -f "$cleanName.server" ] ; then
+    tmpname="$cleanName.$(basename "$_root")"
+    if [ -f "$tmpname" ] ; then
         echo "Conflict in $cleanName"
         exit 1
     else
-        mv "$current1" "$cleanName.$_root"
+        mv "$current1" "$tmpname"
         mv "$current2" "$_new"
     fi
 fi
