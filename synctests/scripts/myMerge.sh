@@ -6,15 +6,11 @@ current2="$4"
 _new="$5"
 currentarchopt="$6"
 cleanName="$_root/$_path"
-if [ -n "$currentarchopt" ] ; then
-    diff3 -m "$current1" "$currentarchopt" "$current2" > "$_new"
+tmpname="$cleanName.$(date --utc +%s).$(basename "$_root")"
+if [ -f "$tmpname" ] ; then
+    echo "Conflict in $cleanName"
+    exit 1
 else
-    tmpname="$cleanName.$(basename "$_root")"
-    if [ -f "$tmpname" ] ; then
-        echo "Conflict in $cleanName"
-        exit 1
-    else
-        mv "$current1" "$tmpname"
-        mv "$current2" "$_new"
-    fi
+    mv "$current1" "$tmpname"
+    mv "$current2" "$_new"
 fi
