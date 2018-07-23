@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 module Events (
   Time
   , HostId
@@ -17,8 +18,21 @@ import Control.Monad.Reader (
   , asks
   , liftIO
   )
+import Data.Time.Clock (
+  DiffTime
+  , UTCTime(..)
+  , getCurrentTime
+  )
 import Data.Word (Word16)
-import System.Directory (removeFile)
+import System.Directory (
+  doesFileExist
+  , getModificationTime
+  , removeFile
+  )
+import System.FilePath (
+  takeDirectory
+  , takeFileName
+  )
 import System.IO.Error (tryIOError)
 
 newtype Time = TimeMs Word16
@@ -39,20 +53,36 @@ data Operation
     | OpStabilize
   deriving (Show)
 
+type Conflicts = [(HostId, FileContent)]
+
 data StabilizationResult
     = StabOK FileContent Conflicts
     | StabFail [(HostId, FileContent, Conflicts)]
 
 class HasConfig c where
+  -- | Extract function from configuration to map a client to its @FilePath@
+  -- under test
   filePathUnderTest :: c -> HostId -> FilePath
+  -- | Extract function from configuration to map a client to its 2 status
+  -- files used to timestamp when the synchronisation started and ended.
+  clientStatusUnderTest :: c -> HostId -> (FilePath, FilePath)
+  -- | Extract list of clients used for that test run
+  clientList :: c -> [HostId]
+
+-- | The name of the directory holding a client's files is also used
+-- as the client's name to disambiguate conflict file names.
+clientName :: HasConfig c
+  => c -- ^ configuration
+  -> HostId -- ^ which client's name is required
+  -> FilePath -- ^ client's name
+clientName c hostId =
+  takeFileName $ takeFileName $ filePathUnderTest c hostId
 
 class (Monad m) => SynctestIO m where
   doRead :: HasConfig c => HostId -> ReaderT c m FileContent
   doWrite :: HasConfig c => HostId -> FileContent -> ReaderT c m FileContent
   doSleep :: Time -> ReaderT c m ()
   doStabilize :: HasConfig c => ReaderT c m StabilizationResult
-
-type Conflicts = [(HostId, FileContent)]
 
 data Observation
     = ObsRead HostId FileContent
@@ -77,11 +107,29 @@ performOperation OpStabilize = do
              StabOK fc cs -> ObsStabilize fc cs
              StabFail csMap -> ObsFailedStabilize csMap
 
-askFilePathUnderTest :: (HasConfig c, Monad m) => HostId -> ReaderT c m FilePath
-askFilePathUnderTest hostId = do
-  fpFun <- asks filePathUnderTest
+askRelativeToHost :: (HasConfig c, Monad m) => (c -> HostId -> o) -> HostId -> ReaderT c m o
+askRelativeToHost f hostId = do
+  fpFun <- asks f
   return $ fpFun hostId
 
+askFilePathUnderTest :: (HasConfig c, Monad m) => HostId -> ReaderT c m FilePath
+askFilePathUnderTest = askRelativeToHost filePathUnderTest
+
+askClientStatusUnderTest :: (HasConfig c, Monad m) => HostId -> ReaderT c m (FilePath, FilePath)
+askClientStatusUnderTest = askRelativeToHost clientStatusUnderTest
+
+askClientList :: (HasConfig c, Monad m) => ReaderT c m [HostId]
+askClientList = asks clientList
+
+askConflictFile :: (HasConfig c, Monad m)
+  => HostId -- ^ Which client contains the conflict file
+  -> HostId -- ^ Whose client data is contained in the conflict file
+  -> ReaderT c m FilePath
+askConflictFile host conflict = do
+  root <- askFilePathUnderTest host
+  cnflct <- askRelativeToHost clientName conflict
+  return $ root ++ "." ++ cnflct
+  
 lowLevelReadIO :: (MonadIO m, HasConfig c) => HostId -> ReaderT c m (FilePath, FileContent)
 lowLevelReadIO hostId = do
   fp <- askFilePathUnderTest hostId
@@ -109,15 +157,116 @@ doWriteIO hostId fc = do
 doSleepIO :: MonadIO m => Time -> ReaderT c m ()
 doSleepIO (TimeMs ms) = liftIO $ threadDelay $ fromIntegral ms
 
--- TODO: when logfile of unisonsync.sh call isn't updated/created
+shiftUTCTime :: UTCTime -> DiffTime -> UTCTime
+shiftUTCTime t@(UTCTime { utctDayTime=u }) offs = t { utctDayTime=u + offs }
+
+-- | How many seconds to wait maximum for stabilization to occur
+stabilizeTimeout = 120 :: DiffTime
+
+-- | When logfile of unisonsync.sh call isn't updated/created
 -- anymore, the syncing sees no new data to transfer (since
 -- 05bf67e5a1227a0bf220bc972f139f16900d08f9).  Detect this with a
 -- timeout...
 --
--- As long as a conflict remains, the logfile with be updated with the
--- information of that conflict.
-doStabilizeIO :: MonadIO m => HasConfig c => ReaderT c m StabilizationResult
-doStabilizeIO = undefined
+-- As long as a conflict remains, the logfile will be updated with the
+-- information of that conflict.  This will cause a timeout.
+doStabilizeIO :: (MonadIO m, HasConfig c) => ReaderT c m StabilizationResult
+doStabilizeIO = do
+  startTime <- liftIO $ getCurrentTime
+  let stopTime = startTime `shiftUTCTime` stabilizeTimeout
+  mbSyncedOnce <- waitAllClientsSyncedAtLeastOnce startTime stopTime
+  case mbSyncedOnce of
+    -- TODO: decide how to make this function total
+    Nothing -> error "doStabilizeIO: failed to run all syncs before timeout (1st time)"
+    Just firstSyncTime -> do
+      mbSyncedTwice <- waitAllClientsSyncedAtLeastOnce firstSyncTime stopTime
+      case mbSyncedTwice of
+        -- TODO: decide how to make this function total
+        Nothing -> error "doStabilizeIO: failed to run all syncs before timeout (2nd time)"
+        Just _ -> gatherStabilizationResultsIO
+
+-- | Return list of conflict files found on a client
+doReadConflicts :: (MonadIO m, HasConfig c)
+  => HostId -- ^ which client to query
+  -> ReaderT c m Conflicts
+doReadConflicts hostId = do
+  fput <- askFilePathUnderTest hostId
+  let dir = takeDirectory fput
+  let filename = takeFileName fput
+  clientList <- askClientList
+  -- Read conflict files found on client `hostId' into a list of
+  -- [Maybe (HostId, FileContent)] ...
+  tmp <- flip mapM clientList $ \conflictHostId -> do
+    cF <- askConflictFile hostId conflictHostId
+    exists <- liftIO $ doesFileExist cF
+    if exists
+    then do
+      -- TODO: I didn't wrap this in tryIOError because I haven't
+      -- decided how to handle errors
+      fc' <- liftIO $ readFile cF
+      let fc = case fc' of
+                 "" -> FileEmpty
+                 _ -> FileContent fc'
+      return $ Just (conflictHostId, fc)
+    else return Nothing
+  -- ... filtered to only keep the `Just _'
+  return $ foldr (\elt acc -> maybe acc (:acc) elt) [] tmp
+
+-- | Read file under test and conflict copies on all clients.
+--
+-- If each client has the same content and conflict copies, the
+-- stabilization was a success, otherwise, it was a failure.
+--
+-- NB: testing with an empty list of clients makes no sense and should
+-- never happen but to keep the function total, 'StabFail' is returned
+-- instead.
+gatherStabilizationResultsIO :: (MonadIO m, HasConfig c) => ReaderT c m StabilizationResult
+gatherStabilizationResultsIO = do
+  clientList <- askClientList
+  contents <- mapM doReadIO clientList
+  conflicts <- mapM doReadConflicts clientList
+  case zip contents conflicts of
+    [] -> return $ StabFail []
+    ref@(cntnt, cnflct):cts -> return $
+      if all (== ref) cts
+      then StabOK cntnt cnflct
+      else StabFail $ zip3 clientList contents conflicts
+
+-- | 'True' if a synchronization ran for the client after the given time
+clientSyncedAfter :: (MonadIO m, HasConfig c)
+  => UTCTime -- ^ Only accept synchronisation runs happening after this time
+  -> HostId  -- ^ Which client is the focus
+  -> ReaderT c m Bool -- ^ @True@ if the client contacted the server after
+                      -- @startTime@
+clientSyncedAfter startTime hostId = do
+  (syncStart, syncStop) <- askClientStatusUnderTest hostId
+  syncStartTime <- liftIO $ getModificationTime $ syncStart
+  syncStopTime <- liftIO $ getModificationTime $ syncStop
+  return $ (startTime < syncStartTime) && (syncStartTime <= syncStopTime)
+  
+-- | Wait with timeout until all clients have contacted the server at least
+-- once.  This doesn't necessarily mean that synchronisation was successful.
+waitAllClientsSyncedAtLeastOnce :: (MonadIO m, HasConfig c)
+  => UTCTime -- ^ Only accept synchronisation runs happening after this time
+             -- (see 'clientSyncedAfter')
+  -> UTCTime -- ^ Timeout
+  -> ReaderT c m (Maybe UTCTime) -- ^ @Nothing@ for timeout or @Just t@ for
+                                 -- timestamp when all clients had
+                                 -- synchronised at least once.
+waitAllClientsSyncedAtLeastOnce startTime deadline = do
+  now <- liftIO $ getCurrentTime
+  if now >= deadline
+    then return Nothing
+    else do
+      clientList <- askClientList
+      clientStatus <- fmap and
+                         $ mapM (clientSyncedAfter startTime)
+                                (clientList :: [HostId])
+      if clientStatus
+        then return $ Just now
+        else do
+          liftIO $ threadDelay 1000 -- ms
+          waitAllClientsSyncedAtLeastOnce startTime deadline
 
 -- (Monad m, MonadIO m) => SynctestIO m would require
 -- {-# LANGUAGE FlexibleInstances, UndecidableInstances #-}
