@@ -27,11 +27,13 @@ if test -n "$noTrailingSlash" -a -r "$noTrailingSlash" -a \
     done
     # End of subtle bug
     export UNISON="$parent/.unison"
+    touch "$parent/.start.$(basename "$noTrailingSlash")"
     unison -root "$noTrailingSlash/" -root "$parent/server" -fat -dumbtty -silent -auto \
            -ignore 'Name *~' -ignore 'Name #*' -ignore 'Name *#' -ignore 'Name *.bak' \
            -backupcurr 'Name *' \
            -merge 'Name * -> sh "'"$scriptDir/myMerge.sh"'" "'"$noTrailingSlash"'" PATH CURRENT1 CURRENT2 NEW CURRENTARCHOPT' \
            -log -logfile "$logfile"
+    touch "$parent/.stop.$(basename "$noTrailingSlash")"
 else
     echo "$(basename "$0") [$(cd "$parent" ; find . -maxdepth 1 -not -name .\* -not -name server -type d | sort | awk 'BEGIN { r = "" } { sub(/^\.\//, ""); r = (r?r " | ":"") $1 } END { print r }')] logfile"
     exit 1
