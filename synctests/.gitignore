@@ -1,0 +1,4 @@
+.stack-work/
+synctests.cabal
+*~
+stack.yaml

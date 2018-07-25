@@ -1,0 +1,4 @@
+* synctests
+
+Trying to implement ideas from [[https://www.youtube.com/watch?v=Y2jQe8DFzUM][A Deep Specification for Dropbox]] by
+Benjamin Pierce.
