@@ -1,11 +1,12 @@
 {-# LANGUAGE TupleSections #-}
 module Events (
   Time
-  , HostId
+  , HostId(..)
   , FileContent(..)
   , Operation(..)
   , Conflicts
   , Observation(..)
+  , Scenario(..)
   )
 
 where
@@ -34,17 +35,46 @@ import System.FilePath (
   , takeFileName
   )
 import System.IO.Error (tryIOError)
+import Test.QuickCheck
+import Test.QuickCheck.Gen (oneof)
 
 newtype Time = TimeMs Word16
   deriving (Show)
 
+instance Arbitrary Time where
+  arbitrary = do
+    let delaysInMs = [10, 100, 500]
+    idx <- choose (0, length delaysInMs - 1)
+    return $ TimeMs $ delaysInMs !! idx
+
 newtype HostId = HostId Int
   deriving (Eq, Show)
+
+instance Arbitrary HostId where
+  arbitrary = fmap HostId arbitrary
+
+newtype ConfReader a = ConfReader { unConfReader :: Int -> a }
+
+instance Arbitrary (ConfReader HostId) where
+  arbitrary = do
+    x <- arbitrary
+    return $ ConfReader $ \c ->
+      case getClientCount c of
+        0 -> 0
+        n -> abs x `mod` n
 
 data FileContent
     = FileContent String
     | FileEmpty
   deriving (Eq, Show)
+
+instance Arbitrary FileContent where
+  arbitrary = frequency [
+    (1, return FileEmpty),
+    (9, oneof $ map (return . FileContent) $ words (
+        "hello world I just need enough words to make sure \
+        \that there are many different file contents generated \
+        \thus creating conflicts between updates"))]
 
 data Operation
     = OpRead HostId
@@ -52,6 +82,28 @@ data Operation
     | OpSleep Time
     | OpStabilize
   deriving (Show)
+
+newtype Scenario = Scenario { unScenario :: [Operation] }
+  deriving (Show)
+
+instance Arbitrary (ConfReader Scenario) where
+  arbitrary = undefined
+
+instance Arbitrary Scenario where
+  arbitrary = fmap Scenario $ do
+    elt <- frequency [
+      (3, fmap OpRead arbitrary)
+      , (4, fmap OpWrite arbitrary <*> arbitrary)
+      , (3, fmap OpSleep arbitrary)
+      , (1, return OpStabilize)]
+    case elt of
+      OpStabilize -> do
+        continue <- frequency [(1, return False), (3, return True)]
+        case continue of
+          True -> fmap (prependElt elt) arbitrary
+          False -> return [elt]
+      _ -> fmap (prependElt elt) arbitrary
+    where prependElt elt (Scenario ops) = elt:ops
 
 type Conflicts = [(HostId, FileContent)]
 
