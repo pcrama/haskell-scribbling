@@ -1,4 +1,5 @@
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Events (
   Time
   , HostId(..)
@@ -15,7 +16,8 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (tryJust)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (
-  ReaderT
+  MonadReader
+  , ReaderT
   , asks
   , liftIO
   )
@@ -50,18 +52,15 @@ instance Arbitrary Time where
 newtype HostId = HostId Int
   deriving (Eq, Show)
 
-instance Arbitrary HostId where
-  arbitrary = fmap HostId arbitrary
+newtype ConfReader c a = ConfReader { unConfReader :: c -> a }
 
-newtype ConfReader a = ConfReader { unConfReader :: Int -> a }
-
-instance Arbitrary (ConfReader HostId) where
+instance HasConfig c => Arbitrary (ConfReader c HostId) where
   arbitrary = do
     x <- arbitrary
     return $ ConfReader $ \c ->
       case getClientCount c of
-        0 -> 0
-        n -> abs x `mod` n
+        0 -> HostId 0
+        n -> HostId $ abs x `mod` fromIntegral n
 
 data FileContent
     = FileContent String
@@ -83,27 +82,51 @@ data Operation
     | OpStabilize
   deriving (Show)
 
+limitScenarioToValidHosts :: HasConfig c => Scenario -> ConfReader c Scenario
+limitScenarioToValidHosts (Scenario s) = ConfReader $ \c -> Scenario $ map (flip go c) s
+  where go (OpRead h) = fixHostId OpRead h
+        go (OpWrite h fc) = fixHostId (\h' -> OpWrite h' fc) h
+        go s@(OpSleep _) = const s
+        go s@OpStabilize = const s
+        fixHostId f (HostId h) c = f $ case getClientCount c of
+          0 -> HostId 0
+          n -> HostId $ abs h `mod` fromIntegral n
+
 newtype Scenario = Scenario { unScenario :: [Operation] }
   deriving (Show)
 
-instance Arbitrary (ConfReader Scenario) where
-  arbitrary = undefined
-
 instance Arbitrary Scenario where
-  arbitrary = fmap Scenario $ do
-    elt <- frequency [
-      (3, fmap OpRead arbitrary)
-      , (4, fmap OpWrite arbitrary <*> arbitrary)
-      , (3, fmap OpSleep arbitrary)
-      , (1, return OpStabilize)]
-    case elt of
-      OpStabilize -> do
-        continue <- frequency [(1, return False), (3, return True)]
-        case continue of
-          True -> fmap (prependElt elt) arbitrary
-          False -> return [elt]
-      _ -> fmap (prependElt elt) arbitrary
-    where prependElt elt (Scenario ops) = elt:ops
+  arbitrary = do
+    f <- oneof [arbSleep, arbWrite]
+    completeScenario f []
+    where
+      arbRead :: Gen Operation
+      arbRead = OpRead . HostId <$> arbitrary
+      arbWrite :: Gen Operation
+      arbWrite = OpWrite <$> (HostId <$> arbitrary) <*> arbitrary
+      arbSleep :: Gen Operation
+      arbSleep = OpSleep <$> arbitrary
+      arbStabilize :: Gen Operation
+      arbStabilize = return OpStabilize
+      completeScenario :: Operation -> [Operation] -> Gen Scenario
+      completeScenario last revList = do
+        let (frRead, frWrite, frSleep, frStabilize) = case last of
+                                                        OpRead _ -> (1, 2, 1, 2)
+                                                        OpWrite _ _ -> (1, 2, 2, 1)
+                                                        OpSleep _ -> (2, 2, 1, 2)
+                                                        OpStabilize -> (3, 4, 1, 0)
+        endHere <- frequency [(3, return False), (1, return True)]
+        case last of
+          OpStabilize | endHere -> return $ Scenario $ reverse $ last:revList
+          _ -> do
+            next <- frequency [(frRead, arbRead),
+                               (frWrite, arbWrite),
+                               (frSleep, arbSleep),
+                               (frStabilize, arbStabilize)]
+            completeScenario next $ last:revList
+
+instance HasConfig c => Arbitrary (ConfReader c Scenario) where
+  arbitrary = limitScenarioToValidHosts <$> arbitrary
 
 type Conflicts = [(HostId, FileContent)]
 
@@ -120,6 +143,9 @@ class HasConfig c where
   clientStatusUnderTest :: c -> HostId -> (FilePath, FilePath)
   -- | Extract list of clients used for that test run
   clientList :: c -> [HostId]
+  -- | How many clients participate in the test run
+  getClientCount :: c -> Word
+  getClientCount = fromIntegral . length . clientList
 
 -- | The name of the directory holding a client's files is also used
 -- as the client's name to disambiguate conflict file names.
