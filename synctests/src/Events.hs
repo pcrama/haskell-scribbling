@@ -1,5 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RecordWildCards #-}
 module Events (
   Time
   , HostId(..)
@@ -8,6 +9,15 @@ module Events (
   , Conflicts
   , Observation(..)
   , Scenario(..)
+  , performScenario
+  , sample
+  , Gen
+  , arbitrary
+  , minCfg
+  , SimplisticConfig
+  , HasConfig(..)
+  , ConfReader(..)
+  , runReaderT
   )
 
 where
@@ -17,6 +27,7 @@ import Control.Exception (tryJust)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (
   MonadReader
+  , runReaderT
   , ReaderT
   , asks
   , liftIO
@@ -33,7 +44,9 @@ import System.Directory (
   , removeFile
   )
 import System.FilePath (
-  takeDirectory
+  FilePath
+  , (</>)
+  , takeDirectory
   , takeFileName
   )
 import System.IO.Error (tryIOError)
@@ -147,6 +160,32 @@ class HasConfig c where
   getClientCount :: c -> Word
   getClientCount = fromIntegral . length . clientList
 
+data SimplisticConfig = SimplisticConfig
+  { scRoot :: FilePath
+  , scBasename :: FilePath
+  , scClientCount :: Word
+  }
+
+_scHostPath :: SimplisticConfig -> HostId -> FilePath
+_scHostPath (SimplisticConfig {..}) (HostId h) = scRoot </> ('h':show h)
+
+instance HasConfig SimplisticConfig where
+  filePathUnderTest sc@(SimplisticConfig {..}) h =
+    _scHostPath sc h </> scBasename
+  clientStatusUnderTest sc@(SimplisticConfig {..}) h =
+    let f s = let root = _scHostPath sc h
+              in takeDirectory root </> (s ++ takeFileName root)
+    in (f ".start.", f ".stop.")
+  clientList (SimplisticConfig {..}) =
+    map HostId [1..fromIntegral scClientCount]
+  getClientCount (SimplisticConfig {..}) = scClientCount
+
+minCfg = SimplisticConfig
+  { scRoot = "/tmp"
+  , scBasename = "testFile"
+  , scClientCount = 3
+  }
+
 -- | The name of the directory holding a client's files is also used
 -- as the client's name to disambiguate conflict file names.
 clientName :: HasConfig c
@@ -184,6 +223,9 @@ performOperation OpStabilize = do
   return $ case stab of
              StabOK fc cs -> ObsStabilize fc cs
              StabFail csMap -> ObsFailedStabilize csMap
+
+performScenario :: (HasConfig c, SynctestIO m) => Scenario -> ReaderT c m [Observation]
+performScenario (Scenario s) = sequence $ map performOperation s
 
 askRelativeToHost :: (HasConfig c, Monad m) => (c -> HostId -> o) -> HostId -> ReaderT c m o
 askRelativeToHost f hostId = do
@@ -318,10 +360,14 @@ clientSyncedAfter :: (MonadIO m, HasConfig c)
                       -- @startTime@
 clientSyncedAfter startTime hostId = do
   (syncStart, syncStop) <- askClientStatusUnderTest hostId
-  syncStartTime <- liftIO $ getModificationTime $ syncStart
-  syncStopTime <- liftIO $ getModificationTime $ syncStop
-  return $ (startTime < syncStartTime) && (syncStartTime <= syncStopTime)
-  
+  etStartTime <- liftIO $ tryIOError $ getModificationTime syncStart
+  etStopTime <- liftIO $ tryIOError $ getModificationTime syncStop
+  return $ compareTime etStartTime etStopTime
+  where compareTime (Left _) _ = False
+        compareTime _ (Left _) = False
+        compareTime (Right syncStartTime) (Right syncStopTime) =
+          (startTime < syncStartTime) && (syncStartTime <= syncStopTime)
+
 -- | Wait with timeout until all clients have contacted the server at least
 -- once.  This doesn't necessarily mean that synchronisation was successful.
 waitAllClientsSyncedAtLeastOnce :: (MonadIO m, HasConfig c)
