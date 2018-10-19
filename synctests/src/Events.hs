@@ -265,11 +265,14 @@ doReadIO = fmap snd . lowLevelReadIO
 doWriteIO :: (MonadIO m, HasConfig c) => HostId -> FileContent -> ReaderT c m FileContent
 doWriteIO hostId fc = do
   (fp, oldContent) <- lowLevelReadIO hostId
-  r <- liftIO $ tryIOError $ doWriteOrDelete fp fc
-  case r of
-    -- TODO: decide how to make this function total
-    Left err -> error $ "doWriteIO " ++ show hostId ++ ": error writing to " ++ fp ++ ": " ++ show err
-    Right () -> return oldContent
+  case (oldContent, fc) of
+    (FileEmpty, FileEmpty) -> return FileEmpty
+    _ -> do
+      r <- liftIO $ tryIOError $ doWriteOrDelete fp fc
+      case r of
+        -- TODO: decide how to make this function total
+        Left err -> error $ "doWriteIO " ++ show hostId ++ ": error writing to " ++ fp ++ ": " ++ show err
+        Right () -> return oldContent
   where
     doWriteOrDelete fp FileEmpty = removeFile fp
     doWriteOrDelete fp (FileContent newContent) = writeFile fp newContent
