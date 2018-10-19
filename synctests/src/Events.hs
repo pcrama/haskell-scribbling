@@ -257,7 +257,7 @@ lowLevelReadIO hostId = do
   return $ (fp
            , case c' of
                Left _ -> FileEmpty
-               Right c -> c `seq` FileContent c)
+               Right c -> if length c == 0 then FileEmpty else FileContent c)
   
 doReadIO :: (MonadIO m, HasConfig c) => HostId -> ReaderT c m FileContent
 doReadIO = fmap snd . lowLevelReadIO
