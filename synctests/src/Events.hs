@@ -16,12 +16,12 @@ module Events (
   , minCfg
   , SimplisticConfig
   , HasConfig(..)
-  , ConfReader(..)
   , runReaderT
   )
 
 where
 
+import Debug.Trace (trace)
 import Control.Concurrent (threadDelay)
 import Control.Exception (tryJust)
 import Control.Monad.IO.Class (MonadIO)
@@ -62,18 +62,16 @@ instance Arbitrary Time where
     idx <- choose (0, length delaysInMs - 1)
     return $ TimeMs $ delaysInMs !! idx
 
-newtype HostId = HostId Int
-  deriving (Eq, Show)
+data HostId = H1 | H2 | H3 | H4 | H5 | H6 | H7 | H8
+  deriving (Eq, Show, Enum, Bounded)
 
-newtype ConfReader c a = ConfReader { unConfReader :: c -> a }
-
-instance HasConfig c => Arbitrary (ConfReader c HostId) where
-  arbitrary = do
-    x <- arbitrary
-    return $ ConfReader $ \c ->
-      case getClientCount c of
-        0 -> HostId 0
-        n -> HostId $ abs x `mod` fromIntegral n
+instance Arbitrary HostId where
+  shrink h
+    | h == minBound = []
+    | fromEnum h > 2 = [pred h, pred $ pred h]
+    | fromEnum h > 1 = [pred h]
+    | otherwise = [] -- also stops/hides HostId < 0 which should never happen
+  arbitrary = oneof $ map return [minBound..maxBound]
 
 data FileContent
     = FileContent String
@@ -95,34 +93,38 @@ data Operation
     | OpStabilize
   deriving (Show)
 
-limitScenarioToValidHosts :: HasConfig c => Scenario -> ConfReader c Scenario
-limitScenarioToValidHosts (Scenario s) = ConfReader $ \c -> Scenario $ map (flip go c) s
-  where go (OpRead h) = fixHostId OpRead h
-        go (OpWrite h fc) = fixHostId (\h' -> OpWrite h' fc) h
-        go s@(OpSleep _) = const s
-        go s@OpStabilize = const s
-        fixHostId f (HostId h) c = f $ case getClientCount c of
-          0 -> HostId 0
-          n -> HostId $ abs h `mod` fromIntegral n
-
-newtype Scenario = Scenario { unScenario :: [Operation] }
+data Scenario = Scenario { scenarioMaxHost :: HostId, scenarioOps :: [Operation] }
   deriving (Show)
 
+-- | Auxiliary function computing the list of hosts (clients)
+-- participating in the test scenario
+hostList :: HostId -> [HostId]
+hostList maxHost = [minBound .. maxHost]
+
 instance Arbitrary Scenario where
+  -- after shrinking, last element must still be OpStabilize
+  shrink (Scenario { scenarioOps=[] }) = []
+  shrink s@(Scenario { scenarioOps=[_], .. }) = [] -- if only one elt left (assumed to be OpStabilize) there is nothing to shrink
+  shrink _ = undefined
   arbitrary = do
+    -- We always want at least 2 hosts to participate in the
+    -- experiment, hence the `succ':
+    h <- oneof $ map return [succ minBound .. maxBound]
     f <- oneof [arbSleep, arbWrite]
-    completeScenario f []
+    completeScenario h f []
     where
+      arbHost :: HostId -> Gen HostId
+      arbHost h = oneof $ map return [H1 .. h]
       arbRead :: Gen Operation
-      arbRead = OpRead . HostId <$> arbitrary
+      arbRead = OpRead <$> arbitrary
       arbWrite :: Gen Operation
-      arbWrite = OpWrite <$> (HostId <$> arbitrary) <*> arbitrary
+      arbWrite = OpWrite <$> arbitrary <*> arbitrary
       arbSleep :: Gen Operation
       arbSleep = OpSleep <$> arbitrary
       arbStabilize :: Gen Operation
       arbStabilize = return OpStabilize
-      completeScenario :: Operation -> [Operation] -> Gen Scenario
-      completeScenario last revList = do
+      completeScenario :: HostId -> Operation -> [Operation] -> Gen Scenario
+      completeScenario maxHost last revList = do
         let (frRead, frWrite, frSleep, frStabilize) = case last of
                                                         OpRead _ -> (1, 2, 1, 2)
                                                         OpWrite _ _ -> (1, 2, 2, 1)
@@ -130,16 +132,15 @@ instance Arbitrary Scenario where
                                                         OpStabilize -> (3, 4, 1, 0)
         endHere <- frequency [(3, return False), (1, return True)]
         case last of
-          OpStabilize | endHere -> return $ Scenario $ reverse $ last:revList
+          OpStabilize | endHere -> return $ Scenario {
+                          scenarioMaxHost=maxHost
+                          , scenarioOps = reverse $ last:revList }
           _ -> do
             next <- frequency [(frRead, arbRead),
                                (frWrite, arbWrite),
                                (frSleep, arbSleep),
                                (frStabilize, arbStabilize)]
-            completeScenario next $ last:revList
-
-instance HasConfig c => Arbitrary (ConfReader c Scenario) where
-  arbitrary = limitScenarioToValidHosts <$> arbitrary
+            completeScenario maxHost next $ last:revList
 
 type Conflicts = [(HostId, FileContent)]
 
@@ -154,20 +155,14 @@ class HasConfig c where
   -- | Extract function from configuration to map a client to its 2 status
   -- files used to timestamp when the synchronisation started and ended.
   clientStatusUnderTest :: c -> HostId -> (FilePath, FilePath)
-  -- | Extract list of clients used for that test run
-  clientList :: c -> [HostId]
-  -- | How many clients participate in the test run
-  getClientCount :: c -> Word
-  getClientCount = fromIntegral . length . clientList
 
 data SimplisticConfig = SimplisticConfig
   { scRoot :: FilePath
   , scBasename :: FilePath
-  , scClientCount :: Word
   }
 
 _scHostPath :: SimplisticConfig -> HostId -> FilePath
-_scHostPath (SimplisticConfig {..}) (HostId h) = scRoot </> ('h':show h)
+_scHostPath (SimplisticConfig {..}) hostId = scRoot </> ('h':(show $ fromEnum hostId))
 
 instance HasConfig SimplisticConfig where
   filePathUnderTest sc@(SimplisticConfig {..}) h =
@@ -176,14 +171,10 @@ instance HasConfig SimplisticConfig where
     let f s = let root = _scHostPath sc h
               in takeDirectory root </> (s ++ takeFileName root)
     in (f ".start.", f ".stop.")
-  clientList (SimplisticConfig {..}) =
-    map HostId [1..fromIntegral scClientCount]
-  getClientCount (SimplisticConfig {..}) = scClientCount
 
 minCfg = SimplisticConfig
   { scRoot = "/tmp"
   , scBasename = "testFile"
-  , scClientCount = 3
   }
 
 -- | The name of the directory holding a client's files is also used
@@ -199,7 +190,7 @@ class (Monad m) => SynctestIO m where
   doRead :: HasConfig c => HostId -> ReaderT c m FileContent
   doWrite :: HasConfig c => HostId -> FileContent -> ReaderT c m FileContent
   doSleep :: Time -> ReaderT c m ()
-  doStabilize :: HasConfig c => ReaderT c m StabilizationResult
+  doStabilize :: HasConfig c => HostId -> ReaderT c m StabilizationResult
 
 data Observation
     = ObsRead HostId FileContent
@@ -209,23 +200,27 @@ data Observation
     | ObsFailedStabilize [(HostId, FileContent, Conflicts)]
   deriving (Show)
 
-performOperation :: (HasConfig c, SynctestIO m) => Operation -> ReaderT c m Observation
-performOperation (OpRead hId) = do
+performOperation :: (HasConfig c, SynctestIO m)
+  => HostId -- ^ hosts in in range minBound .. maxHost participate in test
+  -> Operation
+  -> ReaderT c m Observation
+performOperation _ (OpRead hId) = do
   c <- doRead hId
   return $ ObsRead hId c
-performOperation (OpWrite hId fc) = do
+performOperation _ (OpWrite hId fc) = do
   oldContent <- doRead hId
   doWrite hId fc
   return $ ObsWrite hId oldContent
-performOperation (OpSleep time) = doSleep time >> return ObsSleep
-performOperation OpStabilize = do
-  stab <- doStabilize
+performOperation _(OpSleep time) = doSleep time >> return ObsSleep
+performOperation maxHost OpStabilize = do
+  stab <- doStabilize maxHost
   return $ case stab of
              StabOK fc cs -> ObsStabilize fc cs
              StabFail csMap -> ObsFailedStabilize csMap
 
 performScenario :: (HasConfig c, SynctestIO m) => Scenario -> ReaderT c m [Observation]
-performScenario (Scenario s) = sequence $ map performOperation s
+performScenario (Scenario { scenarioMaxHost=maxHost, scenarioOps=scenarioOps })
+  = sequence $ map (performOperation maxHost) scenarioOps
 
 askRelativeToHost :: (HasConfig c, Monad m) => (c -> HostId -> o) -> HostId -> ReaderT c m o
 askRelativeToHost f hostId = do
@@ -237,9 +232,6 @@ askFilePathUnderTest = askRelativeToHost filePathUnderTest
 
 askClientStatusUnderTest :: (HasConfig c, Monad m) => HostId -> ReaderT c m (FilePath, FilePath)
 askClientStatusUnderTest = askRelativeToHost clientStatusUnderTest
-
-askClientList :: (HasConfig c, Monad m) => ReaderT c m [HostId]
-askClientList = asks clientList
 
 askConflictFile :: (HasConfig c, Monad m)
   => HostId -- ^ Which client contains the conflict file
@@ -293,30 +285,33 @@ stabilizeTimeout = 120 :: DiffTime
 --
 -- As long as a conflict remains, the logfile will be updated with the
 -- information of that conflict.  This will cause a timeout.
-doStabilizeIO :: (MonadIO m, HasConfig c) => ReaderT c m StabilizationResult
-doStabilizeIO = do
+doStabilizeIO :: (MonadIO m, HasConfig c)
+  => HostId -- ^ to know how many hosts there are
+  -> ReaderT c m StabilizationResult
+doStabilizeIO maxHost = do
   startTime <- liftIO $ getCurrentTime
   let stopTime = startTime `shiftUTCTime` stabilizeTimeout
-  mbSyncedOnce <- waitAllClientsSyncedAtLeastOnce startTime stopTime
+  mbSyncedOnce <- waitAllClientsSyncedAtLeastOnce maxHost startTime stopTime
   case mbSyncedOnce of
     -- TODO: decide how to make this function total
     Nothing -> error "doStabilizeIO: failed to run all syncs before timeout (1st time)"
     Just firstSyncTime -> do
-      mbSyncedTwice <- waitAllClientsSyncedAtLeastOnce firstSyncTime stopTime
+      mbSyncedTwice <- waitAllClientsSyncedAtLeastOnce maxHost firstSyncTime stopTime
       case mbSyncedTwice of
         -- TODO: decide how to make this function total
         Nothing -> error "doStabilizeIO: failed to run all syncs before timeout (2nd time)"
-        Just _ -> gatherStabilizationResultsIO
+        Just _ -> gatherStabilizationResultsIO maxHost
 
 -- | Return list of conflict files found on a client
 doReadConflicts :: (MonadIO m, HasConfig c)
-  => HostId -- ^ which client to query
+  => HostId -- ^ hosts under test are [(minBound :: HostId)..maxHost]
+  -> HostId -- ^ which client to query
   -> ReaderT c m Conflicts
-doReadConflicts hostId = do
+doReadConflicts maxHost hostId = do
   fput <- askFilePathUnderTest hostId
   let dir = takeDirectory fput
   let filename = takeFileName fput
-  clientList <- askClientList
+  let clientList = hostList maxHost
   -- Read conflict files found on client `hostId' into a list of
   -- [Maybe (HostId, FileContent)] ...
   tmp <- flip mapM clientList $ \conflictHostId -> do
@@ -343,11 +338,13 @@ doReadConflicts hostId = do
 -- NB: testing with an empty list of clients makes no sense and should
 -- never happen but to keep the function total, 'StabFail' is returned
 -- instead.
-gatherStabilizationResultsIO :: (MonadIO m, HasConfig c) => ReaderT c m StabilizationResult
-gatherStabilizationResultsIO = do
-  clientList <- askClientList
+gatherStabilizationResultsIO :: (MonadIO m, HasConfig c)
+  => HostId -- ^ highest host number, hosts under test are [(minBound :: HostId)..maxHost]
+  -> ReaderT c m StabilizationResult
+gatherStabilizationResultsIO maxHost = do
+  let clientList = hostList maxHost
   contents <- mapM doReadIO clientList
-  conflicts <- mapM doReadConflicts clientList
+  conflicts <- mapM (doReadConflicts maxHost) clientList
   case zip contents conflicts of
     [] -> return $ StabFail []
     ref@(cntnt, cnflct):cts -> return $
@@ -374,18 +371,19 @@ clientSyncedAfter startTime hostId = do
 -- | Wait with timeout until all clients have contacted the server at least
 -- once.  This doesn't necessarily mean that synchronisation was successful.
 waitAllClientsSyncedAtLeastOnce :: (MonadIO m, HasConfig c)
-  => UTCTime -- ^ Only accept synchronisation runs happening after this time
+  => HostId -- ^ clients are [(minBound :: HostId)..maxHost]
+  -> UTCTime -- ^ Only accept synchronisation runs happening after this time
              -- (see 'clientSyncedAfter')
   -> UTCTime -- ^ Timeout
   -> ReaderT c m (Maybe UTCTime) -- ^ @Nothing@ for timeout or @Just t@ for
                                  -- timestamp when all clients had
                                  -- synchronised at least once.
-waitAllClientsSyncedAtLeastOnce startTime deadline = do
+waitAllClientsSyncedAtLeastOnce maxHost startTime deadline = do
   now <- liftIO $ getCurrentTime
   if now >= deadline
     then return Nothing
     else do
-      clientList <- askClientList
+      let clientList = hostList maxHost
       clientStatus <- fmap and
                          $ mapM (clientSyncedAfter startTime)
                                 (clientList :: [HostId])
@@ -393,7 +391,7 @@ waitAllClientsSyncedAtLeastOnce startTime deadline = do
         then return $ Just now
         else do
           liftIO $ threadDelay 1000 -- ms
-          waitAllClientsSyncedAtLeastOnce startTime deadline
+          waitAllClientsSyncedAtLeastOnce maxHost startTime deadline
 
 -- (Monad m, MonadIO m) => SynctestIO m would require
 -- {-# LANGUAGE FlexibleInstances, UndecidableInstances #-}
