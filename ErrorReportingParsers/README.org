@@ -1,7 +1,7 @@
 * ErrorReportingParsers
 
 Following along [[https://themonadreader.files.wordpress.com/2013/08/issue221.pdf][Error Reporting Parsers: a Monad Transformer Approach]]
-(Matt Fenwick & Jay Vyas, pp 41-46).
+(Matt Fenwick & Jay Vyas, pp 41-46, Monad.Reader Issue 22, [2013-08-21]).
 
 ** ~src/SimpleParser.hs~
 First sections.
