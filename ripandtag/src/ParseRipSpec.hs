@@ -2,11 +2,11 @@ module ParseRipSpec
     ( TrackRipSpec(..)
     , IntOrFollowing(..)
     , CDRipSpec(..)
-    , parseCRS
     , Key(..)
-    , translateSpec
     , emptyTrackRipSpec
     , expandOverrides
+    , parseCRS
+    , translateSpec
     ) where
 
 import Data.Char (isAlpha, toLower, digitToInt)
@@ -138,15 +138,17 @@ parseKeyString = do
   _ <- char ':'
   skipSpaces
   value <- munch1 (not . (`elem` "\r\n"))
-  case lookup (map toLower keyName)
-              [ ("title", Title)
-              , ("artist", Artist)
-              , ("track", Track)
-              , ("total", Total)
-              , ("album", Album)
-              , ("genre", Genre) ] of
+  case lookup (map toLower keyName) keyNameAlist of
     Just key -> return (key, dropWhileEnd (`elem` " \t") value)
     Nothing -> pfail
+
+keyNameAlist :: [(String, Key)]
+keyNameAlist = [ ("title", Title)
+               , ("artist", Artist)
+               , ("track", Track)
+               , ("total", Total)
+               , ("album", Album)
+               , ("genre", Genre) ]
 
 eol1 :: ReadP String
 eol1 = munch1 (`elem` "\r\n")
