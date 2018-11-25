@@ -1,7 +1,7 @@
 -- stack exec --package QuickCheck -- ghci test/Spec.hs import Test.Hspec
 import Debug.Trace
 import Data.List.NonEmpty (NonEmpty(..))
-import Text.ParserCombinators.ReadP (readP_to_S)
+import Text.ParserCombinators.ReadP (ReadP, readP_to_S)
 import Test.HUnit
 import Test.QuickCheck
 import Test.Hspec
@@ -86,6 +86,48 @@ prop_breakOnPredicateAlternatingPredForParts p s =
         -- compiler doesn't know
         alternatingPredResult _ = False
 
+filterCompleteParse :: [(a, [b])] -> [(a, [b])]
+filterCompleteParse = filter (null . snd)
+
+assertParseFails :: (Eq a, Show a) => String -> ReadP a -> String -> Assertion
+assertParseFails msg parser input =
+  assertEqual msg [] $ filterCompleteParse $ readP_to_S parser input
+
+testParseCellData :: String -> String -> SpecWith ()
+testParseCellData s expected =
+  it ("should accept cell data " ++ show s)
+   $ let obs = readP_to_S parseCellData s
+     in assertEqual (show obs) [(expected, "")] $ filterCompleteParse obs
+
+testParseCRSDataRow :: String -> NonEmpty Key -> NonEmpty (Key, String) -> SpecWith ()
+testParseCRSDataRow s headers expected =
+  it ("should accept cells " ++ show s ++ " for " ++ show headers)
+   $ let obs = readP_to_S (parseCRSDataRow headers) s
+     in assertEqual (show obs) [(expected, "")] $ filterCompleteParse obs
+
+testParseCRSDataRowFail :: String -> NonEmpty Key -> SpecWith ()
+testParseCRSDataRowFail s headers =
+  it ("should reject cells " ++ show s ++ " for " ++ show headers)
+   $ assertParseFails "returned parse success" (parseCRSDataRow headers) s
+
+testParseCRSHeaderRow :: String -> NonEmpty Key -> SpecWith ()
+testParseCRSHeaderRow s expected =
+  it ("parses header row " ++ show s ++ " as " ++ show expected)
+   $ let obs = readP_to_S parseCRSHeaderRow s
+     in assertEqual (show obs) [(expected, "")] $ filterCompleteParse obs
+
+testParseCRSTable :: Int -> [Char] -> [CDRipSpec] -> SpecWith ()
+testParseCRSTable indent s expected =
+  it ("should parse a table indented " ++ show indent)
+   $ assertEqual ("testParseCRSTable " ++ show indent)
+                 [(expected, "")]
+               $ filterCompleteParse $ readP_to_S (parseCRSTable indent) s
+
+testParseCRSTableFail :: String -> Int -> String -> SpecWith ()
+testParseCRSTableFail message indent s =
+  it ("should reject a table indented " ++ show indent ++ " [" ++ message ++ "]")
+   $ assertParseFails message (parseCRSTable indent) s
+
 testParseCRS :: Int -> [Char] -> CDRipSpec -> SpecWith ()
 testParseCRS indent s expected =
   it ("should work for '" ++ s ++ "'")
@@ -122,6 +164,44 @@ main = hspec $ do
     testParseCRSfail 0 "-  unknown key   :  g:g "
     testParseCRSfail 2 "-  Title   :  dedent "
     testParseCRSfail 0 "  -  Title   :  indent "
+  describe "parseCellData" $ do
+    testParseCellData "   " ""
+    testParseCellData " A  " "A"
+    testParseCellData " Ab  " "Ab"
+    testParseCellData " A b  " "A b"
+  describe "parseCRSDataRow" $ do
+    testParseCRSDataRow " A | b |  c  | d"
+                        (Genre :| [Album, Artist, Title])
+                      $ (Genre, "A") :| [(Album, "b"), (Artist, "c"), (Title, "d")]
+    testParseCRSDataRow " A " (Genre :| []) $ (Genre, "A") :| []
+    testParseCRSDataRowFail " A " (Genre :| [Album])
+    testParseCRSDataRowFail " A | b | c " (Genre :| [Album])
+  describe "parseCRSHeaderRow" $ do
+    testParseCRSHeaderRow "album | artist" $ Album :| [Artist]
+    testParseCRSHeaderRow "album   |   artist" $ Album :| [Artist]
+    testParseCRSHeaderRow "genre" $ Genre :| []
+  describe "parseTable" $ do
+    testParseCRSTable 0
+                      "| album     | artist     |\n| Breakfast | Supertramp |\n| Dinner    | Tramp      |"
+                      $ [CRS { info = (Album, "Breakfast") :| [(Artist, "Supertramp")]
+                             , overrides = [] }
+                        , CRS { info = (Album, "Dinner") :| [(Artist, "Tramp")]
+                              , overrides = [] }]
+    testParseCRSTable 2
+                      "  | album     | artist     |\n  | Breakfast | Supertramp |\n  | Dinner    | Tramp      |"
+                      $ [CRS { info = (Album, "Breakfast") :| [(Artist, "Supertramp")]
+                             , overrides = [] }
+                        , CRS { info = (Album, "Dinner") :| [(Artist, "Tramp")]
+                              , overrides = [] }]
+    testParseCRSTable 0
+                      "| album     | artist     |\n|  | Supertramp |\n| Empty    |       |"
+                      $ [CRS { info = (Album, "") :| [(Artist, "Supertramp")]
+                             , overrides = [] }
+                        , CRS { info = (Album, "Empty") :| [(Artist, "")]
+                              , overrides = [] }]
+    testParseCRSTableFail "Column mismatch" 0 "| album | artist |\n| A |"
+    testParseCRSTableFail "Indent grows" 2 "  | album | artist |\n   | A | b |"
+    testParseCRSTableFail "Indent shrinks" 2 "  | album | artist |\n | A | b |"
   describe "expandOverrides" $ do
     it "of nested or flattened info is same" $
       property prop_NestedOrFlat

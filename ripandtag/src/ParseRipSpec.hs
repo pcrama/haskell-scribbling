@@ -6,6 +6,10 @@ module ParseRipSpec
     , emptyTrackRipSpec
     , expandOverrides
     , parseCRS
+    , parseCRSDataRow
+    , parseCRSHeaderRow
+    , parseCRSTable
+    , parseCellData
     , translateSpec
     ) where
 
@@ -152,6 +156,63 @@ keyNameAlist = [ ("title", Title)
 
 eol1 :: ReadP String
 eol1 = munch1 (`elem` "\r\n")
+
+colSep :: ReadP ()
+colSep = munch (== ' ') >> char '|' >> munch (== ' ') >> return ()
+
+parseCRSHeaderRow :: ReadP (NonEmpty Key)
+parseCRSHeaderRow = do
+    headers <- sepBy1 parseKey colSep
+    case headers of
+      [] -> pfail -- should never happen because of sepBy1
+      (hd:tl) -> return $ hd :| tl
+  where parseKey = do
+          keyName <- munch1 isAlpha
+          case lookup (map toLower keyName) keyNameAlist of
+            Just key -> return key
+            Nothing -> pfail
+
+nonEmptyZip :: NonEmpty a -> NonEmpty b -> Maybe (NonEmpty (a, b))
+nonEmptyZip (a:|as) (b:|bs) = do
+    revList <- go [] as bs
+    return $ (a, b) :| reverse revList
+  where go acc [] [] = Just acc
+        go acc (a:as) (b:bs) = go ((a, b):acc) as bs
+        go _ _ _ = Nothing
+
+parseCRSDataRow :: NonEmpty Key -> ReadP (NonEmpty (Key, String))
+parseCRSDataRow keys = do
+    cols <- sepBy1 parseCellData colSep
+    case cols of
+      [] -> pfail -- should never happen because of sepBy1
+      (hd:tl) -> case nonEmptyZip keys (hd :| tl) of
+                   Just n -> return n
+                   Nothing -> pfail
+
+parseCellData :: ReadP String
+parseCellData = do
+    -- skip whitespace
+    _ <- munch (`elem` blankData)
+    -- Ideally, we would stop at the last non-blank character, but
+    -- this would require lookahead
+    cell <- option "" $ munch1 $ not . (`elem` sepData)
+    -- as said above, we might have blank characters at the end, so
+    -- trim them before returning.
+    return $ trimEnd cell
+  where blankData = " \t"
+        sepData = "\r\n|"
+        trimEnd = reverse . dropWhile (`elem` blankData) . reverse
+
+parseCRSTable :: Int -> ReadP [CDRipSpec]
+parseCRSTable indent = do
+  let prefix = (string $ replicate indent ' ') >> char '|' >> munch (== ' ')
+      rowSep = colSep >> eol1 >> prefix
+  _ <- prefix
+  headers <- parseCRSHeaderRow
+  _ <- rowSep
+  rows <- sepBy1 (parseCRSDataRow headers) rowSep
+  _ <- colSep
+  return $ map (\n -> CRS { info=n, overrides=[] }) rows
 
 parseCRS :: Int -> ReadP CDRipSpec
 parseCRS indent = do
