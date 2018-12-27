@@ -44,6 +44,32 @@ data TrackRipSpec = TRS
   , genre :: Maybe String
   } deriving (Show, Eq)
 
+shellCommand :: Int -> TrackRipSpec -> (String, Int)
+shellCommand prev trs =
+    ("rip " ++ foldr accField
+                     ("--track " ++ case total trs of
+                                      Nothing -> show curr
+                                      Just t -> show curr ++ "/" ++ show t)
+                     [ (title, "title")
+                     , (artist, "artist")
+                     , (album, "album")
+                     , (genre, "genre")],
+     curr)
+  where curr = case track trs of
+                 PrevPlusOne -> prev + 1
+                 TheInt x -> x
+        accField (field, name) tl =
+          case field trs of
+            Nothing -> tl
+            (Just s) -> "--" ++ name ++ " '" ++ s ++ "' " ++ tl
+
+shellCommands :: [TrackRipSpec] -> [String]
+shellCommands = go 0
+  where go :: Int -> [TrackRipSpec] -> [String]
+        go _ [] = []
+        go p (t:rs) = let (sh, n) = shellCommand p t
+                      in sh:go n rs
+
 instance Arbitrary TrackRipSpec where
   arbitrary = do
       tit <- arbString 9
@@ -223,7 +249,7 @@ parseCRS indent = do
                             $ eol1 >> (string $ replicate nextIndent ' ')
   os <- option [] $ do
     _ <- eol1
-    sepBy (parseCRS nextIndent) eol1
+    parseCRSTable nextIndent +++ sepBy (parseCRS nextIndent) eol1
   return $ CRS { info=kv :| keyValueTail
                , overrides=os }
 

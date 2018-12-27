@@ -133,7 +133,7 @@ testParseCRS indent s expected =
   it ("should work for '" ++ s ++ "'")
    $ assertEqual ("testParseCRS of " ++ s)
                  [(expected, "")]
-               $ readP_to_S (parseCRS indent) s
+               $ filterCompleteParse $ readP_to_S (parseCRS indent) s
 
 testParseCRSfail :: Int -> [Char] -> SpecWith ()
 testParseCRSfail indent s =
@@ -161,6 +161,14 @@ main = hspec $ do
                                          , overrides = [] }
     testParseCRS 3 "   -    Genre   :  g:g " $ CRS { info = (Genre, "g:g") :| []
                                                    , overrides = [] }
+    testParseCRS 0 "-  album: a\n   Genre :  g" $ CRS { info = (Album, "a") :| [(Genre, "g")]
+                                                      , overrides = [] }
+    testParseCRS 1
+                 " - album: a\n   Genre :  g\n   - artist: 1\n   - artist: 2\n     title : t"
+               $ CRS { info = (Album, "a") :| [(Genre, "g")]
+                     , overrides = [CRS { info = (Artist, "1") :| [], overrides = [] }
+                                   , CRS { info = (Artist, "2") :| [(Title, "t")]
+                                         , overrides = [] }] }
     testParseCRSfail 0 "-  unknown key   :  g:g "
     testParseCRSfail 2 "-  Title   :  dedent "
     testParseCRSfail 0 "  -  Title   :  indent "
@@ -180,7 +188,7 @@ main = hspec $ do
     testParseCRSHeaderRow "album | artist" $ Album :| [Artist]
     testParseCRSHeaderRow "album   |   artist" $ Album :| [Artist]
     testParseCRSHeaderRow "genre" $ Genre :| []
-  describe "parseTable" $ do
+  describe "parseCRSTable" $ do
     testParseCRSTable 0
                       "| album     | artist     |\n| Breakfast | Supertramp |\n| Dinner    | Tramp      |"
                       $ [CRS { info = (Album, "Breakfast") :| [(Artist, "Supertramp")]
@@ -202,6 +210,28 @@ main = hspec $ do
     testParseCRSTableFail "Column mismatch" 0 "| album | artist |\n| A |"
     testParseCRSTableFail "Indent grows" 2 "  | album | artist |\n   | A | b |"
     testParseCRSTableFail "Indent shrinks" 2 "  | album | artist |\n | A | b |"
+  describe "nested table in CRS" $ do
+    testParseCRS 0
+                 "- album: a\n  | genre | title |\n  | g | t |\n  | h | |"
+               $ CRS { info = (Album, "a") :| []
+                     , overrides = [CRS { info = (Genre, "g") :| [(Title, "t")]
+                                        , overrides = [] }
+                                   , CRS { info = (Genre, "h") :| [(Title, "")]
+                                          , overrides = [] }] }
+    testParseCRS 2
+                 "  - album: a\n    | genre | title |\n    | g | t |\n    | h | |"
+               $ CRS { info = (Album, "a") :| []
+                     , overrides = [CRS { info = (Genre, "g") :| [(Title, "t")]
+                                        , overrides = [] }
+                                   , CRS { info = (Genre, "h") :| [(Title, "")]
+                                          , overrides = [] }] }
+    testParseCRS 0
+                 "- album: a\n  total: 4\n  | track | genre | title |\n  | 1 | g | t |\n  | | h | |"
+               $ CRS { info = (Album, "a") :| [(Total, "4")]
+                     , overrides = [CRS { info = (Track, "1") :| [(Genre, "g"), (Title, "t")]
+                                        , overrides = [] }
+                                   , CRS { info = (Track, "") :| [(Genre, "h"), (Title, "")]
+                                          , overrides = [] }] }
   describe "expandOverrides" $ do
     it "of nested or flattened info is same" $
       property prop_NestedOrFlat
