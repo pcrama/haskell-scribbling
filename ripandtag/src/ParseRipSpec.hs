@@ -5,15 +5,18 @@ module ParseRipSpec
     , Key(..)
     , emptyTrackRipSpec
     , expandOverrides
+    , formatSpec
+    , parseSpec
     , parseCRS
     , parseCRSDataRow
     , parseCRSHeaderRow
     , parseCRSTable
     , parseCellData
+    , readP_to_S -- re-exported
+    , shellCommands
     , translateSpec
     ) where
 
-import Control.Applicative ((<$>), (<*>))
 import Data.Char (isAlpha, toLower, digitToInt)
 import Data.Function (on)
 import Data.List (minimumBy, foldl', dropWhileEnd)
