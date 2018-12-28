@@ -13,6 +13,7 @@ module ParseRipSpec
     , translateSpec
     ) where
 
+import Control.Applicative ((<$>), (<*>))
 import Data.Char (isAlpha, toLower, digitToInt)
 import Data.Function (on)
 import Data.List (minimumBy, foldl', dropWhileEnd)
@@ -211,9 +212,19 @@ parseCRSDataRow keys = do
     cols <- sepBy1 parseCellData colSep
     case cols of
       [] -> pfail -- should never happen because of sepBy1
-      (hd:tl) -> case nonEmptyZip keys (hd :| tl) of
+      (hd:tl) -> case nonEmptyZip keys (hd :| tl) >>= checkAllKeysHaveData of
                    Just n -> return n
                    Nothing -> pfail
+  where
+    -- All (Key, value) pairs must have a non-empty string, except Track.
+    -- If the user doesn't want to repeat the same value in different rows,
+    -- they can always nest the table inside a "bullet point"
+    checkAllKeysHaveData :: NonEmpty (Key, String) -> Maybe (NonEmpty (Key, String))
+    checkAllKeysHaveData = traverse checkKeyValuePair
+    checkKeyValuePair :: (Key, String) -> Maybe (Key, String)
+    checkKeyValuePair x@(Track, _) = Just x
+    checkKeyValuePair (_ , "") = Nothing
+    checkKeyValuePair x@(_ , _:_) = Just x
 
 parseCellData :: ReadP String
 parseCellData = do

@@ -1,4 +1,5 @@
 -- stack exec --package QuickCheck -- ghci test/Spec.hs import Test.Hspec
+import Control.Monad (forM_)
 import Debug.Trace
 import Data.List.NonEmpty (NonEmpty(..))
 import Text.ParserCombinators.ReadP (ReadP, readP_to_S)
@@ -184,10 +185,19 @@ main = hspec $ do
     testParseCRSDataRow " A " (Genre :| []) $ (Genre, "A") :| []
     testParseCRSDataRowFail " A " (Genre :| [Album])
     testParseCRSDataRowFail " A | b | c " (Genre :| [Album])
+    forM_ [(minBound :: Key)..maxBound] $ \k ->
+      case k of
+        Track -> -- Exception: Track may be empty
+          testParseCRSDataRow " A | | b "
+                              (Genre :| [Track, Album])
+                            $ (Genre, "A") :| [(Track, ""), (Album, "b")]
+        _ -> do -- All other keys may not be empty
+          testParseCRSDataRowFail " A | " (Track :| [k])
+          testParseCRSDataRowFail " | A " (k :| [Track])
   describe "parseCRSHeaderRow" $ do
     testParseCRSHeaderRow "album | artist" $ Album :| [Artist]
     testParseCRSHeaderRow "album   |   artist" $ Album :| [Artist]
-    testParseCRSHeaderRow "genre" $ Genre :| []
+    testParseCRSHeaderRow "gEnRe" $ Genre :| []
   describe "parseCRSTable" $ do
     testParseCRSTable 0
                       "| album     | artist     |\n| Breakfast | Supertramp |\n| Dinner    | Tramp      |"
@@ -202,35 +212,35 @@ main = hspec $ do
                         , CRS { info = (Album, "Dinner") :| [(Artist, "Tramp")]
                               , overrides = [] }]
     testParseCRSTable 0
-                      "| album     | artist     |\n|  | Supertramp |\n| Empty    |       |"
-                      $ [CRS { info = (Album, "") :| [(Artist, "Supertramp")]
+                      "| album     | TracK      |\n| Breakfast | Supertramp |\n| Empty     |            |"
+                      $ [CRS { info = (Album, "Breakfast") :| [(Track, "Supertramp")]
                              , overrides = [] }
-                        , CRS { info = (Album, "Empty") :| [(Artist, "")]
+                        , CRS { info = (Album, "Empty") :| [(Track, "")]
                               , overrides = [] }]
     testParseCRSTableFail "Column mismatch" 0 "| album | artist |\n| A |"
     testParseCRSTableFail "Indent grows" 2 "  | album | artist |\n   | A | b |"
     testParseCRSTableFail "Indent shrinks" 2 "  | album | artist |\n | A | b |"
   describe "nested table in CRS" $ do
     testParseCRS 0
-                 "- album: a\n  | genre | title |\n  | g | t |\n  | h | |"
+                 "- album: a\n  | genre | title |\n  | g | t |\n  | h | i |"
                $ CRS { info = (Album, "a") :| []
                      , overrides = [CRS { info = (Genre, "g") :| [(Title, "t")]
                                         , overrides = [] }
-                                   , CRS { info = (Genre, "h") :| [(Title, "")]
+                                   , CRS { info = (Genre, "h") :| [(Title, "i")]
                                           , overrides = [] }] }
     testParseCRS 2
-                 "  - album: a\n    | genre | title |\n    | g | t |\n    | h | |"
+                 "  - album: a\n    | genre | title |\n    | g | t |\n    | h | ij |"
                $ CRS { info = (Album, "a") :| []
                      , overrides = [CRS { info = (Genre, "g") :| [(Title, "t")]
                                         , overrides = [] }
-                                   , CRS { info = (Genre, "h") :| [(Title, "")]
+                                   , CRS { info = (Genre, "h") :| [(Title, "ij")]
                                           , overrides = [] }] }
     testParseCRS 0
-                 "- album: a\n  total: 4\n  | track | genre | title |\n  | 1 | g | t |\n  | | h | |"
+                 "- album: a\n  total: 4\n  | track | genre | title |\n  | 1 | g | t |\n  | | h | i |"
                $ CRS { info = (Album, "a") :| [(Total, "4")]
                      , overrides = [CRS { info = (Track, "1") :| [(Genre, "g"), (Title, "t")]
                                         , overrides = [] }
-                                   , CRS { info = (Track, "") :| [(Genre, "h"), (Title, "")]
+                                   , CRS { info = (Track, "") :| [(Genre, "h"), (Title, "i")]
                                           , overrides = [] }] }
   describe "expandOverrides" $ do
     it "of nested or flattened info is same" $
