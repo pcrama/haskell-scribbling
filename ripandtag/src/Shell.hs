@@ -1,6 +1,7 @@
 module Shell
   ( safeTrackName
   , breakOnPredicate -- for testing purposes
+  , shellCommands
   )
 
 where
@@ -9,12 +10,27 @@ import Data.Char (toUpper)
 import Data.List (intercalate)
 
 import ParseRipSpec
-  ( IntOrFollowing (..)
-  , TrackRipSpec(..)
+  ( TrackRipSpec'(..)
+  , PreciseTrackRipSpec(..)
   )
 
 simplifyLatin1 :: [String]
-simplifyLatin1 = ["e\xe9", "E\xc9"]
+simplifyLatin1 = [ "a\xe4\xe0\xe1"
+                 , "A\xc4\xc0\xc1"
+                 , "c\xe7"
+                 , "C\xc7"
+                 , "e\xeb\xe9\xe8"
+                 , "E\xcb\xc9\xc8"
+                 , "i\xef\xed\xec"
+                 , "I\xcf\xcd\xcc"
+                 , "n\xf1"
+                 , "N\xd1"
+                 , "o\xf6\xf3\xf2"
+                 , "O\xd6\xd3\xd2"
+                 , "u\xfc\xfa\xf9"
+                 , "U\xdc\xda\xd9"
+                 , "y\xff\xfd"
+                 , "Y\xdd" ]
 
 makeSafeChar :: Char -> Maybe Char
 makeSafeChar x
@@ -49,7 +65,7 @@ makeSafe x =
 
 -- Track name:
 -- artist-album-track number-title
-safeTrackName :: TrackRipSpec -> String
+safeTrackName :: PreciseTrackRipSpec -> String
 safeTrackName x = makeSafe
                 $ intercalate "-"
                 $ map (maybe "" id)
@@ -58,10 +74,9 @@ safeTrackName x = makeSafe
                   , album x
                   , formatTrackNumber (track x) (total x)
                   , title x ]
-  where formatTrackNumber :: IntOrFollowing -> Maybe Int -> Maybe String
-        formatTrackNumber PrevPlusOne _ = Nothing -- should never happen
-        formatTrackNumber (TheInt trk) Nothing = formatWidth trk 2
-        formatTrackNumber (TheInt trk) (Just tot)
+  where formatTrackNumber :: Int -> Maybe Int -> Maybe String
+        formatTrackNumber trk Nothing = formatWidth trk 2
+        formatTrackNumber trk (Just tot)
           | tot < 10 = formatWidth trk 1
           | tot < 100 = formatWidth trk 2
           | otherwise = formatWidth trk 3
@@ -69,3 +84,34 @@ safeTrackName x = makeSafe
           let s = show n
               l = length s
           in Just $ if l < w then replicate (w - l) '0' ++ s else s
+
+shellCommands :: [PreciseTrackRipSpec] -> [String]
+shellCommands = map shellCommand
+  where shellCommand :: PreciseTrackRipSpec -> String
+        shellCommand trs =
+            "rip "
+            ++ safeTrackName trs
+            ++ ".mp3" -- file name extension
+            ++ foldr accField
+                     (" --track " ++ let trackStr = show $ track trs
+                                     in case total trs of
+                                          Nothing -> trackStr
+                                          Just t -> trackStr ++ "/" ++ show t)
+                     [ (title, "title")
+                     , (artist, "artist")
+                     , (album, "album")
+                     , (genre, "genre")]
+          where accField (field, name) tl =
+                  case field trs of
+                    Nothing -> tl
+                    (Just s) -> " --" ++ name ++ " " ++ posixQuote s ++ tl
+                posixQuote x = (  "'"
+                               -- replace each single quote by a closing
+                               -- single quote, an escaped single quote
+                               -- and an opening single quote.  All other
+                               -- characters need no quoting.
+                               ++ concatMap (\c -> case c of
+                                                '\'' -> "'\\''"
+                                                _ -> c:"")
+                                            x
+                               ++ "'")

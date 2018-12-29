@@ -4,6 +4,7 @@ import Data.Function (on)
 import Data.List (minimumBy)
 
 import ParseRipSpec
+import Shell
 
 main :: IO ()
 main = do

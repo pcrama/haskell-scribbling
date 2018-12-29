@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 -- stack exec --package QuickCheck -- ghci test/Spec.hs import Test.Hspec
 import Control.Monad (forM_)
 import Debug.Trace
@@ -42,14 +43,33 @@ prop_Idempotent x =
   in and $ [ expandedOnce !! i == (expandedTwice !! i) !! i
            | i <- [0..length expandedOnce - 1] ]
 
+-- This property is weakened by the usage of PreciseTrackRipSpec in
+-- translateSpec: each sublist of CDRipSpec needs to have an explicit
+-- (Track, "<integer>") at least in the first element to really have
+-- ``concatMap translateSpec == translateSpec . concat''
 prop_Translate :: Int -> [[CDRipSpec]] -> Bool
 prop_Translate maxLen x =
-  let xShortened = take maxLen $ map (take maxLen) x
-      concatThenTranslate = translateSpec $ concat xShortened
-      translateThenConcat = concatMap translateSpec xShortened
+  let xShortened = map (take maxLen) $ take maxLen x
+      concatThenTranslate = translateSpec $ concatMap constifyTrackNumber xShortened
+      translateThenConcat = concatMap (translateSpec . constifyTrackNumber) xShortened
+      -- recursively descend into the first CDRipSpec to make sure there is
+      -- (or impose) a Track starting number
+      constifyTrackNumber :: [CDRipSpec] -> [CDRipSpec]
+      constifyTrackNumber [] = []
+      constifyTrackNumber allXs@(x:xs)
+        | hasFixedTrackNumber x = allXs
+        | otherwise = case overrides x of
+            [] -> let hd :| tl = info x in (x { info = (Track, "1") :| (hd:tl) }):xs
+            ovs@(_:_) -> x { overrides = constifyTrackNumber ovs }:xs
+      -- recursively descend into the first CDRipSpec to see if there is
+      -- a Track starting number
+      hasFixedTrackNumber :: CDRipSpec -> Bool
+      hasFixedTrackNumber (CRS { .. }) = case overrides of
+        [] -> any ((== Track) . fst) info
+        (x:_) -> hasFixedTrackNumber x
   in concatThenTranslate == translateThenConcat
 
-prop_OnlySafeNames :: TrackRipSpec -> Bool
+prop_OnlySafeNames :: PreciseTrackRipSpec -> Bool
 prop_OnlySafeNames = and . map isSafeCharForShell . safeTrackName
   where isSafeCharForShell = not . (`elem` " \n\t|&;()<>'\"[]{}")
 

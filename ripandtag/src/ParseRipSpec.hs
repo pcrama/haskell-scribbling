@@ -1,19 +1,22 @@
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 module ParseRipSpec
-    ( TrackRipSpec(..)
+    ( CDRipSpec(..)
     , IntOrFollowing(..)
-    , CDRipSpec(..)
     , Key(..)
+    , PreciseTrackRipSpec
+    , TrackRipSpec
+    , TrackRipSpec'(..)
     , emptyTrackRipSpec
     , expandOverrides
     , formatSpec
-    , parseSpec
     , parseCRS
+    , parseSpec
     , parseCRSDataRow
     , parseCRSHeaderRow
     , parseCRSTable
     , parseCellData
     , readP_to_S -- re-exported
-    , shellCommands
     , translateSpec
     ) where
 
@@ -39,45 +42,25 @@ data Key = Title | Artist | Track | Total | Album | Genre
 data IntOrFollowing = PrevPlusOne | TheInt Int
   deriving (Show, Eq)
 
-data TrackRipSpec = TRS
+data TrackRipSpec' a = TRS
   { title :: Maybe String
   , artist :: Maybe String
-  , track :: IntOrFollowing
+  , track :: a
   , total :: Maybe Int
   , album :: Maybe String
   , genre :: Maybe String
   } deriving (Show, Eq)
 
-shellCommands :: [TrackRipSpec] -> [String]
-shellCommands = go 0
-  where go :: Int -> [TrackRipSpec] -> [String]
-        go _ [] = []
-        go p (t:rs) = let (sh, n) = shellCommand p t
-                      in sh:go n rs
-        shellCommand :: Int -> TrackRipSpec -> (String, Int)
-        shellCommand prev trs =
-            ("rip " ++ foldr accField
-                             ("--track " ++ case total trs of
-                                              Nothing -> show curr
-                                              Just t -> show curr ++ "/" ++ show t)
-                             [ (title, "title")
-                             , (artist, "artist")
-                             , (album, "album")
-                             , (genre, "genre")]
-            , curr)
-          where curr = case track trs of
-                         PrevPlusOne -> prev + 1
-                         TheInt x -> x
-                accField (field, name) tl =
-                  case field trs of
-                    Nothing -> tl
-                    (Just s) -> "--" ++ name ++ " '" ++ s ++ "' " ++ tl
+type TrackRipSpec = TrackRipSpec' IntOrFollowing
 
-instance Arbitrary TrackRipSpec where
+-- A PreciseTrackRipSpec always has an explicit track number:
+type PreciseTrackRipSpec = TrackRipSpec' Int
+
+instance Arbitrary PreciseTrackRipSpec where
   arbitrary = do
       tit <- arbString 9
       art <- arbString 9
-      tra <- fmap TheInt $ arbitrary `suchThat` (0 <)
+      tra <- arbitrary `suchThat` (0 <)
       tot <- arbTotal
       alb <- arbString 5
       gen <- arbString 2
@@ -113,10 +96,13 @@ instance Arbitrary CDRipSpec where
     case size of
       0 -> do
              k <- elements [Title, Artist, Album, Track, Total, Genre]
-             v <- elements ["ab", "cd", "efg", "hi", "jk", "l", "mn"
-                           , "op", "qrs", "tuvw", "xy", "z a", "bcde"
-                           , "fghi", "jklm", "n op", "Qr s", "TUV"
-                           , "xYz"]
+             v <- elements $ case k of
+                               Track -> ["1", "2", "34", "567"]
+                               Total -> ["5", "10", "100", "10000"]
+                               _ -> ["ab", "cd", "efg", "hi", "jk", "l", "mn"
+                                    , "op", "qrs", "tuvw", "xy", "z a", "bcde"
+                                    , "fghi", "jklm", "n op", "Qr s", "TUV"
+                                    , "xYz"]
              return CRS { info = (k, v) :| [], overrides = [] }
       _ -> do
         let localMaxSize = 20
@@ -290,14 +276,28 @@ reformatSpec s =
       show $ minimumBy (compare `on` length) lst)
     _ -> "Unknown parse error"
 
-parseTrackRipSpec :: String -> Maybe [TrackRipSpec]
+parseTrackRipSpec :: String -> Maybe [PreciseTrackRipSpec]
 parseTrackRipSpec s =
   case readP_to_S parseSpec s of
     [(x, "")] -> Just $ translateSpec x
     _ -> Nothing
 
-translateSpec :: [CDRipSpec] -> [TrackRipSpec]
-translateSpec = concatMap $ expandOverrides emptyTrackRipSpec
+translateSpec :: [CDRipSpec] -> [PreciseTrackRipSpec]
+translateSpec = makeTrackExplicit 0
+              . concatMap (expandOverrides emptyTrackRipSpec)
+  where makeTrackExplicit :: Int -> [TrackRipSpec] -> [PreciseTrackRipSpec]
+        makeTrackExplicit _ [] = []
+        makeTrackExplicit prev (hd:tl) =
+          let curr = case track hd of
+                       TheInt n -> n
+                       PrevPlusOne -> prev + 1
+              in (TRS { title = title hd
+                      , artist = artist hd
+                      , track = curr
+                      , total = total hd
+                      , album = album hd
+                      , genre = genre hd }
+                 :makeTrackExplicit curr tl)
 
 parseInt :: String -> Maybe Int
 parseInt s =
