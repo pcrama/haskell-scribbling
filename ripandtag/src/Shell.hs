@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 module Shell
   ( safeTrackName
   , breakOnPredicate -- for testing purposes
@@ -92,19 +93,29 @@ shellCommands = map shellCommand
             "rip "
             ++ safeTrackName trs
             ++ ".mp3" -- file name extension
-            ++ foldr accField
-                     (" --track " ++ let trackStr = show $ track trs
-                                     in case total trs of
-                                          Nothing -> trackStr
-                                          Just t -> trackStr ++ "/" ++ show t)
-                     [ (title, "title")
-                     , (artist, "artist")
-                     , (album, "album")
-                     , (genre, "genre")]
-          where accField (field, name) tl =
+            ++ (mkAccStringField title "title"
+              . mkAccStringField artist "artist"
+              . mkAccStringField album "album"
+              . mkAccStringField genre "genre"
+              . mkAccIntField year "year"
+              $ " --track " ++ let trackStr = show $ track trs
+                               in case total trs of
+                                    Nothing -> trackStr
+                                    Just t -> trackStr ++ "/" ++ show t)
+          where mkAccStringField :: (PreciseTrackRipSpec -> Maybe String)
+                                 -> String
+                                 -> (String -> String)
+                mkAccStringField field name tl =
                   case field trs of
                     Nothing -> tl
                     (Just s) -> " --" ++ name ++ " " ++ posixQuote s ++ tl
+                mkAccIntField :: (PreciseTrackRipSpec -> Maybe Int)
+                              -> String
+                              -> (String -> String)
+                mkAccIntField field name tl =
+                  case field trs of
+                    Nothing -> tl
+                    (Just i) -> " --" ++ name ++ " " ++ show i ++ tl
                 posixQuote x = (  "'"
                                -- replace each single quote by a closing
                                -- single quote, an escaped single quote

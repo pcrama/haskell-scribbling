@@ -36,8 +36,11 @@ import Test.QuickCheck
   , suchThat
   )
 
-data Key = Title | Artist | Track | Total | Album | Genre
+data Key = Title | Artist | Track | Total | Album | Genre | Year
   deriving (Show, Eq, Enum, Bounded)
+
+instance Arbitrary Key where
+  arbitrary = elements [minBound .. maxBound]
 
 data IntOrFollowing = PrevPlusOne | TheInt Int
   deriving (Show, Eq)
@@ -49,6 +52,7 @@ data TrackRipSpec' a = TRS
   , total :: Maybe Int
   , album :: Maybe String
   , genre :: Maybe String
+  , year :: Maybe Int
   } deriving (Show, Eq)
 
 type TrackRipSpec = TrackRipSpec' IntOrFollowing
@@ -64,12 +68,14 @@ instance Arbitrary PreciseTrackRipSpec where
       tot <- arbTotal
       alb <- arbString 5
       gen <- arbString 2
+      yer <- arbYear
       return $ TRS { title = tit
                    , artist = art
                    , track = tra
                    , total = tot
                    , album = alb
                    , genre = gen
+                   , year = yer
                    }
     where -- arbString :: Int -> Gen (Maybe String)
           arbString p = do
@@ -85,6 +91,13 @@ instance Arbitrary PreciseTrackRipSpec where
             if pickJust
             then fmap Just $ arbitrary `suchThat` (\x -> (0 < x) && (x < 1000))
             else return Nothing
+          -- arbYear :: Gen (Maybe Int)
+          arbYear = do
+            -- 20% Nothing, 80% Just Int
+            pickJust <- elements $ False:replicate 4 True
+            if pickJust
+            then fmap (Just . (+ 1930) . (`mod` 70) . abs) $ arbitrary
+            else return Nothing
 
 data CDRipSpec = CRS
   { info :: NonEmpty (Key, String)
@@ -95,10 +108,11 @@ instance Arbitrary CDRipSpec where
   arbitrary = sized $ \size ->
     case size of
       0 -> do
-             k <- elements [Title, Artist, Album, Track, Total, Genre]
+             k <- elements [Title, Artist, Album, Track, Total, Genre, Year]
              v <- elements $ case k of
                                Track -> ["1", "2", "34", "567"]
                                Total -> ["5", "10", "100", "10000"]
+                               Year -> ["1977", "1965", "2000", "abc"]
                                _ -> ["ab", "cd", "efg", "hi", "jk", "l", "mn"
                                     , "op", "qrs", "tuvw", "xy", "z a", "bcde"
                                     , "fghi", "jklm", "n op", "Qr s", "TUV"
@@ -131,6 +145,7 @@ setFromKey trs (Album, s) = trs { album = Just s }
 setFromKey trs (Track, s) = trs { track = parseIntOrFollowing s }
 setFromKey trs (Total, s) = trs { total = parseInt s }
 setFromKey trs (Genre, s) = trs { genre = Just s }
+setFromKey trs (Year, s) = trs { year = parseInt s }
 
 emptyTrackRipSpec :: TrackRipSpec
 emptyTrackRipSpec = TRS { title = Nothing
@@ -138,7 +153,8 @@ emptyTrackRipSpec = TRS { title = Nothing
                         , track = PrevPlusOne
                         , total = Nothing
                         , album = Nothing
-                        , genre = Nothing }
+                        , genre = Nothing
+                        , year = Nothing }
 
 expandOverrides :: TrackRipSpec -> CDRipSpec -> [TrackRipSpec]
 expandOverrides base
@@ -167,7 +183,8 @@ keyNameAlist = [ ("title", Title)
                , ("track", Track)
                , ("total", Total)
                , ("album", Album)
-               , ("genre", Genre) ]
+               , ("genre", Genre)
+               , ("year", Year) ]
 
 eol1 :: ReadP String
 eol1 = munch1 (`elem` "\r\n")
@@ -296,7 +313,8 @@ translateSpec = makeTrackExplicit 0
                       , track = curr
                       , total = total hd
                       , album = album hd
-                      , genre = genre hd }
+                      , genre = genre hd
+                      , year = year hd }
                  :makeTrackExplicit curr tl)
 
 parseInt :: String -> Maybe Int

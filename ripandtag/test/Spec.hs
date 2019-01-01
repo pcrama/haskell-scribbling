@@ -163,6 +163,29 @@ testParseCRSfail indent s =
                  []
                $ readP_to_S (parseCRS indent) s
 
+-- If we replace an arbitrary field in a PreciseTrackRipSpec by an
+-- arbitrary value and the resulting PreciseTrackRipSpec is different,
+-- the 2 shellCommands generated for both should be different.  This
+-- tests that all fields in PreciseTrackRipSpec are taken into
+-- account.
+prop_allInputsToShellCommandsCount :: Key -- ^Key to modify value for
+                                   -> Int -- ^New value, will be cast to String & wrapped in Just as needed
+                                   -> PreciseTrackRipSpec -- ^Initial PreciseTrackRipSpec
+                                   -> Bool
+prop_allInputsToShellCommandsCount k v prs =
+    (prs == newValue) || (cmd1 /= cmd2)
+  where newFieldString = if v > 0 then Just $ show v else Nothing
+        newFieldInt = if v > 0 then Just v else Nothing
+        newValue = case k of
+          Track -> prs { track = abs v }
+          Title -> prs { title = newFieldString }
+          Artist -> prs { artist = newFieldString }
+          Total -> prs { total = newFieldInt }
+          Album -> prs { album = newFieldString }
+          Genre -> prs { genre = newFieldString }
+          Year -> prs { year = newFieldInt }
+        [cmd1, cmd2] = shellCommands [prs, newValue]
+
 main :: IO ()
 main = hspec $ do
   describe "parseCRS" $ do
@@ -190,6 +213,11 @@ main = hspec $ do
                      , overrides = [CRS { info = (Artist, "1") :| [], overrides = [] }
                                    , CRS { info = (Artist, "2") :| [(Title, "t")]
                                          , overrides = [] }] }
+    testParseCRS 0
+                 "- Title: -1 \n  Artist: 0 \n  Track: 1 \n  Total: 2 \n  Album: 3 \n  Genre: 4 \n  Year: 5"
+               $ CRS { info = (Title, "-1") :| [(Artist, "0"), (Track, "1"), (Total, "2")
+                                               , (Album, "3"), (Genre, "4"), (Year, "5")]
+                     , overrides = [] }
     testParseCRSfail 0 "-  unknown key   :  g:g "
     testParseCRSfail 2 "-  Title   :  dedent "
     testParseCRSfail 0 "  -  Title   :  indent "
@@ -218,6 +246,8 @@ main = hspec $ do
     testParseCRSHeaderRow "album | artist" $ Album :| [Artist]
     testParseCRSHeaderRow "album   |   artist" $ Album :| [Artist]
     testParseCRSHeaderRow "gEnRe" $ Genre :| []
+    testParseCRSHeaderRow "Title | Artist | Track | Total | Album | Genre | Year"
+                        $ Title :| [Artist, Track, Total, Album, Genre, Year]
   describe "parseCRSTable" $ do
     testParseCRSTable 0
                       "| album     | artist     |\n| Breakfast | Supertramp |\n| Dinner    | Tramp      |"
@@ -290,3 +320,6 @@ main = hspec $ do
       property prop_breakOnPredicateReassemble
     it "results in parts with alternating truth values for the predicate" $
       property prop_breakOnPredicateAlternatingPredForParts
+  describe "shellCommands" $ do
+    it "generates different outputs for differernt inputs" $
+      property prop_allInputsToShellCommandsCount
