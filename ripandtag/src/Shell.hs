@@ -90,18 +90,23 @@ shellCommands :: [PreciseTrackRipSpec] -> [String]
 shellCommands = map shellCommand
   where shellCommand :: PreciseTrackRipSpec -> String
         shellCommand trs =
-            "rip "
-            ++ safeTrackName trs
-            ++ ".mp3" -- file name extension
-            ++ (mkAccStringField title "title"
-              . mkAccStringField artist "artist"
-              . mkAccStringField album "album"
-              . mkAccStringField genre "genre"
-              . mkAccIntField year "year"
-              $ " --track " ++ let trackStr = show $ track trs
-                               in case total trs of
-                                    Nothing -> trackStr
-                                    Just t -> trackStr ++ "/" ++ show t)
+          let trackStr = show $ track trs
+          in "cdda2wav -vall cddb=0 speed=4 -paranoia paraopts=proof -D /dev/sr0 --track "
+             ++ trackStr
+             ++ " - | " -- write audio samples to stdout, then pipe to ...
+             ++ "lame --preset 128 --add-id3v2 --id3v2-latin1"
+             ++ (mkAccStringField title "tt"
+               . mkAccStringField artist "ta"
+               . mkAccStringField album "tl"
+               . mkAccStringField genre "tg"
+               . mkAccIntField year "ty"
+               $ " --tn "
+                 ++ case total trs of
+                      Nothing -> trackStr
+                      Just t -> trackStr ++ "/" ++ show t
+                 ++ " - "       -- read from stdin
+                 ++ safeTrackName trs
+                 ++ ".mp3")
           where mkAccStringField :: (PreciseTrackRipSpec -> Maybe String)
                                  -> String
                                  -> (String -> String)

@@ -184,7 +184,7 @@ prop_allInputsToShellCommandsCount k v prs =
           Album -> prs { album = newFieldString }
           Genre -> prs { genre = newFieldString }
           Year -> prs { year = newFieldInt }
-        [cmd1, cmd2] = shellCommands [prs, newValue]
+        [cmd1, cmd2] = map shellCommands [[prs], [newValue]]
 
 main :: IO ()
 main = hspec $ do
