@@ -1,4 +1,4 @@
-GHC=ghc -Wincomplete-patterns -Wmissing-fields
+GHC=ghc -Wincomplete-patterns -Wmissing-fields -Wdodgy-imports
 
 @phony test: test/Spec
 	test/Spec

@@ -12,7 +12,7 @@ import Data.List (intercalate)
 
 import ParseRipSpec
   ( TrackRipSpec'(..)
-  , PreciseTrackRipSpec(..)
+  , PreciseTrackRipSpec
   )
 
 simplifyLatin1 :: [String]
