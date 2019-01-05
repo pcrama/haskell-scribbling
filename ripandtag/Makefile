@@ -1,3 +1,7 @@
+# sudo apt install ghc
+# sudo apt install libghc-quickcheck-{io,text,safe}-d{oc,ev} haskell-doc
+# sudo apt install libghc-hspec-d{ev,oc}
+
 GHC=ghc -Wincomplete-patterns -Wmissing-fields -Wdodgy-imports
 
 @phony test: test/Spec

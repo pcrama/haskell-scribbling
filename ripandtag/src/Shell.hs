@@ -91,7 +91,7 @@ shellCommands = map shellCommand
   where shellCommand :: PreciseTrackRipSpec -> String
         shellCommand trs =
           let trackStr = show $ track trs
-          in "cdda2wav -vall cddb=0 speed=4 -paranoia paraopts=proof -D /dev/sr0 --track "
+          in "icedax -vall cddb=0 speed=4 -D /dev/sr0 --track "
              ++ trackStr
              ++ " - | " -- write audio samples to stdout, then pipe to ...
              ++ "lame --preset 128 --add-id3v2 --id3v2-latin1"
