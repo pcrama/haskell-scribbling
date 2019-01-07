@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, FunctionalDependencies #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts, TypeFamilies #-}
 
 data ExprP0 a
   = Val0 Int
@@ -151,55 +151,69 @@ instance Functor p => Bifunctor (AllClowns p) where
 instance Functor p => Bifunctor (AllJokers p) where
   dimap _ g (AllJokers pj) = AllJokers $ fmap g pj
 
-class (Functor p, Bifunctor p'') => Diss p p'' | p -> p'' where
-  -- either at    far left     -or- in the middle
-  --              (ie. only jokers) (provide clown
-  --                                 to plug the
-  --                                 hole)
-  right :: Either (p j)             (p'' c j, c)
-        --        still in middle, -or- plugged last
-        --        return evicted joker  hole with clown,
-        --        and new dissection    only clowns left
-        -> Either (j, p'' c j)          (p c)
-  -- either at   far right    -or- in the middle
-  --             (ie. only clowns) (provide joker
-  --                                to plug the
-  --                                hole)
-  left :: Either (p c)             (p'' c j, j)
-       --        still in middle, -or- plugged last
-       --        return evicted clown  hole with joker,
-       --        and new dissection    only jokers left
-       -> Either (c, p'' c j)          (p j)
+class (Functor p, Bifunctor (DissectionContainer p)) => Diss p c j where
+  type DissectionContainer p :: * -> * -> *
+  -- either at    far left, ie. -or- in the middle (provide clown
+  --              only jokers        to plug the hole)
+  right :: Either (p j)             (DissectionContainer p c j, c)
+        --        still in middle, return evicted joker and new
+        --        dissection
+        -> Either (j, DissectionContainer p c j)
+        --  -or-  plugged last hole with clown, only clowns left
+                  (p c)
+  -- either at   far right, ie. -or- in the middle (provide joker
+  --             only clowns         to plug the hole)
+  left :: Either (p c)              (DissectionContainer p c j, j)
+       --        still in middle, return evicted clown and new
+       --        dissection
+       -> Either (c, DissectionContainer p c j)
+       --  -or-  plugged last hole with joker, only jokers left
+                 (p j)
 
-instance (Diss p p'', Diss q q'') => Diss (Sum1 p q) (Sum2 p'' q'') where
-  right (Right (p''cj, c)) = case right $ Right (p''cj, c) of
-    Left (j, p''cj1) -> Left (j, p''cj1)
-    Right pc -> Right $ L1 pc
-  right (Right (p''cj, c)) = case right $ Right (p''cj, c) of
-    Left (j, p''cj1) -> Left (j, p''cj1)
-    Right qc -> Right $ R1 qc
+instance (Diss p c j, Diss q c j) => Diss (Sum1 p q) c j where
   right (Left (L1 pj)) = case right $ Left pj of
-    Left (j, p''cj) -> Left (j, p''cj)
+    Left (j, pcj1) -> Left (j, L2 pcj1)
     Right pc -> Right $ L1 pc
   right (Left (R1 qj)) = case right $ Left qj of
-    Left (j, p''cj) -> Left (j, p''cj)
+    Left (j, qcj) -> Left (j, R2 qcj)
     Right qc -> Right $ R1 qc
+  right (Right (L2 pcj, c)) = case right $ Right (pcj, c) of
+    Left (j, pcj1) -> Left (j, L2 pcj1)
+    Right pc -> Right $ L1 pc
+  right (Right (R2 qcj, c)) = case right $ Right (qcj, c) of
+    Left (j, qcj1) -> Left (j, R2 qcj1)
+    Right pc -> Right $ R1 pc
+  left (Left (L1 pc)) = case left $ Left pc of
+    Left (c, pcj) -> Left (c, L2 pcj)
+    Right pj -> Right $ L1 pj
+  left (Left (R1 qc)) = case left $ Left qc of
+    Left (c, qcj) -> Left (c, R2 qcj)
+    Right qj -> Right $ R1 qj
+  left (Right (L2 pcj, j)) = case left $ Right (pcj, j) of
+    Left (c, pcj) -> Left (c, L2 pcj)
+    Right pj -> Right $ L1 pj
+  left (Right (R2 qcj, j)) = case left $ Right (qcj, j) of
+    Left (c, qcj) -> Left (c, R2 qcj)
+    Right qj -> Right $ R1 qj
+  type DissectionContainer (Sum1 p q) = Sum2 (DissectionContainer p) (DissectionContainer q)
 
 -- newtype Fst   x y = Fst x               -- element
 -- newtype Snd   x y = Snd y               -- element
 -- data Sum2 p q x y = L2 (p x) | R2 (q y) -- choice
 -- data Prd2 p q x y = Prd2 (p x) (q y)    -- pairing
-instance Diss (K1 a) (K2 Zero) where
+instance Diss (K1 a) c j where
   right (Left (K1 a)) = Right $ K1 a
   right (Right (K2 z, _)) = magic z
   left (Left (K1 a)) = Right $ K1 a
   left (Right (K2 z, _)) = magic z
+  type DissectionContainer (K1 a) = K2 Zero
 
-instance Diss Id One2 where
+instance Diss Id c j where
   right (Left (Id j)) = Left (j, K2 ())
   right (Right (K2 (), c)) = Right $ Id c
   left (Left (Id c)) = Left (c, K2 ())
   left (Right (K2 (), j)) = Right $ Id j
+  type DissectionContainer Id = One2
 
 main = do
   putStrLn . show $ lfoldr (+) 0 $ list2listf [1..4]

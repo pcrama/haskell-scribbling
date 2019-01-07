@@ -1,1 +1,4 @@
 Reimplementing Conor McBride's "Clowns to the Left, Jokers to the Right"
+
+Modernizing code to use ~TypeFamilies~ instead of ~FunctionalDependencies~
+and ~UndecidableInstances~.
