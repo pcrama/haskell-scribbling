@@ -1,0 +1,211 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, FunctionalDependencies #-}
+{-# LANGUAGE UndecidableInstances #-}
+
+data ExprP0 a
+  = Val0 Int
+  | Add0 a a
+
+instance Functor ExprP0 where
+  fmap f (Val0 v) = Val0 v
+  fmap f (Add0 a b) = Add0 (f a) (f b)
+
+newtype Fix f = Fix { unFix :: f (Fix f) }
+
+cata :: Functor p => (p a -> a) -> Fix p -> a
+cata f = f . fmap (cata f) . unFix
+
+type Expr0 = Fix ExprP0
+
+eval0 :: Expr0 -> Int
+eval0 = cata smallEval
+  where smallEval (Val0 x) = x
+        smallEval (Add0 x y) = x + y
+
+pp0 :: Expr0 -> String
+pp0 = cata smallPp
+  where smallPp :: ExprP0 String -> String
+        smallPp (Val0 v) = show v
+        smallPp (Add0 x y) = "(" ++ x ++ "+" ++ y ++ ")"
+
+data ListF a b
+    = LFNil
+    | LFCons a b
+
+instance Functor (ListF a) where
+  fmap _ LFNil = LFNil
+  fmap f (LFCons a b) = LFCons a $ f b
+
+type List a = Fix (ListF a)
+
+lfoldr :: (a -> b -> b) -> b -> List a -> b
+lfoldr f base = cata f'
+  where f' LFNil = base
+        f' (LFCons a b) = f a b
+
+lnil = Fix LFNil
+lcons hd tl = Fix $ LFCons hd tl
+
+val0 = Fix . Val0
+add0 x y = Fix $ Add0 x y
+
+list2listf = foldr lcons lnil
+
+newtype K1 a  x = K1 a                -- constant
+newtype Id    x = Id x                -- element
+data Sum1 p q x = L1 (p x) | R1 (q x) -- choice
+data Prd1 p q x = Prd1 (p x) (q x)    -- pairing
+
+type One1 = K1 ()
+
+-- Maybe re-expressed with above types
+type Mebbe x = Sum1 One1 Id x
+
+mebbeNothing = L1 $ K1 ()
+mebbeJust    = R1 . Id
+mebbe       :: b -> (a -> b) -> Mebbe a -> b
+mebbe b _ (L1 (K1 ())) = b
+mebbe _ f (R1 (Id x)) = f x
+
+instance Functor (K1 a) where
+  fmap _ (K1 x) = K1 x
+
+instance Functor Id where
+  fmap f (Id x) = Id $ f x
+
+instance (Functor p, Functor q) => Functor (Sum1 p q) where
+  fmap f (L1 px) = L1 $ fmap f px
+  fmap f (R1 qx) = R1 $ fmap f qx
+
+instance (Functor p, Functor q) => Functor (Prd1 p q) where
+  fmap f (Prd1 px qx) = Prd1 (fmap f px) (fmap f qx)
+
+type ExprP1 = Sum1 (K1 Int) (Prd1 Id Id)
+type Expr1 = Fix ExprP1
+
+pattern Val1 v = L1 (K1 v)
+pattern Add1 x y = R1 (Prd1 (Id x) (Id y))
+
+val1 = Fix . L1 . K1
+add1 x y = Fix . R1 $ Prd1 (Id x) (Id y)
+
+eval1 :: Expr1 -> Int
+eval1 = cata smallEval
+  where smallEval (Val1 v) = v
+        smallEval (Add1 x y) = x + y
+
+pp1 :: Expr1 -> String
+pp1 = cata $ \case
+  Val1 v -> show v
+  Add1 x y -> '(':x ++ "+" ++ y ++ ")"
+
+newtype K2 a  x y = K2 a                    -- constant
+newtype Fst   x y = Fst x                   -- element
+newtype Snd   x y = Snd y                   -- element
+data Sum2 p q x y = L2 (p x y) | R2 (q x y) -- choice
+data Prd2 p q x y = Prd2 (p x y) (q x y)    -- pairing
+
+type One2 = K2 ()
+
+class Bifunctor p where
+  dimap :: (a -> x) -> (b -> y) -> p a b -> p x y
+  lmap :: (a -> x) -> p a y -> p x y
+  lmap = flip dimap id
+  rmap :: (b -> y) -> p x b -> p x y
+  rmap = dimap id
+
+instance Bifunctor (K2 a) where
+  dimap _ _ (K2 x) = K2 x
+
+instance Bifunctor Fst where
+  dimap f _ (Fst x) = Fst $ f x
+
+instance Bifunctor Snd where
+  dimap _ f (Snd x) = Snd $ f x
+
+instance (Bifunctor p, Bifunctor q) => Bifunctor (Sum2 p q) where
+  dimap f g (L2 p) = L2 $ dimap f g p
+  dimap f g (R2 q) = R2 $ dimap f g q
+
+instance (Bifunctor p, Bifunctor q) => Bifunctor (Prd2 p q) where
+  dimap f g (Prd2 p q) = Prd2 (dimap f g p) (dimap f g q)
+
+data Zero                       -- has no values
+
+magic :: Zero -> a
+magic z = z `seq` error "Never get this far because no values exist for Zero"
+
+inflate :: Functor p => p Zero -> p a
+inflate = fmap magic            -- also unsafeCoerce#
+
+type Zero1 = K1 Zero
+type Zero2 = K2 Zero
+
+newtype AllClowns p c j = AllClowns (p c) -- AllClowns Id === Fst
+newtype AllJokers p c j = AllJokers (p j) -- AllJokers Id === Snd
+
+instance Functor p => Bifunctor (AllClowns p) where
+  dimap f _ (AllClowns pc) = AllClowns $ fmap f pc
+
+instance Functor p => Bifunctor (AllJokers p) where
+  dimap _ g (AllJokers pj) = AllJokers $ fmap g pj
+
+class (Functor p, Bifunctor p'') => Diss p p'' | p -> p'' where
+  -- either at    far left     -or- in the middle
+  --              (ie. only jokers) (provide clown
+  --                                 to plug the
+  --                                 hole)
+  right :: Either (p j)             (p'' c j, c)
+        --        still in middle, -or- plugged last
+        --        return evicted joker  hole with clown,
+        --        and new dissection    only clowns left
+        -> Either (j, p'' c j)          (p c)
+  -- either at   far right    -or- in the middle
+  --             (ie. only clowns) (provide joker
+  --                                to plug the
+  --                                hole)
+  left :: Either (p c)             (p'' c j, j)
+       --        still in middle, -or- plugged last
+       --        return evicted clown  hole with joker,
+       --        and new dissection    only jokers left
+       -> Either (c, p'' c j)          (p j)
+
+instance (Diss p p'', Diss q q'') => Diss (Sum1 p q) (Sum2 p'' q'') where
+  right (Right (p''cj, c)) = case right $ Right (p''cj, c) of
+    Left (j, p''cj1) -> Left (j, p''cj1)
+    Right pc -> Right $ L1 pc
+  right (Right (p''cj, c)) = case right $ Right (p''cj, c) of
+    Left (j, p''cj1) -> Left (j, p''cj1)
+    Right qc -> Right $ R1 qc
+  right (Left (L1 pj)) = case right $ Left pj of
+    Left (j, p''cj) -> Left (j, p''cj)
+    Right pc -> Right $ L1 pc
+  right (Left (R1 qj)) = case right $ Left qj of
+    Left (j, p''cj) -> Left (j, p''cj)
+    Right qc -> Right $ R1 qc
+
+-- newtype Fst   x y = Fst x               -- element
+-- newtype Snd   x y = Snd y               -- element
+-- data Sum2 p q x y = L2 (p x) | R2 (q y) -- choice
+-- data Prd2 p q x y = Prd2 (p x) (q y)    -- pairing
+instance Diss (K1 a) (K2 Zero) where
+  right (Left (K1 a)) = Right $ K1 a
+  right (Right (K2 z, _)) = magic z
+  left (Left (K1 a)) = Right $ K1 a
+  left (Right (K2 z, _)) = magic z
+
+instance Diss Id One2 where
+  right (Left (Id j)) = Left (j, K2 ())
+  right (Right (K2 (), c)) = Right $ Id c
+  left (Left (Id c)) = Left (c, K2 ())
+  left (Right (K2 (), j)) = Right $ Id j
+
+main = do
+  putStrLn . show $ lfoldr (+) 0 $ list2listf [1..4]
+  putStrLn $ lfoldr (\a b -> show a ++ b) "." $ list2listf [1..4]
+  let exp val add = add (val 1) (add (add (val 2) (val 3)) (val 4))
+  let exp0 = exp val0 add0
+  putStrLn $ "0: " ++ pp0 exp0 ++ "=" ++ show (eval0 exp0)
+  let exp1 = exp val1 add1
+  putStrLn $ "1: " ++ pp1 exp1 ++ "=" ++ show (eval1 exp1)
