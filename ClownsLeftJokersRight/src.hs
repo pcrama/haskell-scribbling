@@ -170,6 +170,24 @@ class (Functor p, Bifunctor (DissectionContainer p)) => Diss p c j where
        --  -or-  plugged last hole with joker, only jokers left
                  (p j)
 
+instance (Diss p c j, Diss q c j) => Diss (Prd1 p q) c j where
+  type DissectionContainer (Prd1 p q) = Sum2 (Prd2 (DissectionContainer p) (AllJokers q))
+                                             (Prd2 (AllClowns p) (DissectionContainer q))
+  right (Left (Prd1 pj qj)) = case right $ Left pj of
+    Left (j, pcj) -> Left (j, L2 $ Prd2 pcj (AllJokers qj))
+    Right pc -> case right $ Left qj of
+      Left (j, qcj) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj)
+      Right qc -> Right $ Prd1 pc qc
+  right (Right (L2 (Prd2 pcj (AllJokers qj)), c)) = case right $ Right (pcj, c) of
+    Left (j, pcj1) -> Left (j, L2 $ Prd2 pcj1 (AllJokers qj))
+    Right (AllClowns pc) -> case right $ Left qj of
+      Left (j, qcj) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj)
+      Right (AllClowns qc) -> Right $ Prd1 pc qc
+  right (Right (R2 (Prd2 (AllClowns pc) qcj), c)) = case right $ Right (qcj, c) of
+    Left (j, qcj1) -> Left (j, L2 $ Prd2 (AllClowns pc) qcj1)
+    Right qc -> Right $ Prd1 pc qc
+  right _ = undefined
+
 instance (Diss p c j, Diss q c j) => Diss (Sum1 p q) c j where
   right (Left (L1 pj)) = case right $ Left pj of
     Left (j, pcj1) -> Left (j, L2 pcj1)
