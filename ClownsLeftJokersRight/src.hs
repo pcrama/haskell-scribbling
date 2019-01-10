@@ -8,7 +8,7 @@ data ExprP0 a
   | Add0 a a
 
 instance Functor ExprP0 where
-  fmap f (Val0 v) = Val0 v
+  fmap _ (Val0 v) = Val0 v
   fmap f (Add0 a b) = Add0 (f a) (f b)
 
 newtype Fix f = Fix { unFix :: f (Fix f) }
@@ -44,12 +44,19 @@ lfoldr f base = cata f'
   where f' LFNil = base
         f' (LFCons a b) = f a b
 
+lnil :: Fix (ListF a)
 lnil = Fix LFNil
+
+lcons :: a -> Fix (ListF a) -> Fix (ListF a)
 lcons hd tl = Fix $ LFCons hd tl
 
+val0 :: Int -> Fix ExprP0
 val0 = Fix . Val0
+
+add0 :: Fix ExprP0 -> Fix ExprP0 -> Fix ExprP0
 add0 x y = Fix $ Add0 x y
 
+list2listf :: [a] -> Fix (ListF a)
 list2listf = foldr lcons lnil
 
 newtype K1 a  x = K1 a                -- constant
@@ -62,9 +69,11 @@ type One1 = K1 ()
 -- Maybe re-expressed with above types
 type Mebbe x = Sum1 One1 Id x
 
+mebbeNothing :: Sum1 (K1 ()) Id x
 mebbeNothing = L1 $ K1 ()
-mebbeJust    = R1 . Id
-mebbe       :: b -> (a -> b) -> Mebbe a -> b
+mebbeJust :: x -> Sum1 (K1 ()) Id x
+mebbeJust  = R1 . Id
+mebbe :: b -> (a -> b) -> Mebbe a -> b
 mebbe b _ (L1 (K1 ())) = b
 mebbe _ f (R1 (Id x)) = f x
 
@@ -87,7 +96,10 @@ type Expr1 = Fix ExprP1
 pattern Val1 v = L1 (K1 v)
 pattern Add1 x y = R1 (Prd1 (Id x) (Id y))
 
+val1 :: Int -> Expr1
 val1 = Fix . L1 . K1
+
+add1 :: Expr1 -> Expr1 -> Expr1
 add1 x y = Fix . R1 $ Prd1 (Id x) (Id y)
 
 eval1 :: Expr1 -> Int
@@ -170,23 +182,19 @@ class (Functor p, Bifunctor (DissectionContainer p)) => Diss p c j where
        --  -or-  plugged last hole with joker, only jokers left
                  (p j)
 
-instance (Diss p c j, Diss q c j) => Diss (Prd1 p q) c j where
-  type DissectionContainer (Prd1 p q) = Sum2 (Prd2 (DissectionContainer p) (AllJokers q))
-                                             (Prd2 (AllClowns p) (DissectionContainer q))
-  right (Left (Prd1 pj qj)) = case right $ Left pj of
-    Left (j, pcj) -> Left (j, L2 $ Prd2 pcj (AllJokers qj))
-    Right pc -> case right $ Left qj of
-      Left (j, qcj) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj)
-      Right qc -> Right $ Prd1 pc qc
-  right (Right (L2 (Prd2 pcj (AllJokers qj)), c)) = case right $ Right (pcj, c) of
-    Left (j, pcj1) -> Left (j, L2 $ Prd2 pcj1 (AllJokers qj))
-    Right (AllClowns pc) -> case right $ Left qj of
-      Left (j, qcj) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj)
-      Right (AllClowns qc) -> Right $ Prd1 pc qc
-  right (Right (R2 (Prd2 (AllClowns pc) qcj), c)) = case right $ Right (qcj, c) of
-    Left (j, qcj1) -> Left (j, L2 $ Prd2 (AllClowns pc) qcj1)
-    Right qc -> Right $ Prd1 pc qc
-  right _ = undefined
+instance Diss (K1 a) c j where
+  right (Left (K1 a)) = Right $ K1 a
+  right (Right (K2 z, _)) = magic z
+  left (Left (K1 a)) = Right $ K1 a
+  left (Right (K2 z, _)) = magic z
+  type DissectionContainer (K1 a) = K2 Zero
+
+instance Diss Id c j where
+  right (Left (Id j)) = Left (j, K2 ())
+  right (Right (K2 (), c)) = Right $ Id c
+  left (Left (Id c)) = Left (c, K2 ())
+  left (Right (K2 (), j)) = Right $ Id j
+  type DissectionContainer Id = One2
 
 instance (Diss p c j, Diss q c j) => Diss (Sum1 p q) c j where
   right (Left (L1 pj)) = case right $ Left pj of
@@ -208,36 +216,62 @@ instance (Diss p c j, Diss q c j) => Diss (Sum1 p q) c j where
     Left (c, qcj) -> Left (c, R2 qcj)
     Right qj -> Right $ R1 qj
   left (Right (L2 pcj, j)) = case left $ Right (pcj, j) of
-    Left (c, pcj) -> Left (c, L2 pcj)
+    Left (c, pcj1) -> Left (c, L2 pcj1)
     Right pj -> Right $ L1 pj
   left (Right (R2 qcj, j)) = case left $ Right (qcj, j) of
-    Left (c, qcj) -> Left (c, R2 qcj)
+    Left (c, qcj1) -> Left (c, R2 qcj1)
     Right qj -> Right $ R1 qj
   type DissectionContainer (Sum1 p q) = Sum2 (DissectionContainer p) (DissectionContainer q)
 
--- newtype Fst   x y = Fst x               -- element
--- newtype Snd   x y = Snd y               -- element
--- data Sum2 p q x y = L2 (p x) | R2 (q y) -- choice
--- data Prd2 p q x y = Prd2 (p x) (q y)    -- pairing
-instance Diss (K1 a) c j where
-  right (Left (K1 a)) = Right $ K1 a
-  right (Right (K2 z, _)) = magic z
-  left (Left (K1 a)) = Right $ K1 a
-  left (Right (K2 z, _)) = magic z
-  type DissectionContainer (K1 a) = K2 Zero
+instance (Diss p c j, Diss q c j) => Diss (Prd1 p q) c j where
+  -- Only jokers in Prd1 -> start with first component of Prd1
+  right (Left (Prd1 pj qj)) = case right $ Left pj of
+    -- a Joker and dissection of pj -> return Joker & repackage in Prd2
+    Left (j, pcj) -> Left (j, L2 $ Prd2 pcj (AllJokers qj))
+    -- there were no jokers in pj -> look for one in second component of Prd1
+    Right pc -> case right $ Left qj of
+      -- a Joker & dissection of qj -> return Joker & repackage in Prd2
+      Left (j, qcj) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj)
+      -- there were no Jokers in qj -> return Prd1 of Clowns only
+      Right qc -> Right $ Prd1 pc qc
+  -- Dissection of first component -> continue dissecting it
+  right (Right (L2 (Prd2 pcj (AllJokers qj)), c)) = case right $ Right (pcj, c) of
+    -- a Joker & continued dissection of pcj -> return Joker & repackage
+    Left (j, pcj1) -> Left (j, L2 $ Prd2 pcj1 (AllJokers qj))
+    -- there were no Jokers in pj -> look for one in second component of Prd1
+    Right pc -> case right $ Left qj of
+      -- a Joker & dissection of qj -> return Joker & repackage in Prd2
+      Left (j, qcj) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj)
+      -- there were no Jokers in qj -> return Prd1 of Clowns only
+      Right qc -> Right $ Prd1 pc qc
+  -- Dissection of second component -> continue dissecting it
+  right (Right (R2 (Prd2 (AllClowns pc) qcj), c)) = case right $ Right (qcj, c) of
+    -- a Joker & continued dissection of qcj -> return Joker & repackage in Prd2
+    Left (j, qcj1) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj1)
+    -- no Jokers left in qcj -> return Prd1 of Clowns only
+    Right qc -> Right $ Prd1 pc qc
+  left (Left (Prd1 pc qc)) = case left $ Left qc of
+    Left (c, qcj) -> Left (c, R2 $ Prd2 (AllClowns pc) qcj)
+    Right qj -> case left $ Left pc of
+      Left (c, pcj) -> Left $ (c, L2 $ Prd2 pcj (AllJokers qj))
+      Right pj -> Right $ Prd1 pj qj
+  left (Right (R2 (Prd2 (AllClowns pc) qcj), j)) = case left $ Right (qcj, j) of
+    Left (c, qcj1) -> Left (c, R2 $ Prd2 (AllClowns pc) qcj1)
+    Right qj -> case left $ Left pc of
+      Left (c, pcj) -> Left (c, L2 $ Prd2 pcj $ AllJokers qj)
+      Right pj -> Right $ Prd1 pj qj
+  left (Right (L2 (Prd2 pcj (AllJokers qj)), j)) = case left $ Right (pcj, j) of
+    Left (c, pcj1) -> Left (c, L2 $ Prd2 pcj1 $ AllJokers qj)
+    Right pj -> Right $ Prd1 pj qj
+  type DissectionContainer (Prd1 p q) = Sum2 (Prd2 (DissectionContainer p) (AllJokers q))
+                                             (Prd2 (AllClowns p) (DissectionContainer q))
 
-instance Diss Id c j where
-  right (Left (Id j)) = Left (j, K2 ())
-  right (Right (K2 (), c)) = Right $ Id c
-  left (Left (Id c)) = Left (c, K2 ())
-  left (Right (K2 (), j)) = Right $ Id j
-  type DissectionContainer Id = One2
-
+main :: IO ()
 main = do
-  putStrLn . show $ lfoldr (+) 0 $ list2listf [1..4]
-  putStrLn $ lfoldr (\a b -> show a ++ b) "." $ list2listf [1..4]
-  let exp val add = add (val 1) (add (add (val 2) (val 3)) (val 4))
-  let exp0 = exp val0 add0
+  putStrLn . show $ lfoldr (+) 0 $ list2listf [1..4 :: Int]
+  putStrLn $ lfoldr (\a b -> show a ++ b) "." $ list2listf [1..4 :: Int]
+  let expr val add = add (val 1) (add (add (val 2) (val 3)) (val 4))
+  let exp0 = expr val0 add0
   putStrLn $ "0: " ++ pp0 exp0 ++ "=" ++ show (eval0 exp0)
-  let exp1 = exp val1 add1
+  let exp1 = expr val1 add1
   putStrLn $ "1: " ++ pp1 exp1 ++ "=" ++ show (eval1 exp1)
