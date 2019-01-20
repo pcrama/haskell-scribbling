@@ -102,8 +102,12 @@ val1 = Fix . L1 . K1
 add1 :: Expr1 -> Expr1 -> Expr1
 add1 x y = Fix . R1 $ Prd1 (Id x) (Id y)
 
+-- tcata is cata re-expressed with fmap
+tcata :: Diss p a (Fix p) => (p a -> a) -> Fix p -> a
+tcata f = f . tmap (tcata f) . unFix
+
 eval1 :: Expr1 -> Int
-eval1 = cata smallEval
+eval1 = tcata smallEval
   where smallEval (Val1 v) = v
         smallEval (Add1 x y) = x + y
 
@@ -288,6 +292,11 @@ instance (Diss p c j, Diss q c j) => Diss (Prd1 p q) c j where
               Right pj -> Right $ Prd1 pj qj
   type DissectionContainer (Prd1 p q) = Sum2 (Prd2 (DissectionContainer p) (AllJokers q))
                                              (Prd2 (AllClowns p) (DissectionContainer q))
+
+tmap :: Diss p c j => (j -> c) -> p j -> p c
+tmap f = continue . right . Left
+  where continue (Left (j, pcj)) = continue $ right $ Right (pcj, f j)
+        continue (Right pc) = pc
 
 main :: IO ()
 main = do
