@@ -197,72 +197,95 @@ instance Diss Id c j where
   type DissectionContainer Id = One2
 
 instance (Diss p c j, Diss q c j) => Diss (Sum1 p q) c j where
-  right (Left (L1 pj)) = case right $ Left pj of
-    Left (j, pcj1) -> Left (j, L2 pcj1)
-    Right pc -> Right $ L1 pc
-  right (Left (R1 qj)) = case right $ Left qj of
-    Left (j, qcj) -> Left (j, R2 qcj)
-    Right qc -> Right $ R1 qc
-  right (Right (L2 pcj, c)) = case right $ Right (pcj, c) of
-    Left (j, pcj1) -> Left (j, L2 pcj1)
-    Right pc -> Right $ L1 pc
-  right (Right (R2 qcj, c)) = case right $ Right (qcj, c) of
-    Left (j, qcj1) -> Left (j, R2 qcj1)
-    Right pc -> Right $ R1 pc
-  left (Left (L1 pc)) = case left $ Left pc of
-    Left (c, pcj) -> Left (c, L2 pcj)
-    Right pj -> Right $ L1 pj
-  left (Left (R1 qc)) = case left $ Left qc of
-    Left (c, qcj) -> Left (c, R2 qcj)
-    Right qj -> Right $ R1 qj
-  left (Right (L2 pcj, j)) = case left $ Right (pcj, j) of
-    Left (c, pcj1) -> Left (c, L2 pcj1)
-    Right pj -> Right $ L1 pj
-  left (Right (R2 qcj, j)) = case left $ Right (qcj, j) of
-    Left (c, qcj1) -> Left (c, R2 qcj1)
-    Right qj -> Right $ R1 qj
+  right = \case
+      Left (L1 pj) -> repackP $ Left pj
+      Right (L2 pcj, c) -> repackP $ Right (pcj, c)
+      Left (R1 qj) -> repackQ $ Left qj
+      Right (R2 qcj, c) -> repackQ $ Right (qcj, c)
+    where repackP = repackSumAsP right
+          repackQ = repackSumAsQ right
+  left = \case
+      Left (L1 pc) -> repackP $ Left pc
+      Right (L2 pcj, j) -> repackP $ Right (pcj, j)
+      Left (R1 qc) -> repackQ $ Left qc
+      Right (R2 qcj, j) -> repackQ $ Right (qcj, j)
+    where repackP = repackSumAsP left
+          repackQ = repackSumAsQ left
   type DissectionContainer (Sum1 p q) = Sum2 (DissectionContainer p) (DissectionContainer q)
 
+-- Probably only useful as auxiliary function for the Diss (Sum p q) x
+-- y instance, but I don't know how to make it more local.  The type
+-- signature is made more specialized than needed on purpose to make
+-- it clearer.  c1 can't be c & j1 can't be j because repackSumAsP
+-- will be used with left and right.
+repackSumAsP :: (Diss p c j, Diss q c j)
+             => (Either (p t) (DissectionContainer p c j, z)
+                 -> Either (j1, DissectionContainer p c j) (p c1))
+             -> (Either (p t) (DissectionContainer p c j, z))
+             -> Either (j1, Sum2 (DissectionContainer p)
+                                (DissectionContainer q)
+                                c
+                                j)
+                       (Sum1 p q c1)
+repackSumAsP f x = case f x of
+  Left (j, pcj) -> Left (j, L2 pcj)
+  Right pc -> Right $ L1 pc
+
+-- Probably only useful as auxiliary function for the Diss (Sum p q) x
+-- y instance, but I don't know how to make it more local.  The type
+-- signature is made more specialized than needed on purpose to make
+-- it clearer.  c1 can't be c & j1 can't be j because repackSumAsP
+-- will be used with left and right.
+--
+-- Most general type signature (proposed by ghc):
+-- repackSumAsQ :: (a -> Either (t, q x y) (q1 x1))
+--              -> a
+--              -> Either (t, Sum2 p q x y) (Sum1 p1 q1 x1)
+repackSumAsQ :: (Diss p c j, Diss q c j)
+             => (Either (q t) (DissectionContainer q c j, z)
+                 -> Either (j1, DissectionContainer q c j) (q c1))
+             -> (Either (q t) (DissectionContainer q c j, z))
+             -> Either (j1, Sum2 (DissectionContainer p)
+                                (DissectionContainer q)
+                                c
+                                j)
+                       (Sum1 p q c1)
+repackSumAsQ f x = case f x of
+  Left (j, qcj) -> Left (j, R2 qcj)
+  Right qc -> Right $ R1 qc
+
 instance (Diss p c j, Diss q c j) => Diss (Prd1 p q) c j where
-  -- Only jokers in Prd1 -> start with first component of Prd1
-  right (Left (Prd1 pj qj)) = case right $ Left pj of
-    -- a Joker and dissection of pj -> return Joker & repackage in Prd2
-    Left (j, pcj) -> Left (j, L2 $ Prd2 pcj (AllJokers qj))
-    -- there were no jokers in pj -> look for one in second component of Prd1
-    Right pc -> case right $ Left qj of
-      -- a Joker & dissection of qj -> return Joker & repackage in Prd2
-      Left (j, qcj) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj)
-      -- there were no Jokers in qj -> return Prd1 of Clowns only
-      Right qc -> Right $ Prd1 pc qc
-  -- Dissection of first component -> continue dissecting it
-  right (Right (L2 (Prd2 pcj (AllJokers qj)), c)) = case right $ Right (pcj, c) of
-    -- a Joker & continued dissection of pcj -> return Joker & repackage
-    Left (j, pcj1) -> Left (j, L2 $ Prd2 pcj1 (AllJokers qj))
-    -- there were no Jokers in pj -> look for one in second component of Prd1
-    Right pc -> case right $ Left qj of
-      -- a Joker & dissection of qj -> return Joker & repackage in Prd2
-      Left (j, qcj) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj)
-      -- there were no Jokers in qj -> return Prd1 of Clowns only
-      Right qc -> Right $ Prd1 pc qc
-  -- Dissection of second component -> continue dissecting it
-  right (Right (R2 (Prd2 (AllClowns pc) qcj), c)) = case right $ Right (qcj, c) of
-    -- a Joker & continued dissection of qcj -> return Joker & repackage in Prd2
-    Left (j, qcj1) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj1)
-    -- no Jokers left in qcj -> return Prd1 of Clowns only
-    Right qc -> Right $ Prd1 pc qc
-  left (Left (Prd1 pc qc)) = case left $ Left qc of
-    Left (c, qcj) -> Left (c, R2 $ Prd2 (AllClowns pc) qcj)
-    Right qj -> case left $ Left pc of
-      Left (c, pcj) -> Left $ (c, L2 $ Prd2 pcj (AllJokers qj))
-      Right pj -> Right $ Prd1 pj qj
-  left (Right (R2 (Prd2 (AllClowns pc) qcj), j)) = case left $ Right (qcj, j) of
-    Left (c, qcj1) -> Left (c, R2 $ Prd2 (AllClowns pc) qcj1)
-    Right qj -> case left $ Left pc of
-      Left (c, pcj) -> Left (c, L2 $ Prd2 pcj $ AllJokers qj)
-      Right pj -> Right $ Prd1 pj qj
-  left (Right (L2 (Prd2 pcj (AllJokers qj)), j)) = case left $ Right (pcj, j) of
-    Left (c, pcj1) -> Left (c, L2 $ Prd2 pcj1 $ AllJokers qj)
-    Right pj -> Right $ Prd1 pj qj
+  right = \case
+      -- Only jokers in Prd1 -> start with first component of Prd1
+      Left (Prd1 pj qj) -> dissect1stComponent qj $ Left pj
+      -- Dissection of first component -> continue dissecting it
+      Right (L2 (Prd2 pcj (AllJokers qj)), c) -> dissect1stComponent qj $ Right (pcj, c)
+      -- Dissection of second component -> continue dissecting it
+      Right (R2 (Prd2 (AllClowns pc) qcj), c) -> case right $ Right (qcj, c) of
+        -- a Joker & continued dissection of qcj -> return Joker & repackage in Prd2
+        Left (j, qcj1) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj1)
+        -- no Jokers left in qcj -> return Prd1 of Clowns only
+        Right qc -> Right $ Prd1 pc qc
+    where dissect1stComponent qj x = case right x of
+            -- a Joker and dissection of pj -> return Joker & repackage in Prd2
+            Left (j, pcj) -> Left (j, L2 $ Prd2 pcj (AllJokers qj))
+            -- there were no jokers in pj -> look for one in second component of Prd1
+            Right pc -> case right $ Left qj of
+              -- a Joker & dissection of qj -> return Joker & repackage in Prd2
+              Left (j, qcj) -> Left (j, R2 $ Prd2 (AllClowns pc) qcj)
+              -- there were no Jokers in qj -> return Prd1 of Clowns only
+              Right qc -> Right $ Prd1 pc qc
+  left = goLeft
+    where goLeft (Left (Prd1 pc qc)) = q_then_p pc $ Left qc
+          goLeft (Right (R2 (Prd2 (AllClowns pc) qcj), j)) = q_then_p pc $ Right (qcj, j)
+          goLeft (Right (L2 (Prd2 pcj (AllJokers qj)), j)) = case left $ Right (pcj, j) of
+            Left (c, pcj1) -> Left (c, L2 $ Prd2 pcj1 $ AllJokers qj)
+            Right pj -> Right $ Prd1 pj qj
+          q_then_p pc q = case left q of
+            Left (c, qcj) -> Left (c, R2 $ Prd2 (AllClowns pc) qcj)
+            Right qj -> case left $ Left pc of
+              Left (c, pcj) -> Left $ (c, L2 $ Prd2 pcj (AllJokers qj))
+              Right pj -> Right $ Prd1 pj qj
   type DissectionContainer (Prd1 p q) = Sum2 (Prd2 (DissectionContainer p) (AllJokers q))
                                              (Prd2 (AllClowns p) (DissectionContainer q))
 
