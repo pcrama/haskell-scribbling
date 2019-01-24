@@ -99,7 +99,10 @@ instance (Functor p, Functor q) => Functor (Prd1 p q) where
 type ExprP1 = Sum1 (K1 Int) (Prd1 Id Id)
 type Expr1 = Fix ExprP1
 
+pattern Val1 :: Int -> ExprP1 t
 pattern Val1 v = L1 (K1 v)
+
+pattern Add1 :: t -> t -> ExprP1 t
 pattern Add1 x y = R1 (Prd1 (Id x) (Id y))
 
 val1 :: Int -> Expr1
