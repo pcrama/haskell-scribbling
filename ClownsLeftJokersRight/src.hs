@@ -39,6 +39,12 @@ instance Functor (ListF a) where
 
 type List a = Fix (ListF a)
 
+listFsum :: List Int -> Int
+listFsum = cata summer
+  where summer :: ListF Int Int -> Int
+        summer LFNil = 0
+        summer (LFCons a b) = a + b
+
 lfoldr :: (a -> b -> b) -> b -> List a -> b
 lfoldr f base = cata f'
   where f' LFNil = base
@@ -102,9 +108,36 @@ val1 = Fix . L1 . K1
 add1 :: Expr1 -> Expr1 -> Expr1
 add1 x y = Fix . R1 $ Prd1 (Id x) (Id y)
 
--- tcata is cata re-expressed with fmap
+-- tcata is cata re-expressed with tmap, made fully tail recursive
 tcata :: Diss p a (Fix p) => (p a -> a) -> Fix p -> a
-tcata f = f . tmap (tcata f) . unFix
+-- This would be cheating: it still isn't fully tail recursive (in tcata)
+-- tcata f = f . tmap (tcata f) . unFix
+--
+-- Use `right' to replace Fix p (the jokers) by a (the clowns pushed
+-- to the left).  Once all Fix p in p are replaced, we have a p a,
+-- that can be made into an a by f.  The recursion is managed by
+-- explicitly managing the stack.
+--
+-- `right', specialized for our case:
+-- right :: Either (p (Fix p)) (DissectionContainer p a (Fix p), a)
+--       -> Either (Fix p, DissectionContainer p a (Fix p)) (p a)
+tcata f fpfp = load f fpfp []
+  where load :: Diss p a (Fix p) => (p a -> a) -> Fix p -> [DissectionContainer p a (Fix p)] -> a
+        load f (Fix pfp) = next f (right $ Left pfp)
+        next :: Diss p a (Fix p)
+             => (p a -> a)
+             -> Either (Fix p, DissectionContainer p a (Fix p)) (p a)
+             -> [DissectionContainer p a (Fix p)]
+             -> a
+        next f (Left (fpfp, pcj)) stk = load f fpfp $ pcj:stk
+        next f (Right pa) stk = unload f pa stk
+        unload :: Diss p a (Fix p)
+               => (p a -> a)
+               -> p a
+               -> [DissectionContainer p a (Fix p)]
+               -> a
+        unload f pa [] = f pa
+        unload f pa (pcj:stk) = next f (right $ Right (pcj, f pa)) stk
 
 eval1 :: Expr1 -> Int
 eval1 = tcata smallEval
@@ -300,6 +333,7 @@ tmap f = continue . right . Left
 
 main :: IO ()
 main = do
+  putStrLn . show $ listFsum $ list2listf [1..6 :: Int]
   putStrLn . show $ lfoldr (+) 0 $ list2listf [1..4 :: Int]
   putStrLn $ lfoldr (\a b -> show a ++ b) "." $ list2listf [1..4 :: Int]
   let expr val add = add (val 1) (add (add (val 2) (val 3)) (val 4))
