@@ -228,7 +228,7 @@ instance Diss (K1 a) c j where
   right (Right (K2 z, _)) = magic z
   left (Left (K1 a)) = Right $ K1 a
   left (Right (K2 z, _)) = magic z
-  type DissectionContainer (K1 a) = K2 Zero
+  type DissectionContainer (K1 a) = Zero2
   plug _ (K2 z) = K1 $ magic z
 
 instance Diss Id c j where
