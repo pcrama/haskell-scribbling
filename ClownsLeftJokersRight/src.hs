@@ -221,6 +221,7 @@ class (Functor p, Bifunctor (DissectionContainer p)) => Diss p c j where
        -> Either (c, DissectionContainer p c j)
        --  -or-  plugged last hole with joker, only jokers left
                  (p j)
+  plug :: c ~ j => c -> DissectionContainer p c c -> p c
 
 instance Diss (K1 a) c j where
   right (Left (K1 a)) = Right $ K1 a
@@ -228,6 +229,7 @@ instance Diss (K1 a) c j where
   left (Left (K1 a)) = Right $ K1 a
   left (Right (K2 z, _)) = magic z
   type DissectionContainer (K1 a) = K2 Zero
+  plug _ (K2 z) = K1 $ magic z
 
 instance Diss Id c j where
   right (Left (Id j)) = Left (j, K2 ())
@@ -235,6 +237,7 @@ instance Diss Id c j where
   left (Left (Id c)) = Left (c, K2 ())
   left (Right (K2 (), j)) = Right $ Id j
   type DissectionContainer Id = One2
+  plug x _ = Id x
 
 instance (Diss p c j, Diss q c j) => Diss (Sum1 p q) c j where
   right = \case
@@ -252,6 +255,8 @@ instance (Diss p c j, Diss q c j) => Diss (Sum1 p q) c j where
     where repackP = repackSumAsP left
           repackQ = repackSumAsQ left
   type DissectionContainer (Sum1 p q) = Sum2 (DissectionContainer p) (DissectionContainer q)
+  plug x (L2 pcj) = L1 $ plug x pcj
+  plug x (R2 qcj) = R1 $ plug x qcj
 
 -- Probably only useful as auxiliary function for the Diss (Sum p q) x
 -- y instance, but I don't know how to make it more local.  The type
@@ -328,6 +333,9 @@ instance (Diss p c j, Diss q c j) => Diss (Prd1 p q) c j where
               Right pj -> Right $ Prd1 pj qj
   type DissectionContainer (Prd1 p q) = Sum2 (Prd2 (DissectionContainer p) (AllJokers q))
                                              (Prd2 (AllClowns p) (DissectionContainer q))
+  plug x = \case
+    L2 (Prd2 pcj (AllJokers q)) -> Prd1 (plug x pcj) q
+    R2 (Prd2 (AllClowns p) qcj) -> Prd1 p $ plug x qcj
 
 tmap :: Diss p c j => (j -> c) -> p j -> p c
 tmap f = continue . right . Left
