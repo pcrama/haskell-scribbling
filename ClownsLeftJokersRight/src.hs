@@ -2,6 +2,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts, TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 data ExprP0 a
   = Val0 Int
@@ -341,6 +342,29 @@ tmap :: Diss p c j => (j -> c) -> p j -> p c
 tmap f = continue . right . Left
   where continue (Left (j, pcj)) = continue $ right $ Right (pcj, f j)
         continue (Right pc) = pc
+
+zUp, zDown, zLeft, zRight :: Diss p (Fix p) (Fix p)
+  => (Fix p, [DissectionContainer p (Fix p) (Fix p)])
+  -> Maybe (Fix p, [DissectionContainer p (Fix p) (Fix p)])
+
+zUp (_, []) = Nothing
+zUp (fpfp, pcj:stk) = Just (Fix $ plug fpfp pcj, stk)
+
+zDown (Fix pfp, stk) = case right $ Left pfp of
+  Left (fpfp, pcj) -> Just (fpfp, pcj:stk)
+  Right _ -> Nothing
+
+zLeft (_, []) = Nothing
+zLeft (fpfp, pcj:stk) = case left $ Right (pcj, fpfp) of
+  Left (fpfp', pcj') -> Just (fpfp', pcj':stk)
+  Right (_ :: p (Fix p)) -> Nothing
+
+zRight (_, []) = Nothing
+zRight (fpfp, pcj:stk) = case right $ Right (pcj, fpfp) of
+  Left (fpfp', pcj') -> Just (fpfp', pcj':stk)
+  -- type of ignored Right value is needed to fix type level warning,
+  -- explained in paper, but I don't quite understand, unfortunately.
+  Right (_ :: p (Fix p)) -> Nothing
 
 main :: IO ()
 main = do
