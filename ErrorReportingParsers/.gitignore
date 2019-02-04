@@ -1,3 +1,4 @@
 .stack-work/
 ErrorReportingParsers.cabal
-*~
+app/Main
+test/Spec
