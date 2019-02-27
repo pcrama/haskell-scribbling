@@ -28,8 +28,6 @@ import Control.Applicative (Alternative(..), some, many)
 import Control.Monad.State (StateT(..), MonadState(..), lift)
 import Control.Monad.Trans.Maybe (MaybeT(..))
 
-import TheirMonadError (MonadError(..))
-
 import MTParser1
   ( AST(..)
   , Switch(..)
@@ -150,17 +148,20 @@ lambda ed =
     (cut (eLamParam ed) $
      pure ALambda                   <*>
      (opencurly                      *>
-      (cut (eLamDupe ed)
-         $ check distinct
-               $ many symbol)       <*
+      distinctSymbols ed            <*
       (cut (eLamPClose ed) closecurly)) <*>
      (cut (eLamBody ed)
            $ some (form ed)))
   where distinct :: (Eq a, Foldable f) => f a -> Bool
         distinct = fst . foldr compareAndStore (True, [])
-          where compareAndStore x (False, _) = (False, [])
+          where compareAndStore _ (False, _) = (False, [])
                 compareAndStore x (True, []) = (True, [x])
                 compareAndStore x (True, xs) = (not $ x `elem` xs, x:xs)
+        distinctSymbols :: Monoid e => ErrorDict e -> Parser e Char [String]
+        distinctSymbols e = do
+          syms <- many symbol
+          cut (eLamDupe e) $ check distinct (return syms)
+
 
 form ed = application ed <|> special ed <|> (fmap ASymbol symbol)
 

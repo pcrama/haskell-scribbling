@@ -135,7 +135,7 @@ m3TestDataErrorReporting =
   , ("{define\n (a b c)}", Left (M2.eDefSym M2.parserErrorDict, M3.Pos { M3.row = 2, M3.col = 2 }))
   , ("{define a}", Left (M2.eDefForm M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 10 }))
   , ("{lambda (a b c)}", Left (M2.eLamParam M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 9 }))
-  , ("{lambda {a b a} (c d)}", Left (M2.eLamDupe M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 10 }))
+  , ("{lambda {a b a} (c d)}", Left (M2.eLamDupe M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 15 }))
   , -- unfortunately, the starting position of the list is recorded, but for
     -- this error, it would be better to have the first non-symbol.
     ("{lambda {a \n()} (c d)}", Left (M2.eLamPClose M2.parserErrorDict, M3.Pos { M3.row = 2, M3.col = 1
@@ -145,6 +145,11 @@ m3TestDataErrorReporting =
   , ("{define x y", Left (M2.eSpecClose M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 12 }))
   , ("{defin x y}", Left (M2.eSpecial M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 2 }))
   , ("a,b", Left (M2.eWoof M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 2 }))
+  , (" abc 123 ", Left (M2.eWoof M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 6 }))
+  , (" (((abc ()))) ", Left (M2.eAppOper M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 10 }))
+  , (" (((abc () ", Left (M2.eAppOper M2.parserErrorDict, M3.Pos { M3.row = 1, M3.col = 10 }))
+  , ("{define const \n  {lambda {x x} \n    x}"
+    , Left (M2.eLamDupe M2.parserErrorDict, M3.Pos { M3.row = 2, M3.col = 15 }))
   ]
 
 m2ToM1Example :: (i, Either e (Maybe a)) -> (i, Maybe a)
