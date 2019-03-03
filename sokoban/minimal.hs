@@ -1,14 +1,21 @@
 import Control.Monad (forM_)
+import Data.Maybe (catMaybes)
 
 data Direction = Ri | Up | Le | Do
   deriving (Show, Eq)
 
-data Tile = Free | Wall | Crate
+data Occupied = CrateOnFree | CrateOnTarget
+  deriving (Show, Eq)
+
+data Free = Free | Target
+  deriving (Show, Eq)
+
+data Tile = F Free | Wall | O Occupied
   deriving (Show, Eq)
 
 type Pos = (Int, Int)
 
-data Map = Map { _rows :: Int, _cols :: Int, _moveMap :: Pos -> Tile, _targets :: [Pos] }
+data Map = Map { _rows :: Int, _cols :: Int, _moveMap :: Pos -> Tile }
 
 unconstrainedMove :: Pos -> Direction -> Pos
 unconstrainedMove (x, y) Ri = (x + 1, y)
@@ -21,26 +28,32 @@ tile = ($) . _moveMap
 
 move :: Map -> Pos -> Direction -> Maybe (Map, Pos)
 move mp p dir = case tile mp newPosition of
-    Free -> Just (mp, newPosition)
-    Wall -> Nothing
-    Crate -> case tile mp newCratePosition of
-      Free -> Just (moveTile mp newPosition newCratePosition, newPosition)
-      Wall -> Nothing
-      Crate -> Nothing
+    F _ -> Just (mp, newPosition) -- nothing to push, just move
+    Wall -> Nothing -- can't walk into wall
+    O fromOccupied -> push fromOccupied -- a crate -> see if it can be pushed
   where newPosition = unconstrainedMove p dir
         newCratePosition = unconstrainedMove newPosition dir
+        push fromOccupied = case tile mp newCratePosition of
+          F toFree -> Just (moveCrate mp newPosition fromOccupied newCratePosition toFree
+                           , newPosition)
+          Wall -> Nothing -- can't push crate through wall
+          O _ -> Nothing -- can't push more than 1 crate at a time
 
-moveTile :: Map -> Pos -> Pos -> Map
-moveTile mp from to = mp { _moveMap = newMap }
+moveCrate :: Map -> Pos -> Occupied -> Pos -> Free -> Map
+moveCrate mp from fromOccupied to toFree = mp { _moveMap = newMap }
   where newMap p
-          | from == p = Free
-          | to == p = tile mp from
+          | from == p = case fromOccupied of
+              CrateOnFree -> F Free
+              CrateOnTarget -> F Target
+          | to == p = case toFree of
+                        Free -> O CrateOnFree
+                        Target -> O CrateOnTarget
           | otherwise = tile mp p
 
 won :: Map -> Bool
-won map_@Map { _targets = _targets } = and $ map occupiedByCrate _targets
-  where occupiedByCrate pos = tile map_ pos == Crate
-
+won mp@(Map { _rows = rows, _cols = cols }) = and [and $ [tile mp (col, row) /= F Target
+                                                         | col <- [0..cols - 1]]
+                                                  | row <- [0..rows - 1]]
 
 data PlayerCommand = Move Direction | Quit | Pass
 
@@ -58,28 +71,57 @@ getPlayerCommand :: IO PlayerCommand
 getPlayerCommand = do
   c <- getChar
   return $ case c of
-    'h' -> Move Le
-    'j' -> Move Do
-    'k' -> Move Up
-    'l' -> Move Ri
+    'a' -> Move Le
+    's' -> Move Do
+    'w' -> Move Up
+    'd' -> Move Ri
     'q' -> Quit
     _ -> Pass
 
-playLevel :: Map -> Pos -> IO Bool
-playLevel mp p = do
-  drawMap mp p
+getPlayerDecision :: String -> IO Bool
+getPlayerDecision p = do
+  putStr p
+  putStrLn " (y/n) "
+  c <- getChar
+  case c of
+    'y' -> return True
+    'Y' -> return True
+    'n' -> return False
+    'N' -> return False
+    _ -> getPlayerDecision p
+
+playLevel :: Monad m => Map -> Pos -> m PlayerCommand -> (Map -> Pos -> m ()) -> m Bool
+playLevel mp p getCmd draw = do
+  draw mp p
   if won mp
     then return True
     else do
-    mbMpP <- playerTurn mp p getPlayerCommand
+    mbMpP <- playerTurn mp p getCmd
     case mbMpP of
-      Just (newMap, newPos) -> playLevel newMap newPos
+      Just (newMap, newPos) -> playLevel newMap newPos getCmd draw
       Nothing -> return False
 
-enumerate :: [x] -> [(Int, x)]
-enumerate = go 0
-  where go _ [] = []
-        go i (x:xs) = (i, x):go (i + 1) xs
+playGame :: Monad m
+         => [(Map, Pos)]
+         -> m PlayerCommand
+         -> (Map -> Pos -> m ())
+         -> (String -> m Bool)
+         -> m Bool
+playGame [] _ _ _ = return True
+playGame allLevels@((mp, startPos):otherLevels) getCmd draw prompt = do
+  result <- playLevel mp startPos getCmd draw
+  case (result, null otherLevels) of
+    (True, False) -> do
+      q <- prompt "Congratulations.  Next level?"
+      case q of
+        True -> playGame otherLevels getCmd draw prompt
+        False -> return True
+    (True, True) -> return True
+    (False, _) -> do
+      q <- prompt "Try this level again?"
+      case q of
+        True -> playGame allLevels getCmd draw prompt
+        False -> return False
 
 makeMap :: [String] -> Maybe Map
 makeMap xs =
@@ -97,37 +139,48 @@ makeMap xs =
                        then Wall
                        else case (xs !! y) !! x of
                          '#' -> Wall
-                         'X' -> Crate
-                         _ -> Free
-        , _targets = [(x, y)
-                     | (y, row) <- enumerate xs
-                     , (x, ch) <- enumerate row
-                     , ch == '_'] }
+                         'X' -> O CrateOnFree
+                         '_' -> F Target
+                         _ -> F Free }
 
 drawMap :: Map -> Pos -> IO ()
-drawMap mp@(Map { _targets = targets, _rows = rows, _cols = cols }) pos = do
+drawMap mp@(Map { _rows = rows, _cols = cols }) pos = do
   forM_ [0..rows - 1] $ \r -> do
     forM_ [0..cols - 1] $ \c -> do
       let spot = (c, r)
-      putChar $ case (spot == pos, spot `elem` targets, tile mp spot) of
-        -- TODO? (True, _, Wall) & (True, _, Crate) should be
+      putChar $ case (spot == pos, tile mp spot) of
+        -- TODO? (True, Wall) & (True, O _) should be
         -- forbidden.  Are silently ignored here
-        (True, _, _) -> '*'
-        (False, True, Free) -> '_'
-        (False, False, Free) -> ' '
-        (False, _, Wall) -> '#'
-        (False, True, Crate) -> 'x'
-        (False, False, Crate) -> 'X'
+        (True, _) -> '*'
+        (False, F Target) -> '_'
+        (False, F Free) -> ' '
+        (False, Wall) -> '#'
+        (False, O CrateOnTarget) -> 'x'
+        (False, O CrateOnFree) -> 'X'
     putChar '\n'
 
 main :: IO ()
 main = do
-  let Just mp = makeMap ["##########"
-                        ,"# #  X  _#"
-                        ,"# X    # #"
-                        ,"#     _# #"
-                        ,"##########"]
-  r <- playLevel mp (1, 1)
+  let levels = catMaybes $ map makeMap [
+        ["###############"
+        ,"# #  X  _     #"
+        ,"#             #"
+        ,"# X        #  #"
+        ,"# X       _#_ #"
+        ,"###############"]
+       ,["##############################"
+        ,"#   #       #       #        #"
+        ,"#   #   X   #   X   #   X    #"
+        ,"#   #       #       #        #"
+        ,"#   #   #   #   #   #   #   _#"
+        ,"#       #       #       #  _ #"
+        ,"#   X   #   X   #   X   # _ _#"
+        ,"#       #       #       #_ _ #"
+        ,"##############################"]]
+  r <- playGame (map (\lvl -> (lvl, (1, 1))) levels)
+                getPlayerCommand
+                drawMap
+                getPlayerDecision
   putStrLn $ if r then "Congratulations" else "Better luck next time"
 
 
