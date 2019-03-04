@@ -1,5 +1,6 @@
 import UI.NCurses
 import Control.Monad (forM_)
+import Data.List (findIndices)
 import Data.Maybe (catMaybes)
 
 data Direction = Ri | Up | Le | Do
@@ -132,13 +133,18 @@ makeMap :: [String] -> Maybe Map
 makeMap xs =
   let rows = length xs
       len = length $ head xs
-      pRow = 1
-      pCol = 1
   in case (rows, all (== len) $ map length $ tail xs) of
     (0, _) -> Nothing
     (_, False) -> Nothing
-    (_, True) -> Just $
-      Map {
+    (_, True) -> do
+      let keepRowsWithStar (_rowIdx, colIdxs) = not $ null colIdxs
+      let enumerate = zip [0..]
+      let starPositions = filter keepRowsWithStar $ enumerate $ map (findIndices (=='*')) xs
+      (pCol, pRow) <- case starPositions of
+                        [] -> return (1, 1) -- default start position
+                        [(r, [c])] -> return (c, r) -- only one star -> pick its coordinates
+                        _ -> fail "There should be 0 or 1 '*' in map"
+      return $ Map {
         _rows = rows
         , _cols = len
         , _player = (pCol, pRow)
@@ -176,7 +182,7 @@ levels = catMaybes $ map makeMap [
         ,"#                            #"
         ,"#           ### _            #"
         ,"#                            #"
-        ,"#                            #"
+        ,"#            *               #"
         ,"#    X           X           #"
         ,"#                            #"
         ,"#    #########               #"
@@ -200,11 +206,11 @@ levels = catMaybes $ map makeMap [
         ,"#                  _#_ #"
         ,"########################"]
         ,["##############################"
-        ,"#   #       #       #        #"
-        ,"#   #   X   #   X   #   X    #"
+        ,"# * #       #       #        #"
+        ,"# X #   X   #   X   #   X    #"
         ,"#   #       #       #        #"
         ,"#   #   #   #   #   #   #   _#"
-        ,"#       #       #       #  _ #"
+        ,"#       #       #       #_ _ #"
         ,"#   X   #   X   #   X   # _ _#"
         ,"#       #       #       #_ _ #"
         ,"##############################"]]
