@@ -16,7 +16,7 @@ data Tile = F Free | Wall | O Occupied
 
 type Pos = (Int, Int)
 
-data Map = Map { _rows :: Int, _cols :: Int, _moveMap :: Pos -> Tile, _player :: Pos }
+data Map = Map { _rows :: Int, _cols :: Int, _moveMap :: Pos -> Tile, _player :: Pos, _undo :: Maybe Map }
 
 unconstrainedMove :: Pos -> Direction -> Pos
 unconstrainedMove (x, y) Ri = (x + 1, y)
@@ -35,12 +35,13 @@ move mp@(Map { _player = p }) dir = case tile mp newPosition of
   where newPosition = unconstrainedMove p dir
         newCratePosition = unconstrainedMove newPosition dir
         push fromOccupied = case tile mp newCratePosition of
-          F toFree -> Just $ moveCrate mp newPosition fromOccupied newCratePosition toFree
+          F toFree -> let movedCrate = moveCrate mp newPosition fromOccupied newCratePosition toFree
+                      in Just $ movedCrate { _player = newPosition }
           Wall -> Nothing -- can't push crate through wall
           O _ -> Nothing -- can't push more than 1 crate at a time
 
 moveCrate :: Map -> Pos -> Occupied -> Pos -> Free -> Map
-moveCrate mp from fromOccupied to toFree = mp { _moveMap = newMap, _player = from }
+moveCrate mp from fromOccupied to toFree = mp { _moveMap = newMap }
   where newMap p
           | from == p = case fromOccupied of
               CrateOnFree -> F Free
@@ -55,15 +56,18 @@ won mp@(Map { _rows = rows, _cols = cols }) = and [and $ [tile mp (col, row) /= 
                                                          | col <- [0..cols - 1]]
                                                   | row <- [0..rows - 1]]
 
-data PlayerCommand = Move Direction | Quit | Pass
+data PlayerCommand = Move Direction | Quit | Pass | Undo
 
 playerTurn :: Monad m => Map -> m PlayerCommand -> m (Maybe Map)
 playerTurn mp getCommand = do
   cmd <- getCommand
   case cmd of
+    Undo -> case _undo mp of
+      Nothing -> return $ Just mp -- nothing to undo
+      Just x -> return $ Just x
     Quit -> return Nothing
     Move d -> case move mp d of
-      Just newMapAndPos -> return $ Just newMapAndPos
+      Just newMapAndPos -> return $ Just newMapAndPos { _undo = Just mp }
       Nothing -> return $ Just mp -- Ignore impossible movement
     Pass -> return $ Just mp
 
@@ -75,6 +79,7 @@ getPlayerCommand = do
     's' -> Move Do
     'w' -> Move Up
     'd' -> Move Ri
+    'u' -> Undo
     'q' -> Quit
     _ -> Pass
 
@@ -137,6 +142,7 @@ makeMap xs =
         _rows = rows
         , _cols = len
         , _player = (pCol, pRow)
+        , _undo = Nothing
         , _moveMap = \(x, y) ->
                        if x < 0 || x >= len || y < 0 || y >= rows
                        then Wall
@@ -223,6 +229,7 @@ waitFor w p = loop where
 
 evalPlayerCommand :: Event -> Maybe PlayerCommand
 evalPlayerCommand (EventCharacter 'q') = Just Quit
+evalPlayerCommand (EventCharacter 'u') = Just Undo
 evalPlayerCommand (EventCharacter 'h') = Just $ Move Le
 evalPlayerCommand (EventCharacter 'j') = Just $ Move Do
 evalPlayerCommand (EventCharacter 'k') = Just $ Move Up
