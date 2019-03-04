@@ -220,10 +220,13 @@ plain = do
 waitFor :: Window -> (Event -> Maybe a) -> Curses a
 waitFor w p = loop where
   loop = do
-    ev <- getEvent w Nothing
+    ev <- tryCurses $ getEvent w Nothing
     case ev of
-      Nothing -> loop
-      Just ev' -> case p ev' of
+      -- TODO: swallowing all exceptions all the time while waiting for input
+      -- seems ignorant.
+      Left _ -> loop
+      Right Nothing -> loop
+      Right (Just ev') -> case p ev' of
         Nothing -> loop
         Just a -> return a
 
