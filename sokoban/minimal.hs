@@ -1,3 +1,4 @@
+import UI.NCurses
 import Control.Monad (forM_)
 import Data.Maybe (catMaybes)
 
@@ -159,16 +160,25 @@ drawMap mp@(Map { _rows = rows, _cols = cols }) pos = do
         (False, O CrateOnFree) -> 'X'
     putChar '\n'
 
-main :: IO ()
-main = do
-  let levels = catMaybes $ map makeMap [
-        ["###############"
-        ,"# #  X  _     #"
-        ,"#             #"
-        ,"# X        #  #"
-        ,"# X       _#_ #"
-        ,"###############"]
-       ,["##############################"
+levels = catMaybes $ map (fmap (\lvl -> (lvl, (1, 1))) . makeMap) [
+        -- ["###############"
+        -- ,"# #  X  _     #"
+        -- ,"#             #"
+        -- ,"# X        #  #"
+        -- ,"# X       _#_ #"
+        -- ,"###############"]
+       --,
+        ["########################"
+        ,"#                      #"
+        ,"#####       #########  #"
+        ,"#   #                  #"
+        ,"# X #      #### #      #"
+        ,"#   #         X #      #"
+        ,"#   #      #### #  _#  #"
+        ,"#   #   X     X #   #_ #"
+        ,"#                  _#_ #"
+        ,"########################"]
+        ,["##############################"
         ,"#   #       #       #        #"
         ,"#   #   X   #   X   #   X    #"
         ,"#   #       #       #        #"
@@ -177,10 +187,84 @@ main = do
         ,"#   X   #   X   #   X   # _ _#"
         ,"#       #       #       #_ _ #"
         ,"##############################"]]
-  r <- playGame (map (\lvl -> (lvl, (1, 1))) levels)
+
+plain :: IO ()
+plain = do
+  r <- playGame levels
                 getPlayerCommand
                 drawMap
                 getPlayerDecision
   putStrLn $ if r then "Congratulations" else "Better luck next time"
 
+waitFor :: Window -> (Event -> Maybe a) -> Curses a
+waitFor w p = loop where
+  loop = do
+    ev <- getEvent w Nothing
+    case ev of
+      Nothing -> loop
+      Just ev' -> case p ev' of
+        Nothing -> loop
+        Just a -> return a
 
+evalPlayerCommand :: Event -> Maybe PlayerCommand
+evalPlayerCommand (EventCharacter 'q') = Just Quit
+evalPlayerCommand (EventCharacter 'h') = Just $ Move Le
+evalPlayerCommand (EventCharacter 'j') = Just $ Move Do
+evalPlayerCommand (EventCharacter 'k') = Just $ Move Up
+evalPlayerCommand (EventCharacter 'l') = Just $ Move Ri
+evalPlayerCommand (EventSpecialKey KeyLeftArrow) = Just $ Move Le
+evalPlayerCommand (EventSpecialKey KeyDownArrow) = Just $ Move Do
+evalPlayerCommand (EventSpecialKey KeyUpArrow) = Just $ Move Up
+evalPlayerCommand (EventSpecialKey KeyRightArrow) = Just $ Move Ri
+evalPlayerCommand _ = Nothing
+
+evalPlayerDecision :: Event -> Maybe Bool
+evalPlayerDecision (EventCharacter 'y') = Just True
+evalPlayerDecision (EventCharacter 'Y') = Just True
+evalPlayerDecision (EventCharacter 'n') = Just False
+evalPlayerDecision (EventCharacter 'N') = Just False
+evalPlayerDecision _ = Nothing
+
+main :: IO ()
+main = do
+    r <- runCurses $ do
+      setEcho False
+      w <- defaultWindow
+      playGame levels
+               (getPlayerCommand' w)
+               (drawMap' w)
+               (getPlayerDecision' w)
+    putStrLn $ if r then "Congratulations" else "Better luck next time"
+  where getPlayerCommand' :: Window -> Curses PlayerCommand
+        getPlayerCommand' w = waitFor w evalPlayerCommand
+        drawMap' :: Window -> Map -> Pos -> Curses ()
+        drawMap' w mp (x, y) = do
+          updateWindow w $ do
+            (winRows, winCols) <- windowSize
+            let rowOffs = (winRows - (fromIntegral $ _rows mp)) `div` 2
+            let colOffs = (winCols - (fromIntegral $ _cols mp)) `div` 2
+            let moveCursorRel x y = moveCursor (rowOffs + fromIntegral y) (colOffs + fromIntegral x)
+            clear
+            forM_ [0.._rows mp - 1] $ \row ->
+              forM_ [0.._cols mp - 1] $ \col ->
+                let drawChar c r g = do
+                      moveCursorRel c r
+                      drawString $ g:"" in
+                case tile mp (col, row) of
+                  Wall -> drawChar col row '#'
+                  F Target -> drawChar col row '_'
+                  F Free -> return ()
+                  O CrateOnFree -> drawChar col row 'X'
+                  O CrateOnTarget -> drawChar col row 'x'
+            moveCursorRel x y
+            drawString "*"
+            moveCursorRel x y
+          render
+        getPlayerDecision' :: Window -> String -> Curses Bool
+        getPlayerDecision' w p = do
+          updateWindow w $ do
+            clear
+            moveCursor 0 0
+            drawString p
+          render
+          waitFor w evalPlayerDecision
