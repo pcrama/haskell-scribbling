@@ -16,7 +16,7 @@ data Tile = F Free | Wall | O Occupied
 
 type Pos = (Int, Int)
 
-data Map = Map { _rows :: Int, _cols :: Int, _moveMap :: Pos -> Tile }
+data Map = Map { _rows :: Int, _cols :: Int, _moveMap :: Pos -> Tile, _player :: Pos }
 
 unconstrainedMove :: Pos -> Direction -> Pos
 unconstrainedMove (x, y) Ri = (x + 1, y)
@@ -27,21 +27,20 @@ unconstrainedMove (x, y) Do = (x, y + 1)
 tile :: Map -> Pos -> Tile
 tile = ($) . _moveMap
 
-move :: Map -> Pos -> Direction -> Maybe (Map, Pos)
-move mp p dir = case tile mp newPosition of
-    F _ -> Just (mp, newPosition) -- nothing to push, just move
+move :: Map -> Direction -> Maybe Map
+move mp@(Map { _player = p }) dir = case tile mp newPosition of
+    F _ -> Just $ mp { _player = newPosition } -- nothing to push, just move
     Wall -> Nothing -- can't walk into wall
     O fromOccupied -> push fromOccupied -- a crate -> see if it can be pushed
   where newPosition = unconstrainedMove p dir
         newCratePosition = unconstrainedMove newPosition dir
         push fromOccupied = case tile mp newCratePosition of
-          F toFree -> Just (moveCrate mp newPosition fromOccupied newCratePosition toFree
-                           , newPosition)
+          F toFree -> Just $ moveCrate mp newPosition fromOccupied newCratePosition toFree
           Wall -> Nothing -- can't push crate through wall
           O _ -> Nothing -- can't push more than 1 crate at a time
 
 moveCrate :: Map -> Pos -> Occupied -> Pos -> Free -> Map
-moveCrate mp from fromOccupied to toFree = mp { _moveMap = newMap }
+moveCrate mp from fromOccupied to toFree = mp { _moveMap = newMap, _player = from }
   where newMap p
           | from == p = case fromOccupied of
               CrateOnFree -> F Free
@@ -58,15 +57,15 @@ won mp@(Map { _rows = rows, _cols = cols }) = and [and $ [tile mp (col, row) /= 
 
 data PlayerCommand = Move Direction | Quit | Pass
 
-playerTurn :: Monad m => Map -> Pos -> m PlayerCommand -> m (Maybe (Map, Pos))
-playerTurn mp p getCommand = do
+playerTurn :: Monad m => Map -> m PlayerCommand -> m (Maybe Map)
+playerTurn mp getCommand = do
   cmd <- getCommand
   case cmd of
     Quit -> return Nothing
-    Move d -> case move mp p d of
+    Move d -> case move mp d of
       Just newMapAndPos -> return $ Just newMapAndPos
-      Nothing -> return $ Just (mp, p) -- Ignore impossible movement
-    Pass -> return $ Just (mp, p)
+      Nothing -> return $ Just mp -- Ignore impossible movement
+    Pass -> return $ Just mp
 
 getPlayerCommand :: IO PlayerCommand
 getPlayerCommand = do
@@ -91,26 +90,26 @@ getPlayerDecision p = do
     'N' -> return False
     _ -> getPlayerDecision p
 
-playLevel :: Monad m => Map -> Pos -> m PlayerCommand -> (Map -> Pos -> m ()) -> m Bool
-playLevel mp p getCmd draw = do
-  draw mp p
+playLevel :: Monad m => Map -> m PlayerCommand -> (Map -> m ()) -> m Bool
+playLevel mp getCmd draw = do
+  draw mp
   if won mp
     then return True
     else do
-    mbMpP <- playerTurn mp p getCmd
+    mbMpP <- playerTurn mp getCmd
     case mbMpP of
-      Just (newMap, newPos) -> playLevel newMap newPos getCmd draw
+      Just newMap -> playLevel newMap getCmd draw
       Nothing -> return False
 
 playGame :: Monad m
-         => [(Map, Pos)]
+         => [Map]
          -> m PlayerCommand
-         -> (Map -> Pos -> m ())
+         -> (Map -> m ())
          -> (String -> m Bool)
          -> m Bool
 playGame [] _ _ _ = return True
-playGame allLevels@((mp, startPos):otherLevels) getCmd draw prompt = do
-  result <- playLevel mp startPos getCmd draw
+playGame allLevels@(mp:otherLevels) getCmd draw prompt = do
+  result <- playLevel mp getCmd draw
   case (result, null otherLevels) of
     (True, False) -> do
       q <- prompt "Congratulations.  Next level?"
@@ -128,6 +127,8 @@ makeMap :: [String] -> Maybe Map
 makeMap xs =
   let rows = length xs
       len = length $ head xs
+      pRow = 1
+      pCol = 1
   in case (rows, all (== len) $ map length $ tail xs) of
     (0, _) -> Nothing
     (_, False) -> Nothing
@@ -135,6 +136,7 @@ makeMap xs =
       Map {
         _rows = rows
         , _cols = len
+        , _player = (pCol, pRow)
         , _moveMap = \(x, y) ->
                        if x < 0 || x >= len || y < 0 || y >= rows
                        then Wall
@@ -144,8 +146,9 @@ makeMap xs =
                          '_' -> F Target
                          _ -> F Free }
 
-drawMap :: Map -> Pos -> IO ()
-drawMap mp@(Map { _rows = rows, _cols = cols }) pos = do
+drawMap :: Map -> IO ()
+drawMap mp@(Map { _rows = rows, _cols = cols }) = do
+  let pos = _player mp
   forM_ [0..rows - 1] $ \r -> do
     forM_ [0..cols - 1] $ \c -> do
       let spot = (c, r)
@@ -160,15 +163,27 @@ drawMap mp@(Map { _rows = rows, _cols = cols }) pos = do
         (False, O CrateOnFree) -> 'X'
     putChar '\n'
 
-levels = catMaybes $ map (fmap (\lvl -> (lvl, (1, 1))) . makeMap) [
-        -- ["###############"
-        -- ,"# #  X  _     #"
-        -- ,"#             #"
-        -- ,"# X        #  #"
-        -- ,"# X       _#_ #"
-        -- ,"###############"]
-       --,
-        ["########################"
+levels = catMaybes $ map makeMap [
+        ["##############################"
+        ,"#                            #"
+        ,"#    X                       #"
+        ,"#                            #"
+        ,"#           ### _            #"
+        ,"#                            #"
+        ,"#                            #"
+        ,"#    X           X           #"
+        ,"#                            #"
+        ,"#    #########               #"
+        ,"#                      #     #"
+        ,"#                 _        _ #"
+        ,"##############################"]
+        ,["###############"
+        ,"# #  X  _     #"
+        ,"#             #"
+        ,"# X        #  #"
+        ,"# X       _#_ #"
+        ,"###############"]
+        ,["########################"
         ,"#                      #"
         ,"#####       #########  #"
         ,"#   #                  #"
@@ -237,8 +252,9 @@ main = do
     putStrLn $ if r then "Congratulations" else "Better luck next time"
   where getPlayerCommand' :: Window -> Curses PlayerCommand
         getPlayerCommand' w = waitFor w evalPlayerCommand
-        drawMap' :: Window -> Map -> Pos -> Curses ()
-        drawMap' w mp (x, y) = do
+        drawMap' :: Window -> Map -> Curses ()
+        drawMap' w mp = do
+          let (x, y) = _player mp
           updateWindow w $ do
             (winRows, winCols) <- windowSize
             let rowOffs = (winRows - (fromIntegral $ _rows mp)) `div` 2
