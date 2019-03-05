@@ -13,3 +13,4 @@
   touching the screen while playing in Termux would crash the game)
 * Encode player start position in level's map
 * Hide cursor
+* Load levels from data file (separated by at least one empty line)

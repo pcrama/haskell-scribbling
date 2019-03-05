@@ -182,48 +182,8 @@ drawMap mp@(Map { _rows = rows, _cols = cols }) = do
         (False, O CrateOnFree) -> 'X'
     putChar '\n'
 
-levels = catMaybes $ map makeMap [
-        ["##############################"
-        ,"#                            #"
-        ,"#    X                       #"
-        ,"#                            #"
-        ,"#           ### _            #"
-        ,"#                            #"
-        ,"#            *               #"
-        ,"#    X           X           #"
-        ,"#                            #"
-        ,"#    #########               #"
-        ,"#                      #     #"
-        ,"#                 _        _ #"
-        ,"##############################"]
-        ,["###############"
-        ,"# #  X  _     #"
-        ,"#             #"
-        ,"# X        #  #"
-        ,"# X       _#_ #"
-        ,"###############"]
-        ,["########################"
-        ,"#                      #"
-        ,"#####       #########  #"
-        ,"#   #                  #"
-        ,"# X #      #### #      #"
-        ,"#   #         X #      #"
-        ,"#   #      #### #  _#  #"
-        ,"#   #   X     X #   #_ #"
-        ,"#                  _#_ #"
-        ,"########################"]
-        ,["##############################"
-        ,"# * #       #       #        #"
-        ,"# X #   X   #   X   #   X    #"
-        ,"#   #       #       #        #"
-        ,"#   #   #   #   #   #   #   _#"
-        ,"#       #       #       #_ _ #"
-        ,"#   X   #   X   #   X   # _ _#"
-        ,"#       #       #       #_ _ #"
-        ,"##############################"]]
-
-plain :: IO ()
-plain = do
+plain :: [Map] -> IO ()
+plain levels = do
   r <- playGame levels
                 getPlayerCommand
                 drawMap
@@ -263,8 +223,16 @@ evalPlayerDecision (EventCharacter 'n') = Just False
 evalPlayerDecision (EventCharacter 'N') = Just False
 evalPlayerDecision _ = Nothing
 
+splitOnBlankLines :: [String] -> [[String]]
+splitOnBlankLines [] = []
+splitOnBlankLines lst = hd:(splitOnBlankLines $ dropWhile mapSeparator tl)
+  where (hd, tl) = break mapSeparator lst
+        mapSeparator = all (`elem` " \t") -- NB: all p [] == True => empty line is separator, too!
+
 main :: IO ()
 main = do
+    allLevelsText <- readFile "./levels.txt"
+    let levels = catMaybes $ map makeMap $ splitOnBlankLines $ lines allLevelsText
     r <- runCurses $ do
       setEcho False
       w <- defaultWindow
