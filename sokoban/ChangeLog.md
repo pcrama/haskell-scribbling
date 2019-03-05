@@ -6,7 +6,7 @@
 
 ## 0.2.0.0  -- 2019-03-05
 
-* Unlimited undo
+* Unlimited undo possible, limited at 5 at player's request
 * Catch & ignore exceptions while waiting for user input (otherwise,
   touching the screen while playing in Termux would crash the game)
 * Encode player start position in level's map

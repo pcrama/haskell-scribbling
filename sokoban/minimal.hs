@@ -17,7 +17,13 @@ data Tile = F Free | Wall | O Occupied
 
 type Pos = (Int, Int)
 
-data Map = Map { _rows :: Int, _cols :: Int, _moveMap :: Pos -> Tile, _player :: Pos, _undo :: Maybe Map }
+data Map = Map {
+    _rows :: Int
+  , _cols :: Int
+  , _moveMap :: Pos -> Tile
+  , _player :: Pos
+  , _undosLeft :: Int
+  , _undo :: Maybe Map }
 
 unconstrainedMove :: Pos -> Direction -> Pos
 unconstrainedMove (x, y) Ri = (x + 1, y)
@@ -63,9 +69,9 @@ playerTurn :: Monad m => Map -> m PlayerCommand -> m (Maybe Map)
 playerTurn mp getCommand = do
   cmd <- getCommand
   case cmd of
-    Undo -> case _undo mp of
-      Nothing -> return $ Just mp -- nothing to undo
-      Just x -> return $ Just x
+    Undo -> case (_undo mp, _undosLeft mp > 0) of
+      (Just x, True) -> return $ Just x { _undosLeft = _undosLeft mp - 1 }
+      _ -> return $ Just mp -- nothing to undo or undo limit reached
     Quit -> return Nothing
     Move d -> case move mp d of
       Just newMapAndPos -> return $ Just newMapAndPos { _undo = Just mp }
@@ -148,6 +154,7 @@ makeMap xs =
         _rows = rows
         , _cols = len
         , _player = (pCol, pRow)
+        , _undosLeft = 5
         , _undo = Nothing
         , _moveMap = \(x, y) ->
                        if x < 0 || x >= len || y < 0 || y >= rows
@@ -291,7 +298,8 @@ main = do
                   O CrateOnTarget -> drawChar col row 'x'
             moveCursorRel x y
             drawString "*"
-            moveCursorRel x y
+            moveCursorRel 0 $ _rows mp
+            drawString $ show (_undosLeft mp) ++ " undos left"
           render
         getPlayerDecision' :: Window -> String -> Curses Bool
         getPlayerDecision' w p = do
