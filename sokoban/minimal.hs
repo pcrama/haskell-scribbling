@@ -43,7 +43,7 @@ move mp@(Map { _player = p }) dir = case tile mp newPosition of
         newCratePosition = unconstrainedMove newPosition dir
         push fromOccupied = case tile mp newCratePosition of
           F toFree -> let movedCrate = moveCrate mp newPosition fromOccupied newCratePosition toFree
-                      in Just $ movedCrate { _player = newPosition }
+                      in Just $ movedCrate { _player = newPosition, _undo = Just mp }
           Wall -> Nothing -- can't push crate through wall
           O _ -> Nothing -- can't push more than 1 crate at a time
 
@@ -74,7 +74,7 @@ playerTurn mp getCommand = do
       _ -> return $ Just mp -- nothing to undo or undo limit reached
     Quit -> return Nothing
     Move d -> case move mp d of
-      Just newMapAndPos -> return $ Just newMapAndPos { _undo = Just mp }
+      Just newMapAndPos -> return $ Just newMapAndPos
       Nothing -> return $ Just mp -- Ignore impossible movement
     Pass -> return $ Just mp
 
