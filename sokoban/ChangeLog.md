@@ -10,3 +10,4 @@
 * Catch & ignore exceptions while waiting for user input (otherwise,
   touching the screen while playing in Termux would crash the game)
 * Encode player start position in level's map
+* Hide cursor

@@ -271,6 +271,7 @@ main = do
         drawMap' :: Window -> Map -> Curses ()
         drawMap' w mp = do
           let (x, y) = _player mp
+          setCursorMode CursorInvisible
           updateWindow w $ do
             (winRows, winCols) <- windowSize
             let rowOffs = (winRows - (fromIntegral $ _rows mp)) `div` 2
