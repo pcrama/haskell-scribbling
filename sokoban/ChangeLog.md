@@ -14,3 +14,7 @@
 * Encode player start position in level's map
 * Hide cursor
 * Load levels from data file (separated by at least one empty line)
+
+## 0.3.0.0  -- 2019-03-06
+
+* Interactively select level to play

@@ -78,62 +78,31 @@ playerTurn mp getCommand = do
       Nothing -> return $ Just mp -- Ignore impossible movement
     Pass -> return $ Just mp
 
-getPlayerCommand :: IO PlayerCommand
-getPlayerCommand = do
-  c <- getChar
-  return $ case c of
-    'a' -> Move Le
-    's' -> Move Do
-    'w' -> Move Up
-    'd' -> Move Ri
-    'u' -> Undo
-    'q' -> Quit
-    _ -> Pass
-
-getPlayerDecision :: String -> IO Bool
-getPlayerDecision p = do
-  putStr p
-  putStrLn " (y/n) "
-  c <- getChar
-  case c of
-    'y' -> return True
-    'Y' -> return True
-    'n' -> return False
-    'N' -> return False
-    _ -> getPlayerDecision p
-
-playLevel :: Monad m => Map -> m PlayerCommand -> (Map -> m ()) -> m Bool
+playLevel :: Monad m => Map -> m PlayerCommand -> (Map -> m ()) -> m ()
 playLevel mp getCmd draw = do
   draw mp
   if won mp
-    then return True
+    then return ()
     else do
     mbMpP <- playerTurn mp getCmd
     case mbMpP of
       Just newMap -> playLevel newMap getCmd draw
-      Nothing -> return False
+      Nothing -> return ()
 
 playGame :: Monad m
-         => [Map]
-         -> m PlayerCommand
-         -> (Map -> m ())
-         -> (String -> m Bool)
-         -> m Bool
-playGame [] _ _ _ = return True
-playGame allLevels@(mp:otherLevels) getCmd draw prompt = do
-  result <- playLevel mp getCmd draw
-  case (result, null otherLevels) of
-    (True, False) -> do
-      q <- prompt "Congratulations.  Next level?"
-      case q of
-        True -> playGame otherLevels getCmd draw prompt
-        False -> return True
-    (True, True) -> return True
-    (False, _) -> do
-      q <- prompt "Try this level again?"
-      case q of
-        True -> playGame allLevels getCmd draw prompt
-        False -> return False
+         => m (Maybe Map)      -- |^ next level (Nothing quits)
+         -> m PlayerCommand    -- |^ next action requested by player, e.g. Move Up
+         -> (Map -> m ())      -- |^ draw complete level state
+         -> (String -> m Bool) -- |^ prompt for a y/n response
+         -> m ()
+playGame nextLevel getCmd draw prompt = loop
+  where loop = do
+          mbLevel <- nextLevel
+          case mbLevel of
+            Just level -> do
+              playLevel level getCmd draw
+              loop
+            Nothing -> return ()
 
 makeMap :: [String] -> Maybe Map
 makeMap xs =
@@ -165,30 +134,57 @@ makeMap xs =
                          '_' -> F Target
                          _ -> F Free }
 
-drawMap :: Map -> IO ()
-drawMap mp@(Map { _rows = rows, _cols = cols }) = do
-  let pos = _player mp
-  forM_ [0..rows - 1] $ \r -> do
-    forM_ [0..cols - 1] $ \c -> do
-      let spot = (c, r)
-      putChar $ case (spot == pos, tile mp spot) of
-        -- TODO? (True, Wall) & (True, O _) should be
-        -- forbidden.  Are silently ignored here
-        (True, _) -> '*'
-        (False, F Target) -> '_'
-        (False, F Free) -> ' '
-        (False, Wall) -> '#'
-        (False, O CrateOnTarget) -> 'x'
-        (False, O CrateOnFree) -> 'X'
-    putChar '\n'
+data Zipper a = Zipper [a] a [a]
 
-plain :: [Map] -> IO ()
-plain levels = do
-  r <- playGame levels
-                getPlayerCommand
-                drawMap
-                getPlayerDecision
-  putStrLn $ if r then "Congratulations" else "Better luck next time"
+mkZipper :: [a] -> Maybe (Zipper a)
+mkZipper [] = Nothing
+mkZipper (x:xs) = Just $ Zipper [] x xs
+
+zipperPrev :: Zipper a -> Maybe (Zipper a)
+zipperPrev (Zipper [] _ _) = Nothing
+zipperPrev (Zipper (p:ps) f ns) = Just $ Zipper ps p $ f:ns
+
+zipperNext :: Zipper a -> Maybe (Zipper a)
+zipperNext (Zipper _ _ []) = Nothing
+zipperNext (Zipper ps f (n:ns)) = Just $ Zipper (f:ps) n ns
+
+zipperFirst :: Zipper a -> Zipper a
+zipperFirst z@(Zipper [] _ _) = z
+zipperFirst (Zipper (p:ps) f ns) = zipperFirst $ Zipper ps p $ f:ns
+
+zipperLast :: Zipper a -> Zipper a
+zipperLast z@(Zipper _ _ []) = z
+zipperLast (Zipper ps f (n:ns)) = zipperLast $ Zipper (f:ps) n ns
+
+zipperFocus :: Zipper a -> a
+zipperFocus (Zipper _ f _) = f
+
+data SelectCommand =
+  FirstElt | PrevElt | NextElt | LastElt | ConfirmSelection | QuitSelection
+
+selectLevel :: Monad m
+            => [a]
+            -> (a -> m ())
+            -> m SelectCommand
+            -> m (Maybe a)
+selectLevel levels drawLevel query = case mkZipper levels of
+    Nothing -> return Nothing
+    Just zipper -> go zipper
+  where go zipper = do
+          let focus = zipperFocus zipper
+          drawLevel focus
+          cmd <- query
+          case cmd of
+            FirstElt -> go $ zipperFirst zipper
+            PrevElt -> case zipperPrev zipper of
+                         Nothing -> go zipper
+                         Just prev -> go prev
+            NextElt -> case zipperNext zipper of
+                         Nothing -> go zipper
+                         Just next -> go next
+            LastElt -> go $ zipperLast zipper
+            ConfirmSelection -> return $ Just focus
+            QuitSelection -> return Nothing
 
 waitFor :: Window -> (Event -> Maybe a) -> Curses a
 waitFor w p = loop where
@@ -203,26 +199,6 @@ waitFor w p = loop where
         Nothing -> loop
         Just a -> return a
 
-evalPlayerCommand :: Event -> Maybe PlayerCommand
-evalPlayerCommand (EventCharacter 'q') = Just Quit
-evalPlayerCommand (EventCharacter 'u') = Just Undo
-evalPlayerCommand (EventCharacter 'h') = Just $ Move Le
-evalPlayerCommand (EventCharacter 'j') = Just $ Move Do
-evalPlayerCommand (EventCharacter 'k') = Just $ Move Up
-evalPlayerCommand (EventCharacter 'l') = Just $ Move Ri
-evalPlayerCommand (EventSpecialKey KeyLeftArrow) = Just $ Move Le
-evalPlayerCommand (EventSpecialKey KeyDownArrow) = Just $ Move Do
-evalPlayerCommand (EventSpecialKey KeyUpArrow) = Just $ Move Up
-evalPlayerCommand (EventSpecialKey KeyRightArrow) = Just $ Move Ri
-evalPlayerCommand _ = Nothing
-
-evalPlayerDecision :: Event -> Maybe Bool
-evalPlayerDecision (EventCharacter 'y') = Just True
-evalPlayerDecision (EventCharacter 'Y') = Just True
-evalPlayerDecision (EventCharacter 'n') = Just False
-evalPlayerDecision (EventCharacter 'N') = Just False
-evalPlayerDecision _ = Nothing
-
 splitOnBlankLines :: [String] -> [[String]]
 splitOnBlankLines [] = []
 splitOnBlankLines lst = hd:(splitOnBlankLines $ dropWhile mapSeparator tl)
@@ -233,26 +209,52 @@ main :: IO ()
 main = do
     allLevelsText <- readFile "./levels.txt"
     let levels = catMaybes $ map makeMap $ splitOnBlankLines $ lines allLevelsText
-    r <- runCurses $ do
+    runCurses $ do
       setEcho False
       w <- defaultWindow
-      playGame levels
+      playGame (selectLevel' w levels)
                (getPlayerCommand' w)
-               (drawMap' w)
+               (drawMap' w "Move with hjkl or arrows, q to select level, u to undo")
                (getPlayerDecision' w)
-    putStrLn $ if r then "Congratulations" else "Better luck next time"
   where getPlayerCommand' :: Window -> Curses PlayerCommand
-        getPlayerCommand' w = waitFor w evalPlayerCommand
-        drawMap' :: Window -> Map -> Curses ()
-        drawMap' w mp = do
+        getPlayerCommand' w = waitFor w $ flip lookup [
+                                  (EventCharacter 'q', Quit)
+                                , (EventCharacter 'u', Undo)
+                                , (EventCharacter 'h', Move Le)
+                                , (EventCharacter 'j', Move Do)
+                                , (EventCharacter 'k', Move Up)
+                                , (EventCharacter 'l', Move Ri)
+                                , (EventSpecialKey KeyLeftArrow, Move Le)
+                                , (EventSpecialKey KeyDownArrow, Move Do)
+                                , (EventSpecialKey KeyUpArrow, Move Up)
+                                , (EventSpecialKey KeyRightArrow, Move Ri)]
+        selectLevel' :: Window -> [Map] -> Curses (Maybe Map)
+        selectLevel' w maps =
+          selectLevel maps
+                      (drawMap' w "Select a level (move with 0, <-/h, l/->, $; q to quit; y to confirm)")
+                      (waitFor w $ flip lookup
+                                        [(EventCharacter 'q', QuitSelection)
+                                        , (EventCharacter 'y', ConfirmSelection)
+                                        , (EventSpecialKey KeyEnter, ConfirmSelection)
+                                        , (EventCharacter '\n', ConfirmSelection)
+                                        , (EventCharacter 'h', PrevElt)
+                                        , (EventSpecialKey KeyLeftArrow, PrevElt)
+                                        , (EventCharacter 'l', NextElt)
+                                        , (EventSpecialKey KeyRightArrow, NextElt)
+                                        , (EventCharacter '0', FirstElt)
+                                        , (EventCharacter '$', LastElt)])
+        drawMap' :: Window -> String -> Map -> Curses ()
+        drawMap' w s mp = do
           let (x, y) = _player mp
           setCursorMode CursorInvisible
           updateWindow w $ do
             (winRows, winCols) <- windowSize
+            clear
+            moveCursor 0 0
+            drawString s
             let rowOffs = (winRows - (fromIntegral $ _rows mp)) `div` 2
             let colOffs = (winCols - (fromIntegral $ _cols mp)) `div` 2
             let moveCursorRel x y = moveCursor (rowOffs + fromIntegral y) (colOffs + fromIntegral x)
-            clear
             forM_ [0.._rows mp - 1] $ \row ->
               forM_ [0.._cols mp - 1] $ \col ->
                 let drawChar c r g = do
@@ -276,4 +278,7 @@ main = do
             moveCursor 0 0
             drawString p
           render
-          waitFor w evalPlayerDecision
+          waitFor w $ flip lookup [ (EventCharacter 'y', True)
+                                  , (EventCharacter 'Y', True)
+                                  , (EventCharacter 'n', False)
+                                  , (EventCharacter 'N', False)]
