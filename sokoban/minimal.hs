@@ -154,7 +154,7 @@ makeMap xs =
         _rows = rows
         , _cols = len
         , _player = (pCol, pRow)
-        , _undosLeft = 5
+        , _undosLeft = 50
         , _undo = Nothing
         , _moveMap = \(x, y) ->
                        if x < 0 || x >= len || y < 0 || y >= rows

@@ -6,7 +6,7 @@
 
 ## 0.2.0.0  -- 2019-03-05
 
-* Unlimited undo possible, limited at 5 at player's request.  Undo
+* Unlimited undo possible, limited at 50 at player's request.  Undo
   information is registered for each crate movement, not player
   movements (these can be simply undone by moving)
 * Catch & ignore exceptions while waiting for user input (otherwise,
