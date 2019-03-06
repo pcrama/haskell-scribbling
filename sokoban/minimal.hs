@@ -1,5 +1,13 @@
 import UI.NCurses
 import Control.Monad (forM_)
+import Control.Monad.State (
+    MonadState(..)
+  , StateT
+  , evalStateT
+  , get
+  , lift
+  , put
+  )
 import Data.List (findIndices)
 import Data.Maybe (catMaybes)
 
@@ -78,30 +86,34 @@ playerTurn mp getCommand = do
       Nothing -> return $ Just mp -- Ignore impossible movement
     Pass -> return $ Just mp
 
-playLevel :: Monad m => Map -> m PlayerCommand -> (Map -> m ()) -> m ()
+playLevel :: Monad m
+          => Map             -- |^ Level to play
+          -> m PlayerCommand -- |^ next action requested by player e.g. Move Up
+          -> (Map -> m ())   -- |^ draw complete level state
+          -> m Bool          -- |^ True if player solved the puzzle, i.e. all targets occupied
 playLevel mp getCmd draw = do
   draw mp
   if won mp
-    then return ()
-    else do
+  then return True
+  else do
     mbMpP <- playerTurn mp getCmd
     case mbMpP of
       Just newMap -> playLevel newMap getCmd draw
-      Nothing -> return ()
+      Nothing -> return False
 
 playGame :: Monad m
-         => m (Maybe Map)      -- |^ next level (Nothing quits)
-         -> m PlayerCommand    -- |^ next action requested by player, e.g. Move Up
-         -> (Map -> m ())      -- |^ draw complete level state
-         -> (String -> m Bool) -- |^ prompt for a y/n response
+         => (Bool -> m (Maybe Map)) -- |^ next level (Nothing quits)
+         -> m PlayerCommand         -- |^ next action requested by player, e.g. Move Up
+         -> (Map -> m ())           -- |^ draw complete level state
+         -> (String -> m Bool)      -- |^ prompt for a y/n response
          -> m ()
-playGame nextLevel getCmd draw prompt = loop
-  where loop = do
-          mbLevel <- nextLevel
+playGame nextLevel getCmd draw prompt = loop False
+  where loop advanceBeforeSelection = do
+          mbLevel <- nextLevel advanceBeforeSelection
           case mbLevel of
             Just level -> do
-              playLevel level getCmd draw
-              loop
+              r <- playLevel level getCmd draw
+              loop r
             Nothing -> return ()
 
 makeMap :: [String] -> Maybe Map
@@ -162,29 +174,36 @@ zipperFocus (Zipper _ f _) = f
 data SelectCommand =
   FirstElt | PrevElt | NextElt | LastElt | ConfirmSelection | QuitSelection
 
-selectLevel :: Monad m
-            => [a]
-            -> (a -> m ())
-            -> m SelectCommand
-            -> m (Maybe a)
-selectLevel levels drawLevel query = case mkZipper levels of
-    Nothing -> return Nothing
-    Just zipper -> go zipper
-  where go zipper = do
+selectLevel :: (Monad m, MonadState s m)
+            => (s -> Zipper a)      -- |^ extract Zipper of levels from state (there's a lens hiding here)
+            -> (Zipper a -> s -> s) -- |^ update state with modified Zipper of levels (there's a lens hiding here)
+            -> (a -> m ())          -- |^ draw level
+            -> m SelectCommand      -- |^ query user for next action (e.g. skip to next level)
+            -> Bool                 -- |^ whether to present next level (True) for selection
+            -> m (Maybe a)          -- |^ Just selected level or Nothing if user quits
+selectLevel extractFromState updateState drawLevel query advanceBeforeSelection = do
+    zipper <- fmap extractFromState $ get
+    case (advanceBeforeSelection, zipperNext zipper) of
+      (True, Just next) -> go next
+      (True, Nothing) -> go $ zipperFirst zipper -- wrap around to present new level
+      _ -> go zipper
+  where update f = get >>= (put . f)
+        go zipper = do
+          update $ updateState zipper
+          zipper <- fmap extractFromState get
           let focus = zipperFocus zipper
           drawLevel focus
           cmd <- query
           case cmd of
             FirstElt -> go $ zipperFirst zipper
-            PrevElt -> case zipperPrev zipper of
-                         Nothing -> go zipper
-                         Just prev -> go prev
-            NextElt -> case zipperNext zipper of
-                         Nothing -> go zipper
-                         Just next -> go next
+            PrevElt -> goPrevNext zipper zipperPrev
+            NextElt -> goPrevNext zipper zipperNext
             LastElt -> go $ zipperLast zipper
             ConfirmSelection -> return $ Just focus
             QuitSelection -> return Nothing
+        goPrevNext zipper stepper = case stepper zipper of
+                                      Nothing -> go zipper
+                                      Just z -> go z
 
 waitFor :: Window -> (Event -> Maybe a) -> Curses a
 waitFor w p = loop where
@@ -205,17 +224,23 @@ splitOnBlankLines lst = hd:(splitOnBlankLines $ dropWhile mapSeparator tl)
   where (hd, tl) = break mapSeparator lst
         mapSeparator = all (`elem` " \t") -- NB: all p [] == True => empty line is separator, too!
 
+type AppM = StateT (Zipper Map) Curses
+
 main :: IO ()
 main = do
     allLevelsText <- readFile "./levels.txt"
     let levels = catMaybes $ map makeMap $ splitOnBlankLines $ lines allLevelsText
-    runCurses $ do
-      setEcho False
-      w <- defaultWindow
-      playGame (selectLevel' w levels)
-               (getPlayerCommand' w)
-               (drawMap' w "Move with hjkl or arrows, q to select level, u to undo")
-               (getPlayerDecision' w)
+    case mkZipper levels of
+      Nothing -> putStrLn "No levels found"
+      Just z -> do
+        _ <- runCurses $ flip evalStateT z $ do
+          lift $ setEcho False
+          w <- lift $ defaultWindow
+          playGame (selectLevel' w)
+                   (lift $ getPlayerCommand' w)
+                   (lift . drawMap' w "Move with hjkl or arrows, q to select level, u to undo")
+                   (lift . getPlayerDecision' w)
+        putStrLn "Bye, bye!"
   where getPlayerCommand' :: Window -> Curses PlayerCommand
         getPlayerCommand' w = waitFor w $ flip lookup [
                                   (EventCharacter 'q', Quit)
@@ -228,21 +253,23 @@ main = do
                                 , (EventSpecialKey KeyDownArrow, Move Do)
                                 , (EventSpecialKey KeyUpArrow, Move Up)
                                 , (EventSpecialKey KeyRightArrow, Move Ri)]
-        selectLevel' :: Window -> [Map] -> Curses (Maybe Map)
-        selectLevel' w maps =
-          selectLevel maps
-                      (drawMap' w "Select a level (move with 0, <-/h, l/->, $; q to quit; y to confirm)")
-                      (waitFor w $ flip lookup
-                                        [(EventCharacter 'q', QuitSelection)
-                                        , (EventCharacter 'y', ConfirmSelection)
-                                        , (EventSpecialKey KeyEnter, ConfirmSelection)
-                                        , (EventCharacter '\n', ConfirmSelection)
-                                        , (EventCharacter 'h', PrevElt)
-                                        , (EventSpecialKey KeyLeftArrow, PrevElt)
-                                        , (EventCharacter 'l', NextElt)
-                                        , (EventSpecialKey KeyRightArrow, NextElt)
-                                        , (EventCharacter '0', FirstElt)
-                                        , (EventCharacter '$', LastElt)])
+        selectLevel' :: Window -> Bool -> AppM (Maybe Map)
+        selectLevel' w =
+          selectLevel id
+                      const
+                      (lift . drawMap' w "Select a level (move with 0, <-/h, l/->, $; q quits; y confirms)")
+                      (lift $ waitFor w $ flip lookup [(EventCharacter 'q', QuitSelection)
+                                                      , (EventCharacter 'y', ConfirmSelection)
+                                                      , (EventSpecialKey KeyEnter, ConfirmSelection)
+                                                      , (EventCharacter '\n', ConfirmSelection)
+                                                      , (EventCharacter 'h', PrevElt)
+                                                      , (EventSpecialKey KeyLeftArrow, PrevElt)
+                                                      , (EventCharacter 'l', NextElt)
+                                                      , (EventSpecialKey KeyRightArrow, NextElt)
+                                                      , (EventCharacter '0', FirstElt)
+                                                      , (EventCharacter '^', FirstElt)
+                                                      , (EventCharacter '_', FirstElt)
+                                                      , (EventCharacter '$', LastElt)])
         drawMap' :: Window -> String -> Map -> Curses ()
         drawMap' w s mp = do
           let (x, y) = _player mp
