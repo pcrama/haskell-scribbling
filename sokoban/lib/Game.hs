@@ -135,9 +135,8 @@ makeMap xs =
       let enumerate = zip [0..]
       let starPositions = filter keepRowsWithStar $ enumerate $ map (findIndices (=='*')) xs
       (pCol, pRow) <- case starPositions of
-                        [] -> return (1, 1) -- default start position
                         [(r, [c])] -> return (c, r) -- only one star -> pick its coordinates
-                        _ -> fail "There should be 0 or 1 '*' in map"
+                        _ -> fail "There should be exactly 1 '*' in map"
       return $ Map {
         _rows = rows
         , _cols = len
