@@ -18,3 +18,7 @@
 ## 0.3.0.0  -- 2019-03-06
 
 * Interactively select level to play
+
+## 0.4.0.0  -- 2019-03-07
+
+* Reorganize code & add tests
