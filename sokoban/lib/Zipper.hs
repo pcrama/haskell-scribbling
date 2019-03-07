@@ -11,6 +11,7 @@ module Zipper (
 where
 
 data Zipper a = Zipper [a] a [a]
+  deriving (Show, Eq)
 
 mkZipper :: [a] -> Maybe (Zipper a)
 mkZipper [] = Nothing

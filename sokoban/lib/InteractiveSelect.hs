@@ -15,7 +15,8 @@ import Control.Monad.State (
 import Zipper
 
 data SelectCommand =
-  FirstElt | PrevElt | NextElt | LastElt | ConfirmSelection | QuitSelection
+    FirstElt | PrevElt | NextElt | LastElt | ConfirmSelection | QuitSelection
+  deriving (Show, Eq)
 
 interactiveSelect :: (Monad m, MonadState s m)
   => (s -> Zipper a)      -- |^ extract Zipper of selectees from state (there's a lens hiding here)
