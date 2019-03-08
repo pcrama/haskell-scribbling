@@ -7,15 +7,18 @@ module Game (
   , Map(..)
   , PlayerCommand(..)
   , makeMap
+  , move
   , parseLevels
   , playGame
+  , playLevel
   , tile
+  , unconstrainedMove
   )
 where
 
 import Control.Monad (forM_)
 import Data.List (findIndices)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, maybe)
 
 data Direction = Ri | Up | Le | Do
   deriving (Show, Eq)
@@ -39,6 +42,15 @@ data Map = Map {
   , _player :: Pos
   , _undosLeft :: Int
   , _undo :: Maybe Map }
+
+instance Show Map where
+  show (Map { _rows = r, _cols = c, _player = Pos { _x = x, _y = y }, _undosLeft = uLft, _undo = u }) =
+    "<Map { _rows=" ++ show r
+      ++ ", _cols=" ++ show c
+      ++ ", _player=Pos { _x=" ++ show x ++ ", _y=" ++ show y ++ " }"
+      ++ ", _undosLeft=" ++ show uLft
+      ++ ", _undo=" ++ maybe "Nothing" (const "Just ...") u
+      ++ " }>"
 
 unconstrainedMove :: Pos -> Direction -> Pos
 unconstrainedMove p@(Pos { _x = x }) Ri = p { _x = x + 1 }
@@ -79,6 +91,7 @@ won mp@(Map { _rows = rows, _cols = cols }) = and [and $ [tile mp (Pos { _x = co
                                                   | row <- [0..rows - 1]]
 
 data PlayerCommand = Move Direction | Quit | Pass | Undo
+  deriving (Show, Eq)
 
 playerTurn :: Monad m => Map -> m PlayerCommand -> m (Maybe Map)
 playerTurn mp getCommand = do
@@ -120,7 +133,10 @@ playGame nextLevel getCmd draw prompt = loop False
           case mbLevel of
             Just level -> do
               r <- playLevel level getCmd draw
-              loop r
+              playAnother <- prompt "Play another level?"
+              if playAnother
+              then loop r
+              else return ()
             Nothing -> return ()
 
 makeMap :: [String] -> Maybe Map
@@ -149,6 +165,7 @@ makeMap xs =
                        else case (xs !! y) !! x of
                          '#' -> Wall
                          'X' -> O CrateOnFree
+                         'x' -> O CrateOnTarget
                          '_' -> F Target
                          _ -> F Free }
 

@@ -115,9 +115,10 @@ main = do
         getPlayerDecision' :: Window -> String -> Curses Bool
         getPlayerDecision' w p = do
           updateWindow w $ do
-            clear
             moveCursor 0 0
             drawString p
+            drawString " (y/n)"
+            clearLine
           render
           waitFor w $ flip lookup [ (EventCharacter 'y', True)
                                   , (EventCharacter 'Y', True)

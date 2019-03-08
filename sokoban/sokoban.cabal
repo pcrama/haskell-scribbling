@@ -84,6 +84,7 @@ executable test
   other-modules:       Lib
                      , Game
                      , InteractiveSelect
+                     , TestGame
                      , TestInteractiveSelect
                      , Zipper
   

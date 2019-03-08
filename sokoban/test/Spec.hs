@@ -6,6 +6,7 @@ import Test.Hspec
 import Zipper
 
 import TestInteractiveSelect
+import TestGame
 
 testZipper = do
     describe ("mkZipper " ++ show initList) $ do
@@ -35,3 +36,9 @@ main :: IO ()
 main = hspec $ do
   testZipper
   testInteractiveSelect
+  describe "Game" $ do
+    testUnconstrainedMove
+    testMakeMap
+    testMove
+    testPlayLevel
+    testPlayGame
