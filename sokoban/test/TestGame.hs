@@ -297,6 +297,21 @@ testPlayGame = describe "playGame" $ do
                   , GQuery $ Prompt False]
     describe "scenario 2: abort level selection" $ do
       runScenario [GQuery $ SelectLevel False []]
+    describe "scenario 3: start level, abort it, retry same level, then quit" $ do
+      runScenario [selectImpossibleLevel False
+                  , drawImpossibleLevel
+                  , GQuery $ PlayLevel $ Quit
+                  , GQuery $ Prompt True
+                  , selectImpossibleLevel False
+                  , drawImpossibleLevel
+                  , GQuery $ PlayLevel $ Quit
+                  , GQuery $ Prompt False]
+    describe "scenario 4: start level, abort it back to level selection, then quit" $ do
+      runScenario [selectImpossibleLevel False
+                  , drawImpossibleLevel
+                  , GQuery $ PlayLevel $ Quit
+                  , GQuery $ Prompt True
+                  , GQuery $ SelectLevel False []]
   where selectImpossibleLevel b = GQuery $ SelectLevel b ["X*_"]
         drawImpossibleLevel = GDraw [[O CrateOnFree, F Free, F Target]] $ Pos { _x = 1, _y = 0 }
         isQuery (GQuery _) = True
