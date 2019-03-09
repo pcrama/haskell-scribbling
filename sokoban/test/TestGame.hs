@@ -7,19 +7,129 @@ module TestGame (
   )
 where
 
-{- TODO:
- - Add property checking:
- - 1. TestCalls start with Draw, then alternates between Draw & Query
- - 2. Last element is either Draw of a solved puzzle or 'Query Quit'
- - 3. Random Map & random actions -> number of walls, free spaces & crates remains constant
- -}
-
-import Data.Maybe (isNothing, isJust)
+import Data.Maybe (isNothing, isJust, catMaybes)
 import Control.Monad (forM_)
 import Control.Monad.RWS (runRWS, RWS, get, put, tell)
 import Test.Hspec
+import Test.QuickCheck
 
 import Game
+
+newtype ArbMap = ArbMap Map
+
+instance Show ArbMap where
+  show (ArbMap mp) = show mp ++ concat ['\n':[encode $ tile mp $ Pos { _x = c, _y = r }
+                                             | c <- [0.._cols mp - 1]]
+                                       | r <- [0.._rows mp - 1]]
+    where encode (F Free) = '.'
+          encode (F Target) = '_'
+          encode (O CrateOnFree) = 'X'
+          encode (O CrateOnTarget) = 'x'
+          encode Wall = '#'
+
+instance Arbitrary ArbMap where
+  arbitrary = do
+      (NonNegative r', NonNegative c') <- arbitrary -- (arbitrary :: Gen (NonNegative Int, NonNegative Int))
+      let rows = 3 + (r' `mod` 20)
+      let cols = 3 + (c' `mod` 20)
+      (NonNegative px', NonNegative py') <- arbitrary -- (arbitrary :: Gen (NonNegative Int, NonNegative Int))
+      let px = px' `mod` cols
+      let py = py' `mod` rows
+      NonNegative undosLeft <- arbitrary -- (arbitrary :: Gen (NonNegative Int))
+      -- traverse :: (a -> f b) -> t a -> f (t b)
+      tiles <- traverse (makeRow px py cols) [0..rows - 1]
+      return $ ArbMap $ Map {
+          _rows = rows
+        , _cols = cols
+        , _player = Pos { _x = px, _y = py }
+        , _moveMap = \Pos { _x = x, _y = y } ->
+                       if x < 0 || x >= cols || y < 0 || y >= rows
+                       then Wall
+                       else (tiles !! y) !! x
+        , _undosLeft = undosLeft `mod` 10
+        , _undo = Nothing }
+    where makeRow :: Int -> Int -> Int -> Int -> Gen [Tile]
+          makeRow px py cols r = traverse (makeCol px py r) [0..cols - 1]
+          makeCol :: Int -> Int -> Int -> Int -> Gen Tile
+          makeCol px py r c
+            | c == px && r == py = return $ F Free -- place for player
+            | otherwise = frequency [(8, return $ F Free) 
+                                    , (1, return $ F Target)
+                                    , (1, return $ O CrateOnFree)
+                                    , (1, return $ O CrateOnTarget)
+                                    , (2, return Wall)]
+
+newtype ArbPlayerCommand = ArbPlayerCommand { unArbPlayerCommand :: PlayerCommand }
+  deriving Show
+
+instance Arbitrary ArbPlayerCommand where
+  arbitrary = fmap ArbPlayerCommand $ frequency [(20, return $ Move Up)
+                                                , (20, return $ Move Do)
+                                                , (20, return $ Move Ri)
+                                                , (20, return $ Move Le)
+                                                , (3, return Undo)
+                                                , (1, return Quit)]
+
+-- TODO: study inputs to see if we cover enough
+prop_playLevelConservesCounts :: ArbMap -> [ArbPlayerCommand] -> Bool
+prop_playLevelConservesCounts (ArbMap mp) apc =
+    all countsMatch $ catMaybes $ map getDraw $ logging
+  where cmds = map unArbPlayerCommand apc ++ [Quit] -- ensure list of commands is never empty
+        (_, _, logging) = runRWS (playLevel mp query' draw') () cmds
+        getDraw (Draw ts _) = Just ts
+        getDraw (Query _) = Nothing
+        isFree (F _) = 1 :: Int
+        isFree _ = 0
+        isTarget (F Target) = 1 :: Int
+        isTarget (O CrateOnTarget) = 1 :: Int
+        isTarget _ = 0
+        isWall Wall = 1 :: Int
+        isWall _ = 0
+        isCrate (O _) = 1 :: Int
+        isCrate _ = 0
+        -- coords = [Pos { _x = c, _y = r } | c <- [0..cols - 1], r <- [0..rows - 1]]
+        countTiles p m = sum $ map (sum . map p) m
+        countFree = countTiles isFree
+        countWall = countTiles isWall
+        countTarget = countTiles isTarget
+        countCrate = countTiles isCrate
+        mpTiles = fst $ extractMapInfo mp
+        initFree = countFree mpTiles
+        initWall = countWall mpTiles
+        initTarget = countTarget mpTiles
+        initCrate = countCrate mpTiles
+        countsMatch m = countFree m == initFree
+                     && countWall m == initWall
+                     && countTarget m == initTarget
+                     && countCrate m == initCrate
+
+-- TODO: study inputs to see if we cover enough
+prop_playLevelPlayerOnlyStepsOnFreeTiles :: ArbMap -> [ArbPlayerCommand] -> Bool
+prop_playLevelPlayerOnlyStepsOnFreeTiles (ArbMap mp) apc =
+    all playerOnFreeTiles $ catMaybes $ map getDraw $ logging
+  where cmds = map unArbPlayerCommand apc ++ [Quit] -- ensure list of commands is never empty
+        (_, _, logging) = runRWS (playLevel mp query' draw') () cmds
+        getDraw (Draw ts p) = Just (ts, p)
+        getDraw (Query _) = Nothing
+        playerOnFreeTiles (ts, Pos { _x = x, _y = y }) =
+            y >= 0 && x >= 0 && y < length ts && x < length row
+            && isFree (row !! x)
+          where row = ts !! y
+                isFree (F _) = True
+                isFree (O _) = False
+                isFree Wall = False
+
+-- TODO: study inputs to see if we cover enough
+prop_playLevelDrawAndQueryAlternate :: ArbMap -> [ArbPlayerCommand] -> Bool
+prop_playLevelDrawAndQueryAlternate (ArbMap mp) apc =
+    alternatingDrawAndQuery logging
+  where cmds = map unArbPlayerCommand apc ++ [Quit] -- ensure list of commands is never empty
+        (_, _, logging) = runRWS (playLevel mp query' draw') () cmds
+        alternatingDrawAndQuery [] = True
+        alternatingDrawAndQuery [_] = True
+        -- must always start with drawing then querying player for his next move
+        alternatingDrawAndQuery ((Draw _ _):(Query _):ls) = alternatingDrawAndQuery ls
+        alternatingDrawAndQuery _ = False
 
 testMakeMap, testMove, testPlayLevel, testUnconstrainedMove, testPlayGame :: SpecWith ()
 
@@ -110,6 +220,10 @@ draw' :: Map -> TestLevelM ()
 draw' = tell . (:[]) . uncurry Draw . extractMapInfo
 
 testPlayLevel = describe "playLevel" $ do
+    describe "properties" $ do
+      it "conserves tile counts" $ property prop_playLevelConservesCounts
+      it "only steps on free tiles" $ property prop_playLevelPlayerOnlyStepsOnFreeTiles
+      it "draws map then waits for user input in loop" $ property prop_playLevelDrawAndQueryAlternate
     describe "scenario 1" $
       runScenario minimalMapText
                   [Draw minimalMap minimalMapPos
