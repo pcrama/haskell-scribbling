@@ -13,6 +13,7 @@ module Game (
   , playLevel
   , tile
   , unconstrainedMove
+  , won
   )
 where
 
@@ -84,10 +85,18 @@ moveCrate mp from fromOccupied to toFree = mp { _moveMap = newMap }
                         Target -> O CrateOnTarget
           | otherwise = tile mp p
 
+-- You win when either there are no free target spots left or when all
+-- crates are on a target spot.  Both conditions are equivalend if there
+-- are the same number of targets and crates, but makeMap doesn't check
+-- for this.
 won :: Map -> Bool
-won mp@(Map { _rows = rows, _cols = cols }) = and [and $ [tile mp (Pos { _x = col, _y = row }) /= F Target
-                                                         | col <- [0..cols - 1]]
-                                                  | row <- [0..rows - 1]]
+won mp@(Map { _rows = rows, _cols = cols }) =
+     and [and $ [tile mp (Pos { _x = col, _y = row }) /= F Target
+                | col <- [0..cols - 1]]
+         | row <- [0..rows - 1]]
+  || and [and $ [tile mp (Pos { _x = col, _y = row }) /= O CrateOnFree
+                | col <- [0..cols - 1]]
+         | row <- [0..rows - 1]]
 
 data PlayerCommand = Move Direction | Quit | Pass | Undo
   deriving (Show, Eq)

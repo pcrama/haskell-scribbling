@@ -4,6 +4,7 @@ module TestGame (
   , testPlayLevel
   , testUnconstrainedMove
   , testPlayGame
+  , testWon
   )
 where
 
@@ -436,3 +437,18 @@ testPlayGame = describe "playGame" $ do
           let (_, execCmds, logging) = runRWS playGame' () cmds
           it "ran all steps" $ execCmds `shouldBe` []
           it "called all expected actions" $ logging `shouldBe` expLogging
+
+testWon :: SpecWith ()
+testWon = describe "won" $ do
+    it "works when #crates > #targets" $ do
+      ["X*x"] `shouldSatisfy` wins -- because there is nowhere to put the left crate
+      ["X*", "X_"] `shouldNotSatisfy` wins
+    it "works when #crates = #targets" $ do
+      ["X*x_"] `shouldNotSatisfy` wins -- because there is still room for the left crate
+      [".x.", "x*x", ".x."] `shouldSatisfy` wins
+    it "works when #crates < #targets" $ do
+      ["_*x_"] `shouldSatisfy` wins -- because there are no other crates to fill the other targets
+      ["_*X_"] `shouldNotSatisfy` wins
+  where wins s = case makeMap s of
+                   Just mp -> won mp
+                   Nothing -> error $ "Bad test case: map " ++ show s ++ " could not be parsed"

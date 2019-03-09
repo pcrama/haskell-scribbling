@@ -43,3 +43,4 @@ main = hspec $ do
     testMove
     testPlayLevel
     testPlayGame
+    testWon
