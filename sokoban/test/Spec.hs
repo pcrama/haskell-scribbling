@@ -8,7 +8,8 @@ import Zipper
 import TestInteractiveSelect
 import TestGame
 
-testZipper = do
+testZipper :: SpecWith ()
+testZipper = describe "Zipper" $ do
     describe ("mkZipper " ++ show initList) $ do
       let mbZ0 = mkZipper initList
       it "makes a Zipper for a non empty list" $ shouldBe (isJust mbZ0) True

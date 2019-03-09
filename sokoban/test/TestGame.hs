@@ -20,7 +20,8 @@ import Control.Monad.RWS (runRWS, RWS, get, put, tell)
 import Test.Hspec
 
 import Game
-import InteractiveSelect
+
+testMakeMap, testMove, testPlayLevel, testUnconstrainedMove, testPlayGame :: SpecWith ()
 
 testUnconstrainedMove = describe "unconstrainedMove" $ do
   let p0 = Pos { _x = 0, _y = 0 }
@@ -45,10 +46,13 @@ testUnconstrainedMove = describe "unconstrainedMove" $ do
     p0 `shouldBe` (unconstrainedMove (unconstrainedMove p0 Le) Ri)
     p0 `shouldBe` (unconstrainedMove (unconstrainedMove p0 Ri) Le)
 
+minimalMapText :: [String]
 minimalMapText = ["#####", "#_X*#", "#####"]
+minimalMap :: [[Tile]]
 minimalMap = [[Wall, Wall, Wall, Wall, Wall]
              , [Wall, F Target, O CrateOnFree, F Free, Wall]
              , [Wall, Wall, Wall, Wall, Wall]]
+minimalMapPos :: Pos
 minimalMapPos = Pos { _x = 3, _y = 1 }
 
 testMakeMap = describe "makeMap" $ do
@@ -81,8 +85,8 @@ testMakeMap = describe "makeMap" $ do
     _rows mp `shouldBe` length minimalMapText
     _cols mp `shouldBe` length (head minimalMapText)
     _player mp `shouldBe` minimalMapPos
-    forM_ [(0, F Free), (1, Wall), (2, Wall), (3, Wall), (4, F Free)] $ \(col, exp) ->
-      tile mp (Pos { _x = col, _y = 0 }) `shouldBe` exp
+    forM_ [(0, F Free), (1, Wall), (2, Wall), (3, Wall), (4, F Free)] $ \(col, expTile) ->
+      tile mp (Pos { _x = col, _y = 0 }) `shouldBe` expTile
     forM_ [1..2] $ \row ->
       forM_ [0..4] $ \col ->
         tile mp (Pos { _x = col, _y = row }) `shouldBe` (minimalMap !! row) !! col
@@ -177,11 +181,11 @@ testPlayLevel = describe "playLevel" $ do
         isQuery (Draw _ _) = False
         runScenario mapText expLogging expResult = do
           let cmds = map (\(Query x) -> x) $ filter isQuery expLogging
-          let Just map = makeMap mapText
-          let (output, execCmds, logging) = runRWS (playLevel map query' draw') () cmds
+          let Just mp = makeMap mapText
+          let (result, execCmds, logging) = runRWS (playLevel mp query' draw') () cmds
           it "ran all steps" $ execCmds `shouldBe` []
           it "called all expected actions" $ logging `shouldBe` expLogging
-          it "return the correct value" $ output `shouldBe` expResult
+          it "return the correct value" $ result `shouldBe` expResult
 
 testMove = describe "move & moveCrate" $ do
     -- several tests will use a 5x5 map with the player in the center,
@@ -269,8 +273,9 @@ testGamePrompt _ = do
 testGameDraw :: Map -> TestGameM ()
 testGameDraw = tell . (:[]) . uncurry GDraw . extractMapInfo
 
-extractMapInfo map@(Map { _rows = rows, _cols = cols, _player = p }) =
-    ([[tile map $ Pos { _x = c, _y = r } | c <- [0..cols - 1]]
+extractMapInfo :: Map -> ([[Tile]], Pos)
+extractMapInfo mp@(Map { _rows = rows, _cols = cols, _player = p }) =
+    ([[tile mp $ Pos { _x = c, _y = r } | c <- [0..cols - 1]]
      | r <- [0..rows - 1]]
     , p)
 
@@ -286,17 +291,19 @@ testPlayGame = describe "playGame" $ do
                           , [Wall, Wall, Wall, Wall, Wall]]
                         $ Pos { _x = 2, _y = 1 }
                   , GQuery $ Prompt True
-                  , GQuery $ SelectLevel True ["X*_"] -- impossible level!
-                  , GDraw [[O CrateOnFree, F Free, F Target]] $ Pos { _x = 1, _y = 0 }
+                  , selectImpossibleLevel True
+                  , drawImpossibleLevel
                   , GQuery $ PlayLevel $ Quit
                   , GQuery $ Prompt False]
     describe "scenario 2: abort level selection" $ do
       runScenario [GQuery $ SelectLevel False []]
-  where isQuery (GQuery _) = True
+  where selectImpossibleLevel b = GQuery $ SelectLevel b ["X*_"]
+        drawImpossibleLevel = GDraw [[O CrateOnFree, F Free, F Target]] $ Pos { _x = 1, _y = 0 }
+        isQuery (GQuery _) = True
         isQuery (GDraw _ _) = False
         playGame' = playGame testGameSelectLevel testGameQuery testGameDraw testGamePrompt
         runScenario expLogging = do
           let cmds = map (\(GQuery x) -> x) $ filter isQuery expLogging
-          let (output, execCmds, logging) = runRWS playGame' () cmds
+          let (_, execCmds, logging) = runRWS playGame' () cmds
           it "ran all steps" $ execCmds `shouldBe` []
           it "called all expected actions" $ logging `shouldBe` expLogging

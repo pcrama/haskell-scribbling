@@ -8,7 +8,6 @@ module TestInteractiveSelect (testInteractiveSelect) where
  - 4. If last TestCall is QuitSelection, output is Nothing
  -}
 
-import Data.Maybe (isJust, maybe)
 import Control.Monad.RWS (runRWS, RWS, get, put, tell)
 import Test.Hspec
 
@@ -33,6 +32,7 @@ query' = do
 draw' :: a -> TestM a ()
 draw' = tell . (:[]) . Draw
 
+selector :: Bool -> TestM a (Maybe a)
 selector = interactiveSelect (\(TestState _ z) -> z) (\z (TestState c _) -> TestState c z) draw' query'
 
 testInteractiveSelect = describe "interactiveSelect" $ do

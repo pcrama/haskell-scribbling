@@ -7,7 +7,6 @@ where
 
 import Control.Monad.State (
     MonadState
-  , StateT
   , get
   , put
   )
@@ -32,8 +31,8 @@ interactiveSelect extractFromState updateState drawLevel query advanceBeforeSele
       (True, Nothing) -> go $ zipperFirst zipper -- wrap around to present new level
       _ -> go zipper
   where update f = get >>= (put . f)
-        go zipper = do
-          update $ updateState zipper
+        go zipperIn = do
+          update $ updateState zipperIn
           zipper <- fmap extractFromState get
           let focus = zipperFocus zipper
           drawLevel focus

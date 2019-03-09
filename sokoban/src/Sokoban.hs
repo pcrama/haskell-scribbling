@@ -47,10 +47,12 @@ main = do
         _ <- runCurses $ flip evalStateT z $ do
           lift $ setEcho False
           w <- lift $ defaultWindow
+          c <- lift $ setCursorMode CursorInvisible
           playGame (selectLevel' w)
                    (lift $ getPlayerCommand' w)
                    (lift . drawMap' w "Move with hjkl or arrows, q to select level, u to undo")
                    (lift . getPlayerDecision' w)
+          lift $ setCursorMode c
         putStrLn "Bye, bye!"
   where getPlayerCommand' :: Window -> Curses PlayerCommand
         getPlayerCommand' w = waitFor w $ flip lookup [
@@ -87,7 +89,6 @@ main = do
         drawMap' :: Window -> String -> Map -> Curses ()
         drawMap' w s mp = do
           let Pos { _x = x, _y = y } = _player mp
-          setCursorMode CursorInvisible
           updateWindow w $ do
             (winRows, winCols) <- windowSize
             clear
@@ -95,7 +96,7 @@ main = do
             drawString s
             let rowOffs = (winRows - (fromIntegral $ _rows mp)) `div` 2
             let colOffs = (winCols - (fromIntegral $ _cols mp)) `div` 2
-            let moveCursorRel x y = moveCursor (rowOffs + fromIntegral y) (colOffs + fromIntegral x)
+            let moveCursorRel cx cy = moveCursor (rowOffs + fromIntegral cy) (colOffs + fromIntegral cx)
             forM_ [0.._rows mp - 1] $ \row ->
               forM_ [0.._cols mp - 1] $ \col ->
                 let drawChar c r g = do
@@ -109,7 +110,7 @@ main = do
                   O CrateOnTarget -> drawChar col row 'x'
             moveCursorRel x y
             drawString "*"
-            moveCursorRel 0 $ _rows mp
+            moveCursorRel (0 :: Int) $ _rows mp
             drawString $ show (_undosLeft mp) ++ " undos left"
           render
         getPlayerDecision' :: Window -> String -> Curses Bool

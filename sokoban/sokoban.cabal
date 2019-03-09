@@ -62,7 +62,7 @@ executable sokoban
   
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:    
-  
+  ghc-options:         -Wall
   -- Other library packages from which modules are imported.
   build-depends:       base >= 4.9 && < 5
                      , ncurses >= 0.2 && < 1
@@ -90,7 +90,7 @@ executable test
   
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:    
-  
+  ghc-options:         -Wall
   -- Other library packages from which modules are imported.
   build-depends:       base >= 4.9 && < 5
                      , hspec

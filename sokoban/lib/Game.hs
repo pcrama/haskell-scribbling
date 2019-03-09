@@ -16,7 +16,6 @@ module Game (
   )
 where
 
-import Control.Monad (forM_)
 import Data.List (findIndices)
 import Data.Maybe (catMaybes, maybe)
 
