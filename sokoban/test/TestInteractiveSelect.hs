@@ -35,6 +35,7 @@ draw' = tell . (:[]) . Draw
 selector :: Bool -> TestM a (Maybe a)
 selector = interactiveSelect (\(TestState _ z) -> z) (\z (TestState c _) -> TestState c z) draw' query'
 
+testInteractiveSelect :: SpecWith ()
 testInteractiveSelect = describe "interactiveSelect" $ do
     describe "scenario 1" $
       runScenario [0..2 :: Int] False [Draw 0, Query ConfirmSelection] 0 (Just 0)
