@@ -71,6 +71,7 @@ executable sokoban
   build-depends:       base >= 4.9 && < 5
                      , ncurses >= 0.2 && < 1
                      , mtl >= 2.2.1 && < 3
+                     , optparse-applicative >= 0.14 && < 1
   
   -- Directories containing source files.
   hs-source-dirs:      src

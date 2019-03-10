@@ -147,8 +147,8 @@ playGame nextLevel getCmd draw prompt = loop False
               else return ()
             Nothing -> return ()
 
-makeMap :: [String] -> Maybe Map
-makeMap xs =
+makeMap :: Int -> [String] -> Maybe Map
+makeMap maxUndo xs =
   let rows = length xs
       len = length $ head xs
   in case (rows, all (== len) $ map length $ tail xs) of
@@ -165,7 +165,7 @@ makeMap xs =
         _rows = rows
         , _cols = len
         , _player = Pos { _x = pCol, _y = pRow }
-        , _undosLeft = 50
+        , _undosLeft = maxUndo
         , _undo = Nothing
         , _moveMap = \(Pos { _x = x, _y = y}) ->
                        if x < 0 || x >= len || y < 0 || y >= rows
@@ -183,6 +183,7 @@ splitOnBlankLines lst = hd:(splitOnBlankLines $ dropWhile mapSeparator tl)
   where (hd, tl) = break mapSeparator lst
         mapSeparator = all (`elem` " \t") -- NB: all p [] == True => empty line is separator, too!
 
-parseLevels :: String -- |^ All levels together, separated by at least one blank line
+parseLevels :: Int    -- |^ Initial value of remaining undo operations
+            -> String -- |^ All levels together, separated by at least one blank line
             -> [Map]  -- |^ List of levels that parsed OK.  Parse errors are silently dropped from list.
-parseLevels = catMaybes . map makeMap . splitOnBlankLines . lines
+parseLevels maxUndo = catMaybes . map (makeMap maxUndo) . splitOnBlankLines . lines

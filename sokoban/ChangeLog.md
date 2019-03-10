@@ -22,3 +22,4 @@
 ## 0.4.0.0  -- 2019-03-07
 
 * Reorganize code & add tests
+* Add command line argument parsing for amount of allowed undo actions

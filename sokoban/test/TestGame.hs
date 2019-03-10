@@ -16,6 +16,11 @@ import Test.QuickCheck
 
 import Game
 
+-- shorthand to avoid passing the maximum number of undos all the time
+-- (not really important for our tests anyway)
+makeMap' :: [String] -> Maybe Map
+makeMap' = makeMap 50
+
 newtype ArbMap = ArbMap Map
 
 instance Show ArbMap where
@@ -169,13 +174,13 @@ minimalMapPos = Pos { _x = 3, _y = 1 }
 testMakeMap = describe "makeMap" $ do
   describe "ignores invalid input" $ do
     it "not rectangular" $
-      makeMap ["#####", "#*X_#", "###"] `shouldSatisfy` isNothing
+      makeMap' ["#####", "#*X_#", "###"] `shouldSatisfy` isNothing
     it "with 2 initial player positions" $
-      makeMap ["#####", "#*X_*", "#####"] `shouldSatisfy` isNothing
+      makeMap' ["#####", "#*X_*", "#####"] `shouldSatisfy` isNothing
     it "without initial player position" $
-      makeMap ["#####", "# X_#", "#####"] `shouldSatisfy` isNothing
+      makeMap' ["#####", "# X_#", "#####"] `shouldSatisfy` isNothing
   it "parses minimal Map" $ do
-    let Just mp = makeMap minimalMapText
+    let Just mp = makeMap' minimalMapText
     _rows mp `shouldBe` length minimalMapText
     _cols mp `shouldBe` length (head minimalMapText)
     _player mp `shouldBe` minimalMapPos
@@ -183,7 +188,7 @@ testMakeMap = describe "makeMap" $ do
       forM_ [0..4] $ \col ->
         tile mp (Pos { _x = col, _y = row }) `shouldBe` (minimalMap !! row) !! col
   it "recognizes all tile types" $ do
-    let Just mp = makeMap ["#Xx_* "]
+    let Just mp = makeMap' ["#Xx_* "]
     _rows mp `shouldBe` 1
     _cols mp `shouldBe` 6
     _player mp `shouldBe` Pos { _x = 4, _y = 0 }
@@ -192,7 +197,7 @@ testMakeMap = describe "makeMap" $ do
         $ \(col, expTile) -> do
           tile mp (Pos { _x = col, _y = 0 }) `shouldBe` expTile
   it "treats garbage as free tiles" $ do
-    let Just mp = makeMap $ ".###.":(tail minimalMapText)
+    let Just mp = makeMap' $ ".###.":(tail minimalMapText)
     _rows mp `shouldBe` length minimalMapText
     _cols mp `shouldBe` length (head minimalMapText)
     _player mp `shouldBe` minimalMapPos
@@ -296,7 +301,7 @@ testPlayLevel = describe "playLevel" $ do
         isQuery (Draw _ _) = False
         runScenario mapText expLogging expResult = do
           let cmds = map (\(Query x) -> x) $ filter isQuery expLogging
-          let Just mp = makeMap mapText
+          let Just mp = makeMap' mapText
           let (result, execCmds, logging) = runRWS (playLevel mp query' draw') () cmds
           it "ran all steps" $ execCmds `shouldBe` []
           it "called all expected actions" $ logging `shouldBe` expLogging
@@ -315,16 +320,16 @@ testMove = describe "move & moveCrate" $ do
     forM_ [Up, Do, Le, Ri] $ \dir ->
       describe ("move <Map...> " ++ show dir) $ do
         it "doesn't run through walls" $ do
-          let Just mp = makeMap ["###", "#*#", "###"]
+          let Just mp = makeMap' ["###", "#*#", "###"]
           move mp dir `shouldSatisfy` isNothing
         it "doesn't push crates through walls" $ do
-          let Just mp = makeMap ["#####", "#XXX#", "#X*X#", "#XXX#", "#####"]
+          let Just mp = makeMap' ["#####", "#XXX#", "#X*X#", "#XXX#", "#####"]
           move mp dir `shouldSatisfy` isNothing
         it "doesn't push more than one crate" $ do
-          let Just mp = makeMap ["XXXXX", "XXXXX", "XX*XX", "XXXXX", "XXXXX"]
+          let Just mp = makeMap' ["XXXXX", "XXXXX", "XX*XX", "XXXXX", "XXXXX"]
           move mp dir `shouldSatisfy` isNothing
         it "pushes 1! crate onto F Free" $ do
-          let Just mp = makeMap [".....", ".XXX.", ".X*X.", ".XXX.", "....."]
+          let Just mp = makeMap' [".....", ".XXX.", ".X*X.", ".XXX.", "....."]
           let Just (shouldBeFree, shouldBeCrate) = lookup dir pushCrateAwayFromCenter
           let mbMp' = move mp dir
           mbMp' `shouldSatisfy` isJust
@@ -333,7 +338,7 @@ testMove = describe "move & moveCrate" $ do
           tile mp' shouldBeCrate `shouldBe` O CrateOnFree
           _player mp' `shouldBe` shouldBeFree
         it "pushes 1! crate onto F Target" $ do
-          let Just mp = makeMap [".._..", ".XXX.", "_X*X_", ".XXX.", ".._.."]
+          let Just mp = makeMap' [".._..", ".XXX.", "_X*X_", ".XXX.", ".._.."]
           let Just (shouldBeFree, shouldBeCrate) = lookup dir pushCrateAwayFromCenter
           let mbMp' = move mp dir
           mbMp' `shouldSatisfy` isJust
@@ -342,7 +347,7 @@ testMove = describe "move & moveCrate" $ do
           tile mp' shouldBeCrate `shouldBe` O CrateOnTarget
           _player mp' `shouldBe` shouldBeFree
         it "pushes 1! crate from F Target onto F Free" $ do
-          let Just mp = makeMap [".....", ".XxX.", ".x*x.", ".XxX.", "....."]
+          let Just mp = makeMap' [".....", ".XxX.", ".x*x.", ".XxX.", "....."]
           let Just (shouldBeTarget, shouldBeCrate) = lookup dir pushCrateAwayFromCenter
           let mbMp' = move mp dir
           mbMp' `shouldSatisfy` isJust
@@ -369,7 +374,7 @@ testGameSelectLevel b = do
   (SelectLevel _ levelText):cmds <- get
   put $ cmds
   tell $ [GQuery $ SelectLevel b levelText]
-  return $ makeMap levelText
+  return $ makeMap' levelText
 
 testGameQuery :: TestGameM PlayerCommand
 testGameQuery = do
@@ -449,6 +454,6 @@ testWon = describe "won" $ do
     it "works when #crates < #targets" $ do
       ["_*x_"] `shouldSatisfy` wins -- because there are no other crates to fill the other targets
       ["_*X_"] `shouldNotSatisfy` wins
-  where wins s = case makeMap s of
+  where wins s = case makeMap' s of
                    Just mp -> won mp
                    Nothing -> error $ "Bad test case: map " ++ show s ++ " could not be parsed"

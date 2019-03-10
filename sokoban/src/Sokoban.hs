@@ -1,10 +1,12 @@
 import UI.NCurses
+import Data.Semigroup ((<>))
 import Control.Monad (forM_)
 import Control.Monad.State (
     StateT
   , evalStateT
   , lift
   )
+import Options.Applicative
 
 import Lib (
     Occupied(..)
@@ -23,6 +25,8 @@ import Lib (
   , parseLevels
   )
 
+data Opts = Opts { maxUndo :: !Int }
+
 waitFor :: Window -> (Event -> Maybe a) -> Curses a
 waitFor w p = loop where
   loop = do
@@ -40,8 +44,9 @@ type AppM = StateT (Zipper Map) Curses
 
 main :: IO ()
 main = do
+    opts <- execParser optsParser
     allLevelsText <- readFile "./levels.txt"
-    case mkZipper $ parseLevels allLevelsText of
+    case mkZipper $ parseLevels (maxUndo opts) allLevelsText of
       Nothing -> putStrLn "No levels found"
       Just z -> do
         _ <- runCurses $ flip evalStateT z $ do
@@ -125,3 +130,17 @@ main = do
                                   , (EventCharacter 'Y', True)
                                   , (EventCharacter 'n', False)
                                   , (EventCharacter 'N', False)]
+        optsParser :: ParserInfo Opts
+        optsParser = info (helper <*> versionOption <*> programOptions)
+                          (fullDesc
+                           <> progDesc "Sokoban game"
+                           <> header "Clone of the Sokoban game in text mode")
+        versionOption :: Parser (a -> a)
+        versionOption = infoOption "0.4.0.0"
+                                   (long "version" <> short 'v' <> help "Show version") 
+        programOptions :: Parser Opts
+        programOptions = Opts <$> option auto (long "undos"
+                                               <> short 'u'
+                                               <> help "How many undos to allow"
+                                               <> metavar "UNDOS"
+                                               <> value (50 :: Int))
