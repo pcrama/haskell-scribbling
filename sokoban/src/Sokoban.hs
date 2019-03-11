@@ -25,7 +25,10 @@ import Lib (
   , parseLevels
   )
 
-data Opts = Opts { maxUndo :: !Int }
+data Opts = Opts {
+  maxUndo :: !Int
+  , levelsPath :: !FilePath
+  }
 
 waitFor :: Window -> (Event -> Maybe a) -> Curses a
 waitFor w p = loop where
@@ -45,7 +48,7 @@ type AppM = StateT (Zipper Map) Curses
 main :: IO ()
 main = do
     opts <- execParser optsParser
-    allLevelsText <- readFile "./levels.txt"
+    allLevelsText <- readFile $ levelsPath opts
     case mkZipper $ parseLevels (maxUndo opts) allLevelsText of
       Nothing -> putStrLn "No levels found"
       Just z -> do
@@ -144,3 +147,8 @@ main = do
                                                <> help "How many undos to allow"
                                                <> metavar "UNDOS"
                                                <> value (50 :: Int))
+                              <*> strOption (long "levels"
+                                             <> short 'l'
+                                             <> help "Path to file with level definitions"
+                                             <> metavar "FILE"
+                                             <> value "levels.txt")
