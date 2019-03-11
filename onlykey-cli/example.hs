@@ -23,10 +23,18 @@ import System.USB
 
 main :: IO ()
 main = do
-  [vendorIdStr, productIdStr] <- getArgs
-  let vendorId  = read vendorIdStr
-      productId = read productIdStr
+  args <- getArgs
+  let mbIds =
+        case args of
+          [] -> Just (0x1d50, 0x60fc) -- default vendorId & productId of onlykey
+          [vendorIdStr, productIdStr] -> Just (read vendorIdStr, read productIdStr)
+          _ -> Nothing
+  case mbIds of
+    Nothing -> fail "two arguments or nothing"
+    Just (vendorId, productId) -> doMain vendorId productId
 
+doMain :: VendorId -> ProductId -> IO ()
+doMain vendorId productId = do
   -- Initialization:
   ctx <- newCtx
   setDebug ctx PrintDebug
