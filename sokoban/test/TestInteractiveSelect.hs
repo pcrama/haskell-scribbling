@@ -17,17 +17,24 @@ import InteractiveSelect
 data TestState a = TestState [SelectCommand] (Zipper a)
   deriving (Show, Eq)
 
-data TestCalls a = Query SelectCommand | Draw a
+data TestCalls a = Query SelectCommand
+                 | Draw a
+                 | TestSelectFailure String
   deriving (Show, Eq)
 
 type TestM a o = RWS () [TestCalls a] (TestState a) o
 
 query' :: TestM a SelectCommand
 query' = do
-  TestState (c:cmds) z <- get
-  put $ TestState cmds z
-  tell $ [Query c]
-  return c
+  cmds' <- get
+  case cmds' of
+    TestState (c:cmds) z -> do
+      put $ TestState cmds z
+      tell [Query c]
+      return c
+    TestState [] _ -> do
+      tell [TestSelectFailure "Unexpected end of commands in query"]
+      return QuitSelection -- try to end test case
 
 draw' :: a -> TestM a ()
 draw' = tell . (:[]) . Draw
@@ -73,11 +80,14 @@ testInteractiveSelect = describe "interactiveSelect" $ do
                   (Just 'a')
   where isQuery (Query _) = True
         isQuery (Draw _) = False
+        isQuery (TestSelectFailure _) = False
         runScenario choices initSkip expLogging expFocus expResult = do
           let cmds = map (\(Query q) -> q) $ filter isQuery expLogging
           let Just zIn = mkZipper choices
           let (output, TestState execCmds zOut, logging) = runRWS (selector initSkip) () $ TestState cmds zIn
           it "ran all steps" $ shouldBe execCmds []
+          -- comparing with expLogging will catch TestSelectFailure in `logging',
+          -- so no extra test is needed to exclude them:
           it "called all expected actions" $ shouldBe logging expLogging
           it "focussed on selected element" $ shouldBe (zipperFocus zOut) expFocus
           it "return the correct value" $ shouldBe output expResult

@@ -8,6 +8,7 @@ module TestGame (
   )
 where
 
+import Data.List (find)
 import Data.Maybe (isNothing, isJust, catMaybes)
 import Control.Monad (forM_)
 import Control.Monad.RWS (runRWS, RWS, get, put, tell)
@@ -76,14 +77,27 @@ instance Arbitrary ArbPlayerCommand where
                                                 , (3, return Undo)
                                                 , (1, return Quit)]
 
+-- ensure arbitrary list of commands is never empty and always finishes with
+-- Quit to make sure all arbitrary levels finish
+extractPlayerCommands :: [ArbPlayerCommand] -> [PlayerCommand]
+extractPlayerCommands apc = map unArbPlayerCommand apc ++ [Quit]
+
+containsNoTestLevelFailures :: [TestLevelCalls] -> Bool
+containsNoTestLevelFailures = isNothing . find isTestLevelFailure
+  where isTestLevelFailure (TestLevelFailure _) = True
+        isTestLevelFailure (Draw _ _) = False
+        isTestLevelFailure (Query _) = False
+
 -- TODO: study inputs to see if we cover enough
 prop_playLevelConservesCounts :: ArbMap -> [ArbPlayerCommand] -> Bool
 prop_playLevelConservesCounts (ArbMap mp) apc =
-    all countsMatch $ catMaybes $ map getDraw $ logging
-  where cmds = map unArbPlayerCommand apc ++ [Quit] -- ensure list of commands is never empty
+    (all countsMatch $ catMaybes $ map getDraw $ logging)
+    && containsNoTestLevelFailures logging
+  where cmds = extractPlayerCommands apc
         (_, _, logging) = runRWS (playLevel mp query' draw') () cmds
         getDraw (Draw ts _) = Just ts
         getDraw (Query _) = Nothing
+        getDraw (TestLevelFailure _) = Nothing
         isFree (F _) = 1 :: Int
         isFree _ = 0
         isTarget (F Target) = 1 :: Int
@@ -112,11 +126,13 @@ prop_playLevelConservesCounts (ArbMap mp) apc =
 -- TODO: study inputs to see if we cover enough
 prop_playLevelPlayerOnlyStepsOnFreeTiles :: ArbMap -> [ArbPlayerCommand] -> Bool
 prop_playLevelPlayerOnlyStepsOnFreeTiles (ArbMap mp) apc =
-    all playerOnFreeTiles $ catMaybes $ map getDraw $ logging
-  where cmds = map unArbPlayerCommand apc ++ [Quit] -- ensure list of commands is never empty
+    (all playerOnFreeTiles $ catMaybes $ map getDraw $ logging)
+    && containsNoTestLevelFailures logging
+  where cmds = extractPlayerCommands apc
         (_, _, logging) = runRWS (playLevel mp query' draw') () cmds
         getDraw (Draw ts p) = Just (ts, p)
         getDraw (Query _) = Nothing
+        getDraw (TestLevelFailure _) = Nothing
         playerOnFreeTiles (ts, Pos { _x = x, _y = y }) =
             y >= 0 && x >= 0 && y < length ts && x < length row
             && isFree (row !! x)
@@ -128,8 +144,9 @@ prop_playLevelPlayerOnlyStepsOnFreeTiles (ArbMap mp) apc =
 -- TODO: study inputs to see if we cover enough
 prop_playLevelDrawAndQueryAlternate :: ArbMap -> [ArbPlayerCommand] -> Bool
 prop_playLevelDrawAndQueryAlternate (ArbMap mp) apc =
+    -- this one implicitly rejects TestLevelFailure
     alternatingDrawAndQuery logging
-  where cmds = map unArbPlayerCommand apc ++ [Quit] -- ensure list of commands is never empty
+  where cmds = extractPlayerCommands apc
         (_, _, logging) = runRWS (playLevel mp query' draw') () cmds
         alternatingDrawAndQuery [] = True
         alternatingDrawAndQuery [_] = True
@@ -211,16 +228,27 @@ type TestLevelState = [PlayerCommand]
 
 data TestLevelCalls = Query PlayerCommand
                     | Draw [[Tile]] Pos
+                    | TestLevelFailure String
   deriving (Show, Eq)
 
 type TestLevelM o = RWS () [TestLevelCalls] TestLevelState o
 
 query' :: TestLevelM PlayerCommand
 query' = do
-  c:cmds <- get
-  put $ cmds
-  tell $ [Query c]
-  return c
+  cmds' <- get
+  case cmds' of
+    c:cmds -> do
+      put $ cmds
+      tell [Query c]
+      return c
+    [] -> do
+      -- should never happen:
+      -- 1. in scripted scenarios (testPlayLevel scenarios) it is the
+      --    responsibility of the scenario author,
+      -- 2. for properties, all lists of arbitrary commands go through
+      --    extractPlayerCommands and have a trailing Quit.
+      tell [TestLevelFailure "Unexpected end of commands in query"]
+      return Quit -- try to end test case
 
 draw' :: Map -> TestLevelM ()
 draw' = tell . (:[]) . uncurry Draw . extractMapInfo
@@ -299,6 +327,7 @@ testPlayLevel = describe "playLevel" $ do
                   False
   where isQuery (Query _) = True
         isQuery (Draw _ _) = False
+        isQuery (TestLevelFailure _) = False
         runScenario mapText expLogging expResult = do
           let cmds = map (\(Query x) -> x) $ filter isQuery expLogging
           let Just mp = makeMap' mapText
@@ -363,6 +392,7 @@ data TestGameQuery = SelectLevel Bool [String]
 
 data TestGameLog = GQuery TestGameQuery
                  | GDraw [[Tile]] Pos
+                 | TestGameFailure String
   deriving (Show, Eq)
 
 type TestGameM o = RWS () [TestGameLog] [TestGameQuery] o
@@ -371,24 +401,51 @@ type TestGameM o = RWS () [TestGameLog] [TestGameQuery] o
 -- invalid map to makeMap
 testGameSelectLevel :: Bool -> TestGameM (Maybe Map)
 testGameSelectLevel b = do
-  (SelectLevel _ levelText):cmds <- get
-  put $ cmds
-  tell $ [GQuery $ SelectLevel b levelText]
-  return $ makeMap' levelText
+  cmds' <- get
+  case cmds' of
+    (SelectLevel _ levelText):cmds -> do
+      put $ cmds
+      tell [GQuery $ SelectLevel b levelText]
+      return $ makeMap' levelText
+    [] -> do
+      tell [TestGameFailure "Reached end of commands in testGameSelectLevel"]
+      return Nothing -- try to stop test run
+    c:cmds -> do -- if this happens, the test driver and system under test have gotten out of sync
+      put $ cmds
+      tell [TestGameFailure $ "Unexpected " ++ show c ++ " in testGameSelectLevel"]
+      return Nothing -- try to stop test run
 
 testGameQuery :: TestGameM PlayerCommand
 testGameQuery = do
-  taggedC@(PlayLevel c):cmds <- get
-  put $ cmds
-  tell $ [GQuery taggedC]
-  return c
+  cmds' <- get
+  case cmds' of
+    taggedC@(PlayLevel c):cmds -> do
+      put $ cmds
+      tell [GQuery taggedC]
+      return c
+    [] -> do
+      tell [TestGameFailure "Reached end of commands in testGameQuery"]
+      return Quit -- try to stop test run
+    c:cmds -> do -- if this happens, the test driver and system under test have gotten out of sync
+      put $ cmds
+      tell [TestGameFailure $ "Unexpected " ++ show c ++ " in testGameQuery"]
+      return Quit -- try to stop test run
 
 testGamePrompt :: String -> TestGameM Bool
 testGamePrompt _ = do
-  taggedC@(Prompt b):cmds <- get
-  put $ cmds
-  tell $ [GQuery taggedC]
-  return b
+  cmds' <- get
+  case cmds' of
+    taggedB@(Prompt b):cmds -> do
+      put $ cmds
+      tell [GQuery taggedB]
+      return b
+    [] -> do
+      tell [TestGameFailure "Reached end of commands in testGamePrompt"]
+      return False -- try to stop test run
+    c:cmds -> do -- if this happens, the test driver and system under test have gotten out of sync
+      put $ cmds
+      tell [TestGameFailure $ "Unexpected " ++ show c ++ " in testGamePrompt"]
+      return False -- try to stop test run
 
 testGameDraw :: Map -> TestGameM ()
 testGameDraw = tell . (:[]) . uncurry GDraw . extractMapInfo
@@ -436,11 +493,14 @@ testPlayGame = describe "playGame" $ do
         drawImpossibleLevel = GDraw [[O CrateOnFree, F Free, F Target]] $ Pos { _x = 1, _y = 0 }
         isQuery (GQuery _) = True
         isQuery (GDraw _ _) = False
+        isQuery (TestGameFailure _) = False
         playGame' = playGame testGameSelectLevel testGameQuery testGameDraw testGamePrompt
         runScenario expLogging = do
           let cmds = map (\(GQuery x) -> x) $ filter isQuery expLogging
           let (_, execCmds, logging) = runRWS playGame' () cmds
           it "ran all steps" $ execCmds `shouldBe` []
+          -- this will also implicitly reject any TestGameFailure
+          -- in logging
           it "called all expected actions" $ logging `shouldBe` expLogging
 
 testWon :: SpecWith ()
