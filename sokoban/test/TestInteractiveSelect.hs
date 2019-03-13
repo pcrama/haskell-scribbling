@@ -49,15 +49,15 @@ testInteractiveSelect = describe "interactiveSelect" $ do
     describe "scenario 2" $
       runScenario [0..2 :: Int] True [Draw 1, Query ConfirmSelection] 1 (Just 1)
     describe "scenario 3" $
-      runScenario [0..2 :: Int] 
-                  False 
-                  [Draw 0, Query PrevElt, Draw 0, Query ConfirmSelection] 
+      runScenario [0..2 :: Int]
+                  False
+                  [Draw 0, Query PrevElt, Draw 0, Query ConfirmSelection]
                   0
                   (Just 0)
     describe "scenario 4" $
       runScenario [0..2 :: Int]
                   True
-                  [Draw 1, Query PrevElt, Draw 0, Query ConfirmSelection] 
+                  [Draw 1, Query PrevElt, Draw 0, Query ConfirmSelection]
                   0
                   (Just 0)
     describe "scenario 5" $
