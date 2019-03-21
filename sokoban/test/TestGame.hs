@@ -82,20 +82,52 @@ instance Arbitrary ArbPlayerCommand where
 extractPlayerCommands :: [ArbPlayerCommand] -> [PlayerCommand]
 extractPlayerCommands apc = map unArbPlayerCommand apc ++ [Quit]
 
+runPlayLevelForProperty :: ArbMap -> [ArbPlayerCommand] -> [TestLevelCalls]
+runPlayLevelForProperty (ArbMap mp) apc =
+  let _cmds = extractPlayerCommands apc
+      (_levelResult, _remainingCmds, logging) = runRWS (playLevel mp query' draw') () _cmds
+  in logging
+
 containsNoTestLevelFailures :: [TestLevelCalls] -> Bool
 containsNoTestLevelFailures = isNothing . find isTestLevelFailure
   where isTestLevelFailure (TestLevelFailure _) = True
         isTestLevelFailure (Draw _ _) = False
         isTestLevelFailure (Query _) = False
 
+playLevelProperty :: String -> (Map -> [TestLevelCalls] -> Bool) -> SpecWith ()
+playLevelProperty descr prop = it descr $ property p
+  where p amp@(ArbMap mp) apc =
+          let logging = runPlayLevelForProperty amp apc
+          in prop mp logging && containsNoTestLevelFailures logging
+
+playerMoves :: Map -> [TestLevelCalls] -> Int
+playerMoves initialMap = snd . foldr update (initPos, 0)
+  where initPos = _player initialMap
+        update (Query _) x = x
+        update (TestLevelFailure _) x = x
+        update (Draw _ newPos) x@(prevPos, count)
+          | newPos == prevPos = x
+          | otherwise         = (newPos, count + 1)
+
+tileChanges :: Map -> [TestLevelCalls] -> Int
+tileChanges initialMap = snd . foldr update (initTiles, 0)
+  where (initTiles, _) = extractMapInfo initialMap
+        update (Query _) x = x
+        update (TestLevelFailure _) x = x
+        update (Draw newTiles _) x@(prevTiles, count)
+          | newTiles == prevTiles = x
+          | otherwise             = (newTiles, count + 1)
+
 -- TODO: study inputs to see if we cover enough
-prop_playLevelConservesCounts :: ArbMap -> [ArbPlayerCommand] -> Bool
-prop_playLevelConservesCounts (ArbMap mp) apc =
+prop_tilesChangeLessThanPlayerMoves :: Map -> [TestLevelCalls] -> Bool
+prop_tilesChangeLessThanPlayerMoves mp logging =
+  tileChanges mp logging <= playerMoves mp logging
+
+-- TODO: study inputs to see if we cover enough
+prop_playLevelConservesCounts :: Map -> [TestLevelCalls] -> Bool
+prop_playLevelConservesCounts mp logging =
     (all countsMatch $ catMaybes $ map getDraw $ logging)
-    && containsNoTestLevelFailures logging
-  where cmds = extractPlayerCommands apc
-        (_, _, logging) = runRWS (playLevel mp query' draw') () cmds
-        getDraw (Draw ts _) = Just ts
+  where getDraw (Draw ts _) = Just ts
         getDraw (Query _) = Nothing
         getDraw (TestLevelFailure _) = Nothing
         isFree (F _) = 1 :: Int
@@ -124,13 +156,10 @@ prop_playLevelConservesCounts (ArbMap mp) apc =
                      && countCrate m == initCrate
 
 -- TODO: study inputs to see if we cover enough
-prop_playLevelPlayerOnlyStepsOnFreeTiles :: ArbMap -> [ArbPlayerCommand] -> Bool
-prop_playLevelPlayerOnlyStepsOnFreeTiles (ArbMap mp) apc =
+prop_playLevelPlayerOnlyStepsOnFreeTiles :: Map -> [TestLevelCalls] -> Bool
+prop_playLevelPlayerOnlyStepsOnFreeTiles _ logging =
     (all playerOnFreeTiles $ catMaybes $ map getDraw $ logging)
-    && containsNoTestLevelFailures logging
-  where cmds = extractPlayerCommands apc
-        (_, _, logging) = runRWS (playLevel mp query' draw') () cmds
-        getDraw (Draw ts p) = Just (ts, p)
+  where getDraw (Draw ts p) = Just (ts, p)
         getDraw (Query _) = Nothing
         getDraw (TestLevelFailure _) = Nothing
         playerOnFreeTiles (ts, Pos { _x = x, _y = y }) =
@@ -142,13 +171,9 @@ prop_playLevelPlayerOnlyStepsOnFreeTiles (ArbMap mp) apc =
                 isFree Wall = False
 
 -- TODO: study inputs to see if we cover enough
-prop_playLevelDrawAndQueryAlternate :: ArbMap -> [ArbPlayerCommand] -> Bool
-prop_playLevelDrawAndQueryAlternate (ArbMap mp) apc =
-    -- this one implicitly rejects TestLevelFailure
-    alternatingDrawAndQuery logging
-  where cmds = extractPlayerCommands apc
-        (_, _, logging) = runRWS (playLevel mp query' draw') () cmds
-        alternatingDrawAndQuery [] = True
+prop_playLevelDrawAndQueryAlternate :: Map -> [TestLevelCalls] -> Bool
+prop_playLevelDrawAndQueryAlternate _ logging = alternatingDrawAndQuery logging
+  where alternatingDrawAndQuery [] = True
         alternatingDrawAndQuery [_] = True
         -- must always start with drawing then querying player for his next move
         alternatingDrawAndQuery ((Draw _ _):(Query _):ls) = alternatingDrawAndQuery ls
@@ -267,9 +292,10 @@ runPlayLevelScenario mp expLogging = do
 
 testPlayLevel = describe "playLevel" $ do
     describe "properties" $ do
-      it "conserves tile counts" $ property prop_playLevelConservesCounts
-      it "only steps on free tiles" $ property prop_playLevelPlayerOnlyStepsOnFreeTiles
-      it "draws map then waits for user input in loop" $ property prop_playLevelDrawAndQueryAlternate
+      playLevelProperty "conserves tile counts" prop_playLevelConservesCounts
+      playLevelProperty "only steps on free tiles" prop_playLevelPlayerOnlyStepsOnFreeTiles
+      playLevelProperty "draws map then waits for user input in loop" prop_playLevelDrawAndQueryAlternate
+      playLevelProperty "changes tiles at most as often as player moves" prop_tilesChangeLessThanPlayerMoves
     runScenario "scenario 1"
                 minimalMapText
                 [Draw minimalMap minimalMapPos
