@@ -253,85 +253,93 @@ query' = do
 draw' :: Map -> TestLevelM ()
 draw' = tell . (:[]) . uncurry Draw . extractMapInfo
 
+runPlayLevelScenario :: Map                 -- |^ level's map
+                     -> [TestLevelCalls]    -- |^ get simulated user interactions from expected logging
+                     -> (Bool
+                        , TestLevelState
+                        , [TestLevelCalls]) -- |^ (playLevel return value, final state, logging)
+runPlayLevelScenario mp expLogging = do
+    let cmds = catMaybes $ map keepOnlyQuery expLogging
+    runRWS (playLevel mp query' draw') () cmds
+  where keepOnlyQuery (Query x) = Just x
+        keepOnlyQuery (Draw _ _) = Nothing
+        keepOnlyQuery (TestLevelFailure _) = Nothing
+
 testPlayLevel = describe "playLevel" $ do
     describe "properties" $ do
       it "conserves tile counts" $ property prop_playLevelConservesCounts
       it "only steps on free tiles" $ property prop_playLevelPlayerOnlyStepsOnFreeTiles
       it "draws map then waits for user input in loop" $ property prop_playLevelDrawAndQueryAlternate
-    describe "scenario 1" $
-      runScenario minimalMapText
-                  [Draw minimalMap minimalMapPos
-                  , Query $ Move Le
-                  , Draw [[Wall, Wall, Wall, Wall, Wall]
-                         , [Wall, O CrateOnTarget, F Free, F Free, Wall]
-                         , [Wall, Wall, Wall, Wall, Wall]]
-                         $ Pos { _x = 2, _y = 1 }]
-                  True
-    describe "scenario 2" $
-      runScenario minimalMapText
-                  [Draw minimalMap minimalMapPos
-                  , Query $ Quit]
-                  False
-    describe "scenario 3" $
-      runScenario ["_X " ,"*X " ,"  _"]
-                  [Draw [[F Target, O CrateOnFree, F Free]
-                        ,[F Free, O CrateOnFree, F Free]
-                        ,[F Free, F Free, F Target]]
-                      $ Pos { _x = 0, _y = 1 }
-                  , Query $ Move Ri
-                  , Draw [[F Target, O CrateOnFree, F Free]
-                         ,[F Free, F Free, O CrateOnFree]
-                         ,[F Free, F Free, F Target]]
-                       $ Pos { _x = 1, _y = 1 }
-                  , Query $ Move Ri
-                  , Draw [[F Target, O CrateOnFree, F Free]
-                         ,[F Free, F Free, O CrateOnFree]
-                         ,[F Free, F Free, F Target]]
-                       $ Pos { _x = 1, _y = 1 }
-                  , Query $ Move Up
-                  , Draw [[F Target, O CrateOnFree, F Free]
-                         ,[F Free, F Free, O CrateOnFree]
-                         ,[F Free, F Free, F Target]]
-                       $ Pos { _x = 1, _y = 1 }
-                  , Query $ Move Le
-                  , Draw [[F Target, O CrateOnFree, F Free]
-                         ,[F Free, F Free, O CrateOnFree]
-                         ,[F Free, F Free, F Target]]
-                       $ Pos { _x = 0, _y = 1 }
-                  , Query $ Move Up
-                  , Draw [[F Target, O CrateOnFree, F Free]
-                         ,[F Free, F Free, O CrateOnFree]
-                         ,[F Free, F Free, F Target]]
-                       $ Pos { _x = 0, _y = 0 }
-                  , Query $ Move Ri
-                  , Draw [[F Target, F Free, O CrateOnFree]
-                         ,[F Free, F Free, O CrateOnFree]
-                         ,[F Free, F Free, F Target]]
-                       $ Pos { _x = 1, _y = 0 }
-                  , Query $ Undo
-                  , Draw [[F Target, O CrateOnFree, F Free]
-                         ,[F Free, F Free, O CrateOnFree]
-                         ,[F Free, F Free, F Target]]
-                       $ Pos { _x = 0, _y = 0 }
-                  , Query $ Undo
-                  , Draw [[F Target, O CrateOnFree, F Free]
-                         ,[F Free, O CrateOnFree, F Free]
-                         ,[F Free, F Free, F Target]]
-                       $ Pos { _x = 0, _y = 1 }
-                  , Query $ Move Do
-                  , Draw [[F Target, O CrateOnFree, F Free]
-                         ,[F Free, O CrateOnFree, F Free]
-                         ,[F Free, F Free, F Target]]
-                       $ Pos { _x = 0, _y = 2 }
-                  , Query Quit]
-                  False
-  where isQuery (Query _) = True
-        isQuery (Draw _ _) = False
-        isQuery (TestLevelFailure _) = False
-        runScenario mapText expLogging expResult = do
-          let cmds = map (\(Query x) -> x) $ filter isQuery expLogging
-          let Just mp = makeMap' mapText
-          let (result, execCmds, logging) = runRWS (playLevel mp query' draw') () cmds
+    runScenario "scenario 1"
+                minimalMapText
+                [Draw minimalMap minimalMapPos
+                , Query $ Move Le
+                , Draw [[Wall, Wall, Wall, Wall, Wall]
+                       , [Wall, O CrateOnTarget, F Free, F Free, Wall]
+                       , [Wall, Wall, Wall, Wall, Wall]]
+                     $ Pos { _x = 2, _y = 1 }]
+                True
+    runScenario "scenario 2"
+                minimalMapText
+                [Draw minimalMap minimalMapPos
+                , Query $ Quit]
+                False
+    runScenario "scenario 3"
+                ["_X " ,"*X " ,"  _"]
+                [Draw [[F Target, O CrateOnFree, F Free]
+                      ,[F Free, O CrateOnFree, F Free]
+                      ,[F Free, F Free, F Target]]
+                    $ Pos { _x = 0, _y = 1 }
+                , Query $ Move Ri
+                , Draw [[F Target, O CrateOnFree, F Free]
+                       ,[F Free, F Free, O CrateOnFree]
+                       ,[F Free, F Free, F Target]]
+                     $ Pos { _x = 1, _y = 1 }
+                , Query $ Move Ri
+                , Draw [[F Target, O CrateOnFree, F Free]
+                       ,[F Free, F Free, O CrateOnFree]
+                       ,[F Free, F Free, F Target]]
+                     $ Pos { _x = 1, _y = 1 }
+                , Query $ Move Up
+                , Draw [[F Target, O CrateOnFree, F Free]
+                       ,[F Free, F Free, O CrateOnFree]
+                       ,[F Free, F Free, F Target]]
+                     $ Pos { _x = 1, _y = 1 }
+                , Query $ Move Le
+                , Draw [[F Target, O CrateOnFree, F Free]
+                       ,[F Free, F Free, O CrateOnFree]
+                       ,[F Free, F Free, F Target]]
+                     $ Pos { _x = 0, _y = 1 }
+                , Query $ Move Up
+                , Draw [[F Target, O CrateOnFree, F Free]
+                       ,[F Free, F Free, O CrateOnFree]
+                       ,[F Free, F Free, F Target]]
+                     $ Pos { _x = 0, _y = 0 }
+                , Query $ Move Ri
+                , Draw [[F Target, F Free, O CrateOnFree]
+                       ,[F Free, F Free, O CrateOnFree]
+                       ,[F Free, F Free, F Target]]
+                     $ Pos { _x = 1, _y = 0 }
+                , Query $ Undo
+                , Draw [[F Target, O CrateOnFree, F Free]
+                       ,[F Free, F Free, O CrateOnFree]
+                       ,[F Free, F Free, F Target]]
+                     $ Pos { _x = 0, _y = 0 }
+                , Query $ Undo
+                , Draw [[F Target, O CrateOnFree, F Free]
+                       ,[F Free, O CrateOnFree, F Free]
+                       ,[F Free, F Free, F Target]]
+                     $ Pos { _x = 0, _y = 1 }
+                , Query $ Move Do
+                , Draw [[F Target, O CrateOnFree, F Free]
+                       ,[F Free, O CrateOnFree, F Free]
+                       ,[F Free, F Free, F Target]]
+                     $ Pos { _x = 0, _y = 2 }
+                , Query Quit]
+                False
+  where runScenario title mapText expLogging expResult = describe title $ do
+          let (Just mp) = makeMap' mapText
+          let (result, execCmds, logging) = runPlayLevelScenario mp expLogging
           it "ran all steps" $ execCmds `shouldBe` []
           it "called all expected actions" $ logging `shouldBe` expLogging
           it "return the correct value" $ result `shouldBe` expResult
