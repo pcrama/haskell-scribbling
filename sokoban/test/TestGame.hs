@@ -5,6 +5,13 @@ module TestGame (
   , testUnconstrainedMove
   , testPlayGame
   , testWon
+  -- for CheckDistributionOfArb.hs
+  , ArbMap(..)
+  , ArbPlayerCommand
+  , TestLevelCalls(..)
+  , extractPlayerCommands
+  , runPlayLevelScenario
+  , tileChanges
   )
 where
 
