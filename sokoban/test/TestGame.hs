@@ -67,10 +67,10 @@ instance Arbitrary ArbMap where
           makeCol :: Int -> Int -> Int -> Int -> Gen Tile
           makeCol px py r c
             | c == px && r == py = return $ F Free -- place for player
-            | otherwise = frequency [(8, return $ F Free)
-                                    , (1, return $ F Target)
-                                    , (1, return $ O CrateOnFree)
-                                    , (1, return $ O CrateOnTarget)
+            | otherwise = frequency [(16, return $ F Free)
+                                    , (3, return $ F Target)
+                                    , (2, return $ O CrateOnFree)
+                                    , (2, return $ O CrateOnTarget)
                                     , (2, return Wall)]
 
 newtype ArbPlayerCommand = ArbPlayerCommand { unArbPlayerCommand :: PlayerCommand }
