@@ -1,139 +1,47 @@
-module Main where
+-- Was example from https://github.com/chpatrick/haskell-hidapi/
+--
+-- Open and dump the first HID device. Should print deltas (?) for a USB mouse.
+-- You need root or a udev rule for your device.
+-- https://github.com/signal11/hidapi/blob/master/udev/99-hid.rules
+-- This seems to claim the device until it is unplugged.
+--
+-- I adapted it to look for a specific device (optical mouse)
 
--- from base:
-import Control.Exception
-import Control.Concurrent.MVar
-import System.IO
-import System.Environment
-import System.Exit
-import Data.Functor
-import Data.List
 import Control.Monad
-import Text.Printf
+import Data.Int
+import qualified Data.ByteString as BS
+import System.HIDAPI as HID
 
--- from bytestring:
-import qualified Data.ByteString as B ( ByteString, length, unpack )
+showHex :: (Integral a) => a -> String
+showHex = go ""
+  where go s x | x < 16 = s ++ (hexChar x:"")
+               | otherwise = let hd = x `div` 16
+                                 tl = x `mod` 16
+                             in go s hd ++ (hexChar tl:"")
+        hexChar = ("0123456789abcdef" !!) . fromIntegral
 
--- from vector:
-import           Data.Vector      ( (!) )
-import qualified Data.Vector as V ( toList )
-
--- from usb:
-import System.USB
+pp :: DeviceInfo -> String
+pp di = "di:path=" ++ show (path di)
+     ++ "\n   vendorId=" ++ showHex (vendorId di)
+     ++ "\n   productId=" ++ showHex (productId di)
+     ++ "\n   serialNumber=" ++ show (serialNumber di)
+     ++ "\n   releaseNumber=" ++ show (releaseNumber di)
+     ++ "\n   manufacturerString=" ++ show (manufacturerString di)
+     ++ "\n   productString=" ++ show (productString di)
+     ++ "\n   usagePage=" ++ show (usagePage di)
+     ++ "\n   usage=" ++ show (usage di)
+     ++ "\n   interfaceNumber=" ++ show (interfaceNumber di)
 
 main :: IO ()
-main = do
-  args <- getArgs
-  let mbIds =
-        case args of
-          [] -> Just (0x1d50, 0x60fc) -- default vendorId & productId of onlykey
-          [vendorIdStr, productIdStr] -> Just (read vendorIdStr, read productIdStr)
-          _ -> Nothing
-  case mbIds of
-    Nothing -> fail "two arguments or nothing"
-    Just (vendorId, productId) -> doMain vendorId productId
-
-doMain :: VendorId -> ProductId -> IO ()
-doMain vendorId productId = do
-  -- Initialization:
-  ctx <- newCtx
-  setDebug ctx PrintDebug
-
-  -- Device retrieval:
-  dev <- if ctx `hasCapability` HasHotplug
-         then waitForMyDevice ctx vendorId productId
-         else findMyDevice ctx vendorId productId
-
-  -- Device usage:
-  doSomethingWithDevice dev
-
-waitForMyDevice :: Ctx -> VendorId -> ProductId -> IO Device
-waitForMyDevice ctx vendorId productId = do
-  putStrLn "Waiting for device attachment..."
-  mv <- newEmptyMVar
-  mask_ $ do
-    h <- registerHotplugCallback ctx
-                                 deviceArrived
-                                 enumerate
-                                 (Just vendorId)
-                                 (Just productId)
-                                 Nothing
-                                 (\dev event ->
-                                    tryPutMVar mv (dev, event) $>
-                                      DeregisterThisCallback)
-    void $ mkWeakMVar mv $ deregisterHotplugCallback h
-  (dev, _event) <- takeMVar mv
-  return dev
-
--- Enumeratie all devices and find the right one.
-findMyDevice :: Ctx -> VendorId -> ProductId -> IO Device
-findMyDevice ctx vendorId productId = do
-    devs <- V.toList <$> getDevices ctx
-    deviceDescs <- mapM getDeviceDesc devs
-    case fmap fst $ find (match . snd) $ zip devs deviceDescs of
-      Nothing  -> hPutStrLn stderr "Mouse not found" >> exitFailure
-      Just dev -> return dev
-  where
-    match :: DeviceDesc -> Bool
-    match devDesc =  deviceVendorId  devDesc == vendorId
-                  && deviceProductId devDesc == productId
-
-doSomethingWithDevice :: Device -> IO ()
-doSomethingWithDevice dev = do
-  putStrLn $ unlines $ deviceInfo dev
-
-  putStrLn "Opening device..."
-  withDeviceHandle dev $ \devHndl -> do
-
-    putStrLn "Detaching kernel driver..."
-    withDetachedKernelDriver devHndl 0 $ do
-
-      putStrLn "Claiming interface..."
-      withClaimedInterface devHndl 0 $ do
-
-        -- Inspecting descriptors:
-        config0 <- getConfigDesc dev 0
-        let interface0 = configInterfaces config0 ! 0
-            alternate0 = interface0 ! 0
-            endpoint1  = interfaceEndpoints alternate0 ! 0
-            mps        = maxPacketSize $ endpointMaxPacketSize endpoint1
-            timeout    = 5000
-
-        printf "maxPacketSize = %i\n" mps
-
-        putStrLn "Creating transfer..."
-        readTrans <- newReadTransfer
-                       InterruptTransfer
-                       devHndl
-                       (endpointAddress endpoint1)
-                       0
-                       timeout
-
-        -- Performing I/O:
-        let n = 3 :: Int
-        forM_ [0..n-1] $ \i -> do
-          let size = (2^i) * mps
-
-          _ <- printf "(%i/%i) reading %i bytes during a maximum of %i ms...\n"
-                      (i+1) n size timeout
-
-          setReadTransferSize readTrans size
-
-          (bs, status) <- performReadTransfer readTrans
-
-          when (status == TimedOut) $ putStrLn "Reading timed out!"
-          _ <- printf "Read %i bytes:\n" $ B.length bs
-          printBytes bs
-
-deviceInfo :: Device -> [String]
-deviceInfo dev =
-  [ printf "deviceSpeed:   %s" (maybe "-" show $ deviceSpeed dev)
-  , printf "busNumber:     %s" (show $ busNumber dev)
-  , printf "portNumber:    %s" (show $ portNumber dev)
-  , printf "portNumbers:   %s" (maybe "-" (show . V.toList) $
-                                  portNumbers dev 7)
-  , printf "deviceAddress: %s" (show $ deviceAddress dev)
-  ]
-
-printBytes :: B.ByteString -> IO ()
-printBytes = putStrLn . intercalate " " . map (printf "0x%02x") . B.unpack
+main = withHIDAPI $ do
+  dis <- enumerateAll
+  forM_ dis $ \di -> do
+    case vendorId di of
+      0x15ca -> do
+           d <- openDeviceInfo di
+           forever $ do
+             bs <- HID.read d 6
+             putStr (show (fromIntegral (BS.index bs 1) :: Int8))
+             putChar ' '
+             print (fromIntegral (BS.index bs 2) :: Int8)
+      _ -> putStrLn (pp di)

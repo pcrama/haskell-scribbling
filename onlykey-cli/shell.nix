@@ -4,14 +4,14 @@ let
 
   inherit (nixpkgs) pkgs;
 
-  f = { mkDerivation, base, bytestring, stdenv, usb, vector }:
+  f = { mkDerivation, base, bytestring, hidapi, stdenv }:
       mkDerivation {
         pname = "onlykey-cli";
         version = "0.1.0.1";
         src = ./.;
         isLibrary = false;
         isExecutable = true;
-        executableHaskellDepends = [ base bytestring usb vector ];
+        executableHaskellDepends = [ base bytestring hidapi ];
         homepage = "https://github.com/pcrama/haskell-scribbling/onlykey-cli";
         description = "Interface with OnlyKey https://onlykey.io";
         license = stdenv.lib.licenses.bsd3;
