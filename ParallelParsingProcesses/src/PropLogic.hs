@@ -11,8 +11,9 @@ import Data.Char (isAlpha)
 -- import one of the parsers here
 -- import P1 (symbol, P(..), (+++), moduleName)
 -- import P2 (symbol, P, parse, (+++), moduleName)
-import P3RemovingBind (symbol, P, parse, (+++), moduleName)
+-- import P3RemovingBind (symbol, P, parse, (+++), moduleName)
 -- import P4RemovingPlus (symbol, P, parse, (+++), moduleName)
+import P5AssociativityOfBind (symbol, P, parse, (+++), moduleName)
 
 data Form = Form :& Form | Not Form | Var Char
   deriving (Show, Eq)
