@@ -6,9 +6,13 @@ module P3RemovingBind
     , P
     , parse
     , (+++)
+    , moduleName
     ) where
 
 import Control.Applicative (Alternative(..))
+
+moduleName :: String
+moduleName = "P3RemovingBind"
 
 data P i o = Fail
            | SymbolBind (i -> P i o)

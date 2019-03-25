@@ -5,9 +5,13 @@ module P1
     ( symbol
     , P(..)
     , (+++)
+    , moduleName
     ) where
 
 import Control.Applicative (Alternative(..))
+
+moduleName :: String
+moduleName = "P1"
 
 newtype P i o = P { parse :: [i] -> [([i], o)] }
   deriving Functor

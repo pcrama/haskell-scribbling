@@ -6,9 +6,13 @@ module P4RemovingPlus
     , P(..) -- exporting constructors only for P5AssociativityOfBind
     , parse
     , (+++)
+    , moduleName
     ) where
 
 import Control.Applicative (Alternative(..))
+
+moduleName :: String
+moduleName = "P4RemovingPlus"
 
 data P i o = Fail
            | SymbolBind (i -> P i o)

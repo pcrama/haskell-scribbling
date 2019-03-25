@@ -8,8 +8,10 @@ testParseForm s = do
   mapM_ (putStrLn . ("   "++) . show) $ parse form s
 
 main :: IO ()
-main = mapM_ testParseForm [
-    "a&-b&-(-c&d)"
-  , "a&b&c&d&e"
-  , "-----a"
-  , "--z--a" ]
+main = do
+  putStrLn $ "Using src/" ++ moduleName
+  mapM_ testParseForm [
+      "a&-b&-(-c&d)"
+    , "a&b&c&d&e"
+    , "-----a"
+    , "--z--a" ]

@@ -3,15 +3,16 @@ module PropLogic
     ( Form(..)
     , form
     , parse -- re-exported
+    , moduleName -- re-exported
     ) where
 
 import Data.Char (isAlpha)
 
 -- import one of the parsers here
--- import P1 (symbol, P(..), (+++))
--- import P2 (symbol, P, parse, (+++))
-import P3RemovingBind (symbol, P, parse, (+++))
--- import P4RemovingPlus (symbol, P, parse, (+++))
+-- import P1 (symbol, P(..), (+++), moduleName)
+-- import P2 (symbol, P, parse, (+++), moduleName)
+import P3RemovingBind (symbol, P, parse, (+++), moduleName)
+-- import P4RemovingPlus (symbol, P, parse, (+++), moduleName)
 
 data Form = Form :& Form | Not Form | Var Char
   deriving (Show, Eq)

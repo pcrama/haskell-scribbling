@@ -9,12 +9,16 @@ module P5AssociativityOfBind
     , P
 --    , parse
     , (+++)
+    , moduleName
     ) where
 
 -- import Control.Applicative (Alternative(..))
 import qualified P4RemovingPlus as P
 
 type Context s a b = a -> P.P s b
+
+moduleName :: String
+moduleName = "P5AssociativityOfBind"
 
 type P s a = forall b . Context s a b -> P.P s b
 

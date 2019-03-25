@@ -6,9 +6,13 @@ module P2
     , P
     , parse
     , (+++)
+    , moduleName
     ) where
 
 import Control.Applicative (Alternative(..))
+
+moduleName :: String
+moduleName = "P2"
 
 data P i o = Symbol (i -> o)
            | Fail
