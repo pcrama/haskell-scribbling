@@ -58,7 +58,7 @@ main = do
           c <- lift $ setCursorMode CursorInvisible
           playGame (selectLevel' w)
                    (lift $ getPlayerCommand' w)
-                   (lift . drawMap' w "Move with hjkl or arrows, q to select level, u to undo")
+                   (lift . drawMap' w "Move with hjkl or arrows, q to quit level, u to undo")
                    (lift . getPlayerDecision' w)
           lift $ setCursorMode c
         putStrLn "Bye, bye!"
