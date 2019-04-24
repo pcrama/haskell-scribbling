@@ -13,7 +13,12 @@ import Data.Char (isAlpha)
 -- import P2 (symbol, P, parse, (+++), moduleName)
 -- import P3RemovingBind (symbol, P, parse, (+++), moduleName)
 -- import P4RemovingPlus (symbol, P, parse, (+++), moduleName)
-import P5AssociativityOfBind (symbol, P, parse, (+++), moduleName)
+-- import P5AssociativityOfBind (symbol, P, parse, (+++), moduleName)
+import P6LookAhead (symbol, P, parse, (+++), moduleName)
+
+-- symbol = SymbolBind return
+-- parse = parse'
+-- (+++) = (++++)
 
 data Form = Form :& Form | Not Form | Var Char
   deriving (Show, Eq)
