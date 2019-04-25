@@ -14,4 +14,5 @@ main = do
       "a&-b&-(-c&d)"
     , "a&b&c&d&e"
     , "-----a"
+    , "guns&roses&-classic"
     , "--z--a" ]

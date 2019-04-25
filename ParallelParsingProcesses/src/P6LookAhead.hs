@@ -7,6 +7,11 @@ module P6LookAhead
     , failp -- `fail' is already defined in Prelude -> renamed
     , P
     , parse
+    , look
+    , eof
+    , try
+    -- , longest -- I'm too ashamed of my implementation to export it
+    , munch
     , (+++)
     , moduleName
     ) where
@@ -21,9 +26,11 @@ moduleName = "P6LookAhead"
 data P' i o = Fail
             | SymbolBind (i -> P' i o)
             | ReturnPlus o (P' i o) -- ReturnPlus o p === return o ++++ p
+            | LookBind ([i] -> P' i o)
 
 instance Functor (P' i) where
   fmap f (SymbolBind sb) = SymbolBind $ fmap f . sb
+  fmap f (LookBind lb) = LookBind $ fmap f . lb
   fmap _ Fail = Fail
   fmap f (ReturnPlus o pio) = ReturnPlus (f o) $ fmap f pio
 
@@ -34,6 +41,11 @@ instance Applicative (P' i) where
   SymbolBind f <*> (ReturnPlus o pio) = (SymbolBind $ \i -> fmap ($ o) (f i))
                                    ++++ (SymbolBind f <*> pio)
   SymbolBind f <*> sb@(SymbolBind _) = SymbolBind $ \i -> f i <*> sb
+  LookBind f <*> (ReturnPlus o pio) = (LookBind $ \i -> fmap ($ o) (f i))
+                                 ++++ (LookBind f <*> pio)
+  LookBind f <*> lb@(LookBind _) = LookBind $ \i -> f i <*> lb
+  SymbolBind f <*> lb@(LookBind _) = SymbolBind $ \i -> f i <*> lb
+  LookBind f <*> sb@(SymbolBind _) = LookBind $ \i -> f i <*> sb
   (ReturnPlus f pio) <*> pa@(ReturnPlus a pjp) = ReturnPlus (f a)
                                                           $ (fmap f pjp) ++++ (pio <*> pa)
   (ReturnPlus f pio) <*> pjp = fmap f pjp ++++ (pio <*> pjp)
@@ -42,6 +54,7 @@ instance Monad (P' i) where
   fail _ = Fail
   return = pure
   (SymbolBind f) >>= k = SymbolBind $ \x -> f x >>= k
+  (LookBind f) >>= k = LookBind $ \x -> f x >>= k
   Fail >>= _ = Fail
   (ReturnPlus o p) >>= f = f o ++++ (p >>= f)
 
@@ -63,6 +76,7 @@ instance Applicative (P s) where
   pure x = P $ \k -> k x
   p <*> q = p >>= \f -> fmap f q -- abusing Monad instance.  Paper must have been written before Applicative was a thing
   -- I tried these, but they turned into an endless loop:
+  -- Not updated after adding LookBind
   -- <*> :: P (forall z . ((a -> b) -> P' i z) -> P' i z)
   --     -> P (forall z . (a -> P' i z) -> P' i z)
   --     -> P (forall z . (b -> P' i z) -> P' i z)
@@ -79,7 +93,7 @@ instance Applicative (P s) where
   --         finish _ Fail = Fail
   --         finish k (SymbolBind f) = SymbolBind $ \i -> finish k $ f i
   --         finish k (ReturnPlus b pb') = (k b) ++++ (pb' >>= k)
--- Applicative laws:
+-- Applicative laws: (Not updated after adding LookBind)
 -- 1. pure f <*> pure x = pure $ f x
 --
 --    pure f <*> pure x
@@ -103,6 +117,51 @@ symbol = P $ SymbolBind
 failp :: P i o
 failp = P $ const Fail
 
+look :: P s [s]
+look = P $ LookBind
+
+munch :: (s -> Bool) -> P s [s]
+munch p = look >>= go
+  where go (c:xs) | p c = do
+                            _ <- symbol
+                            fmap (c:) $ go xs
+        go _ = return [] -- no input left or predicate not satisfied
+
+eof :: P s ()
+eof = do
+        s <- look
+        case s of
+          [] -> return ()
+          _ -> empty
+
+-- I really don't see why `look' would be needed for this one, unless the
+-- input should not be consumed.  The text is not clear enough on that for me.
+try :: Alternative f => f a -> f (Maybe a)
+try p = fmap Just p <|> pure Nothing
+
+-- This is so ugly, I'm ashamed: it is SICP code (i.e. not idiomatic).
+-- It even runs down the complete input to compute the length!
+-- I commented it out after lightly testing it.
+--
+-- longest :: P i o -> P i o
+-- longest p = do
+--               s <- look
+--               case parse p s of
+--                 [] -> empty
+--                 [(s', x)] -> finish s s' x
+--                 manySolutions -> let (s', x) = pickShortestRemainder $ map (\(s', v) -> (s', (s', v)))
+--                                                                            manySolutions
+--                                  in finish s s' x
+--   where -- longest match means that the remainder is the shortest
+--         pickShortestRemainder sols = case findAssoc null sols of
+--                                        Just (s', x) -> (s', x)
+--                                        Nothing -> pickShortestRemainder $ trimSols sols
+--         trimSols = map (\((_:xs), v) -> (xs, v))
+--         findAssoc p = foldr (\(k, v) b -> if p k then Just v else b) Nothing
+--         finish s s' v = finish' v $ length s - length s'
+--         finish' v 0 = return v
+--         finish' v n = symbol *> (finish' v $ n - 1)
+
 instance Monad (P i) where
   return = pure
   -- P i a >>= (a -> P i b) :: P i b
@@ -123,6 +182,7 @@ parse (P p) = parse' $ p pure
 parse' :: P' i o -> [i] -> [([i], o)]
 parse' (SymbolBind _) [] = []
 parse' (SymbolBind k) (x:xs) = parse' (k x) xs
+parse' (LookBind k) s = parse' (k s) s
 parse' Fail _ = []
 parse' (ReturnPlus o p) xs = (xs, o):parse' p xs
 
@@ -133,6 +193,11 @@ parse' (ReturnPlus o p) xs = (xs, o):parse' p xs
 Fail ++++ p = p
 p ++++ Fail = p
 (SymbolBind k) ++++ (SymbolBind k') = SymbolBind $ \c -> k c ++++ k' c
+(LookBind k) ++++ (LookBind k') = LookBind $ \c -> k c ++++ k' c
+sb@(SymbolBind _) ++++ (LookBind k) = LookBind $ \s -> sb ++++ k s
+(LookBind k) ++++ sb@(SymbolBind _) = LookBind $ \s -> k s ++++ sb
 (ReturnPlus a p) ++++ (ReturnPlus b q) = ReturnPlus a $ ReturnPlus b $ p ++++ q
 (ReturnPlus o p) ++++ sb@(SymbolBind _) = ReturnPlus o $ p ++++ sb
+(ReturnPlus o p) ++++ lb@(LookBind _) = ReturnPlus o $ p ++++ lb
 sb@(SymbolBind _) ++++ (ReturnPlus o p) = ReturnPlus o $ sb ++++ p
+lb@(LookBind _) ++++ (ReturnPlus o p) = ReturnPlus o $ lb ++++ p

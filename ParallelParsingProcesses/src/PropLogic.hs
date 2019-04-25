@@ -7,20 +7,21 @@ module PropLogic
     ) where
 
 import Data.Char (isAlpha)
+import Control.Applicative (Alternative(..))
 
--- import one of the parsers here
+-- import one of the parsers here (but they don't provide `look' & `munch', so maybe update `')
 -- import P1 (symbol, P(..), (+++), moduleName)
 -- import P2 (symbol, P, parse, (+++), moduleName)
 -- import P3RemovingBind (symbol, P, parse, (+++), moduleName)
 -- import P4RemovingPlus (symbol, P, parse, (+++), moduleName)
 -- import P5AssociativityOfBind (symbol, P, parse, (+++), moduleName)
-import P6LookAhead (symbol, P, parse, (+++), moduleName)
+import P6LookAhead (symbol, P, munch, parse, (+++), moduleName)
 
 -- symbol = SymbolBind return
 -- parse = parse'
 -- (+++) = (++++)
 
-data Form = Form :& Form | Not Form | Var Char
+data Form = Form :& Form | Not Form | Var String
   deriving (Show, Eq)
 
 form, atom, paren, neg, var :: P Char Form
@@ -35,8 +36,10 @@ paren = this '(' *> form <* this ')'
 neg = this '-' *> fmap Not atom
 
 var = do
-  v <- sat isAlpha
-  return $ Var v
+  v <- munch isAlpha
+  case v of
+    [] -> empty
+    _ -> return $ Var v
 
 conj :: Form -> P Char Form
 conj a = do
