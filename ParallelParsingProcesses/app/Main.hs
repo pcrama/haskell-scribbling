@@ -1,11 +1,15 @@
 module Main where
 
 import PropLogic
+import P6LookAhead (parseLongest, parseWithPos)
 
 testParseForm :: String -> IO ()
 testParseForm s = do
   putStrLn s
-  mapM_ (putStrLn . ("   "++) . show) $ parse form s
+  -- mapM_ (putStrLn . ("   "++) . show) $ parseLongest form s
+  -- putStrLn . ("   "++) . show $ parseComplete form s
+  putStrLn . ("   "++) . show $ parseLongest form s
+  putStrLn . ("   "++) . show $ parseWithPos form (0 :: Int) (\p _ -> p + 1) s
 
 main :: IO ()
 main = do
@@ -14,5 +18,6 @@ main = do
       "a&-b&-(-c&d)"
     , "a&b&c&d&e"
     , "-----a"
-    , "guns&roses&-classic"
+    , "-classic&(gun&gun)&(rose&rose"
+    , "((gun&gun)&(rose&rose))&-classic"
     , "--z--a" ]

@@ -1,12 +1,16 @@
 {-# LANGUAGE RankNTypes #-}
 -- Look Ahead (Section 10 of Koen Claessen's Functional Pearl
--- Parallel Parsing Processes)
+-- Parallel Parsing Processes) and Other Parse Functions
+-- (Section 11)
 -- http://www.cse.chalmers.se/edu/course/course/afp/Papers/parser-claessen.pdf
 module P6LookAhead
     ( symbol
     , failp -- `fail' is already defined in Prelude -> renamed
     , P
     , parse
+    , parseComplete
+    , parseLongest
+    , parseWithPos
     , look
     , eof
     , try
@@ -185,6 +189,45 @@ parse' (SymbolBind k) (x:xs) = parse' (k x) xs
 parse' (LookBind k) s = parse' (k s) s
 parse' Fail _ = []
 parse' (ReturnPlus o p) xs = (xs, o):parse' p xs
+
+-- Only returns first result for which the parse is complete (i.e. no input is left)
+--
+-- The paper user parseComplete :: P i o -> [i] -> [o] and returns all results
+parseComplete :: P i o -> [i] -> Maybe o
+parseComplete (P p) = go $ p pure
+  where go (SymbolBind _) [] = Nothing
+        go (SymbolBind k) (x:xs) = go (k x) xs
+        go (LookBind k) s = go (k s) s
+        go Fail _ = Nothing
+        go (ReturnPlus o _) [] = Just o
+        go (ReturnPlus _ p) xs = go p xs -- input not completely used up -> discard output
+
+-- Only return (last) result using more of the input than all other results
+--
+-- The paper uses parseLongest :: P i o -> [i] -> Maybe (o, [i])
+parseLongest :: P i o -> [i] -> ([i], Maybe o)
+parseLongest (P p) xs = go (p pure) xs (xs, Nothing)
+  where go (SymbolBind _) [] r = r
+        go (SymbolBind k) (x:xs) r = go (k x) xs r
+        go (LookBind k) s r = go (k s) s r
+        go Fail xs r = r
+        -- since we never go backwards in the input, any time we return
+        -- a result, we must have used at least as much input as before
+        -- if not more, so update the `longest' result to return:
+        go (ReturnPlus o p) xs _ = go p xs (xs, Just o)
+
+-- Like parseLongest but report final position instead of returning remaining input
+parseWithPos :: P i o -> pos -> (pos -> i -> pos) -> [i] -> Either (pos, Maybe o) o
+parseWithPos (P p) z nxt xs = go (p pure) xs (z, Nothing)
+  where go (SymbolBind _) [] r = Left r
+        go (SymbolBind k) (x:xs) (p, r) = let newPos = nxt p x in newPos `seq` go (k x) xs (newPos, r)
+        go (LookBind k) s r = go (k s) s r
+        go Fail xs r = Left r
+        -- since we never go backwards in the input, any time we return
+        -- a result, we must have used at least as much input as before
+        -- if not more, so update the `longest' result to return:
+        go (ReturnPlus o _) [] _ = Right o -- No input left but an output to return -> it's a success
+        go (ReturnPlus o p) xs (pos, _) = go p xs (pos, Just o)
 
 (+++) :: P i o -> P i o -> P i o
 (P a) +++ (P b) = P $ \k -> a k ++++ b k
