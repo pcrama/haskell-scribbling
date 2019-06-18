@@ -125,23 +125,21 @@ tcata :: Diss p a (Fix p) => (p a -> a) -> Fix p -> a
 -- `right', specialized for our case:
 -- right :: Either (p (Fix p)) (DissectionContainer p a (Fix p), a)
 --       -> Either (Fix p, DissectionContainer p a (Fix p)) (p a)
-tcata f fpfp = load f fpfp []
-  where load :: Diss p a (Fix p) => (p a -> a) -> Fix p -> [DissectionContainer p a (Fix p)] -> a
-        load f (Fix pfp) = next f (right $ Left pfp)
+tcata f = flip load []
+  where load :: Diss p a (Fix p) => Fix p -> [DissectionContainer p a (Fix p)] -> a
+        load (Fix pfp) = next (right $ Left pfp)
         next :: Diss p a (Fix p)
-             => (p a -> a)
-             -> Either (Fix p, DissectionContainer p a (Fix p)) (p a)
+             => Either (Fix p, DissectionContainer p a (Fix p)) (p a)
              -> [DissectionContainer p a (Fix p)]
              -> a
-        next f (Left (fpfp, pcj)) stk = load f fpfp $ pcj:stk
-        next f (Right pa) stk = unload f pa stk
-        unload :: Diss p a (Fix p)
-               => (p a -> a)
-               -> p a
-               -> [DissectionContainer p a (Fix p)]
-               -> a
-        unload f pa [] = f pa
-        unload f pa (pcj:stk) = next f (right $ Right (pcj, f pa)) stk
+        next (Left (fpfp, pcj)) stk = load fpfp $ pcj:stk
+        next (Right pa) stk = unload pa stk
+        -- unload :: Diss p a (Fix p)
+        --        => p a
+        --        -> [DissectionContainer p a (Fix p)]
+        --        -> a
+        unload pa [] = f pa
+        unload pa (pcj:stk) = next (right $ Right (pcj, f pa)) stk
 
 eval1 :: Expr1 -> Int
 eval1 = tcata smallEval
@@ -366,8 +364,12 @@ zRight (fpfp, pcj:stk) = case right $ Right (pcj, fpfp) of
   -- explained in paper, but I don't quite understand, unfortunately.
   Right (_ :: p (Fix p)) -> Nothing
 
+ls :: Fix (ListF String)
+ls = Fix $ LFCons "a" $ Fix LFNil
+                 
 main :: IO ()
 main = do
+  putStrLn . show $ cata (\case LFNil -> 0; LFCons s t -> t + length s) ls
   putStrLn . show $ listFsum $ list2listf [1..6 :: Int]
   putStrLn . show $ lfoldr (+) 0 $ list2listf [1..4 :: Int]
   putStrLn $ lfoldr (\a b -> show a ++ b) "." $ list2listf [1..4 :: Int]
