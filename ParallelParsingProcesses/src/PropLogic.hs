@@ -2,7 +2,7 @@
 module PropLogic
     ( Form(..)
     , form
-    , parse -- re-exported
+    -- removed in P7ErrorReporting, parse -- re-exported
     , moduleName -- re-exported
     ) where
 
@@ -15,7 +15,8 @@ import Control.Applicative (Alternative(..))
 -- import P3RemovingBind (symbol, P, parse, (+++), moduleName)
 -- import P4RemovingPlus (symbol, P, parse, (+++), moduleName)
 -- import P5AssociativityOfBind (symbol, P, parse, (+++), moduleName)
-import P6LookAhead (symbol, P, munch, parse, (+++), moduleName)
+-- import P6LookAhead (symbol, P, munch, parse, (+++), moduleName)
+import P7ErrorReporting (symbol, P, munch, (+++), moduleName)
 
 -- symbol = SymbolBind return
 -- parse = parse'

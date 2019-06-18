@@ -1,7 +1,7 @@
 module Main where
 
 import PropLogic
-import P6LookAhead (parseLongest, parseWithPos)
+import P7ErrorReporting (parseLongest, parseWithPos)
 
 testParseForm :: String -> IO ()
 testParseForm s = do
