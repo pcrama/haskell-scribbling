@@ -10,7 +10,7 @@ module Main (main) where
 import qualified SDL
 import SDL.Image
 
-import Control.Monad          (void)
+import Control.Monad          (unless, void)
 import Control.Monad.IO.Class (MonadIO)
 import Data.Text              (Text)
 
@@ -42,18 +42,72 @@ renderSurfaceToWindow w s i
   >> SDL.updateWindowSurface w
 
 
-main :: IO ()
-main = withSDL $ withWindow "Lesson 01" (640, 480) $
-  \w -> do
+isContinue :: Maybe SDL.Event -> Bool
+isContinue = maybe True (not . isQuitEvent)
 
+
+isQuitEvent :: SDL.Event -> Bool
+isQuitEvent (SDL.Event _t SDL.QuitEvent) = True
+isQuitEvent _ = False
+
+
+conditionallyRun :: Applicative m => m () -> Bool -> m Bool
+conditionallyRun f True = True <$ f
+conditionallyRun _ False = pure False
+
+
+whileM :: Monad m => m Bool -> m ()
+whileM a = do
+  cont <- a
+  case cont of
+    True -> whileM a
+    False -> return ()
+
+
+win1 :: MonadIO m => SDL.Window -> m ()
+win1 w = do
     screen <- SDL.getWindowSurface w
     image <- SDL.Image.load "./assets/cat100x100.png"
 
     -- SDL.surfaceFillRect screen Nothing (SDL.V4 maxBound minBound maxBound maxBound)
     -- SDL.updateWindowSurface w
 
-    renderSurfaceToWindow w screen image
+    let doRender = renderSurfaceToWindow w screen image
 
+    whileM $
+      isContinue <$> SDL.pollEvent
+      >>= conditionallyRun doRender
     SDL.delay 5000 -- ms
     SDL.freeSurface image
     SDL.freeSurface screen
+
+
+win2 :: MonadIO m => SDL.Window -> m ()
+win2 w = do
+    renderer <- SDL.createRenderer w (-1) SDL.defaultRenderer
+    appLoop False renderer
+
+
+appLoop :: MonadIO m => Bool -> SDL.Renderer -> m ()
+appLoop isRed renderer = do
+  events <- SDL.pollEvents
+  let eventIsPress keycode event =
+        case SDL.eventPayload event of
+          SDL.KeyboardEvent keyboardEvent ->
+            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed &&
+            SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == keycode
+          _ -> False
+      qPressed = any (eventIsPress SDL.KeycodeQ) events
+      rPressed = any (eventIsPress SDL.KeycodeR) events
+  SDL.rendererDrawColor renderer SDL.$= (if isRed then (SDL.V4 0 0 255 255) else (SDL.V4 0 255 0 255))
+  SDL.clear renderer
+  SDL.present renderer
+  unless qPressed $ appLoop (rPressed /= isRed) renderer
+
+
+main :: IO ()
+main = withSDL $ do
+  -- quit or close window to progress...
+  withWindow "Lesson 01" (640, 480) win1
+  -- (q)uit and `r' to toggle color
+  withWindow "http://hackage.haskell.org/package/sdl2-2.5.0.0/docs/SDL.html" (640, 480) win2
