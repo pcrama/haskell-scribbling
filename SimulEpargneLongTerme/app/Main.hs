@@ -2,7 +2,6 @@ module Main where
 
 import Data.Time.Calendar
   ( Day
-  , addDays
   , addGregorianYearsClip
   , fromGregorian
   , toGregorian
@@ -20,10 +19,10 @@ after t month day =
   in if sameYear <= t then nextYear else sameYear
 
 simulation :: Day -> Simulation (Amount, [Transaction], Day)
-simulation start = do
+simulation simulationStart = do
     end <- asks _end
     sixtieth <- asks _60th
-    loop start end sixtieth $ addGregorianYearsClip 1 sixtieth
+    loop simulationStart end sixtieth $ addGregorianYearsClip 1 sixtieth
     normal <- balance end Normal
     long <- balance end LongTerm
     transactions <- lift $ gets _transactions
@@ -53,11 +52,13 @@ balanceAtRate date rate = foldMap (\(Transaction { _amount=a, _date=d }) ->
   
 main :: IO ()
 main =
+  let startDate = fromGregorian 2019 10 1 in
   flip mapM_ [1965, 1969, 1973, 1977, 1981, 1985] $ \y -> do
-    putStrLn $ "\n----- " ++ show y ++ " -----"
-    let (finalTotal, s, end) = fst $ runSimulation (simulation $ fromGregorian 2018 5 1) y 1 1
+    putStrLn $ "\n----- Born " ++ show y ++ "-01-01, starting " ++ show startDate ++ " -----"
+    let (finalTotal, s, end) = fst $ runSimulation (simulation startDate) y 1 1
     putStrLn $ "final total == " ++ showAmount finalTotal
-    flip mapM_ [15, 20, 25, 30, 35] $ \rate1000 ->
+    -- Show table of value of same deposits at various fixed interest rates:
+    flip mapM_ [15, 20, 25, 30, 35 :: Int] $ \rate1000 ->
       putStrLn $ "fixed 0.0"
                  ++ show rate1000 ++ "%-> "
                  ++ (showAmount $ balanceAtRate end (fromIntegral rate1000 / 1000.0) s)

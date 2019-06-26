@@ -3,7 +3,7 @@ module Banking (
   , ContractState(..)
   , runSimulation
   , Amount(..)
-  , Simulation(..)
+  , Simulation
   , Account(..)
   , XComment(..)
   , Transaction(..)
@@ -40,13 +40,14 @@ data ContractInfo = ContractInfo {
   , _end :: Day
 }
 
+argentaContract :: ContractInfo
 argentaContract = ContractInfo {
   _normalRate=0.005
   , _longRate=0.0105
   , _entryFee=0.06 -- 2% tax and 4% for Argenta
   , _60th=undefined
   , _yearlyMgmtFee=0.0027
-  , _yearlyMgmtCap=Amount $ round $ 100.0 * 7500.0 * 0.0027
+  , _yearlyMgmtCap=Amount $ round (100.0 * 7500.0 * 0.0027 :: Double)
   , _end=undefined
 }
 
@@ -67,9 +68,12 @@ showAmount (Amount a) = let eur = a `div` 100
                                           | x < 10 -> ".0" ++ show x
                                           | otherwise -> "." ++ show x
 
+instance Semigroup Amount where
+  (Amount a) <> (Amount b) = Amount $ a + b
+
 instance Monoid Amount where
   mempty = Amount 0
-  mappend (Amount a) (Amount b) = Amount $ a + b
+  -- mappend (Amount a) (Amount b) = Amount $ a + b
 
 data Account = Normal | LongTerm
   deriving (Show, Eq)
@@ -98,10 +102,13 @@ makeTransaction date account amount xcomment s =
                          }:)
           . _transactions)
 
+scaleAmount :: Double -> Amount -> Amount
 scaleAmount x (Amount a) = Amount $ round $ x * fromIntegral a
 
+addTax :: Double -> Amount -> Amount
 addTax tax = scaleAmount $ 1 + tax
 
+compoundAmount :: Day -> Double -> Day -> Amount -> Amount
 compoundAmount t0 rate t1=
   scaleAmount $ (1 + rate) ** ((fromIntegral $ t1 `diffDays` t0) / 365.25)
 
@@ -131,6 +138,7 @@ topUp date target = do
   then makeTransaction date Normal (target <> scaleAmount (-1.0) blnc) Deposit $ "Top up to " ++ showAmount target
   else return ()
 
+taxRefundableLongTermDeposit :: Amount
 taxRefundableLongTermDeposit = Amount 226000
 
 refundTax :: Day -> Simulation ()
@@ -174,7 +182,12 @@ deductFees day = do
                   Fee
                 $ "Fee for " ++ showAmount blnc
 
-runSimulation :: Simulation f -> Integer -> Int -> Int -> (f, ContractState)
+-- | Run simulation for a person
+runSimulation :: Simulation f -- ^ Simulation to run
+              -> Integer -- ^ Birthday (year)
+              -> Int -- ^ Birthday (month)
+              -> Int -- ^ Birthday (day)
+              -> (f, ContractState) -- ^ simulation result and final contract state
 runSimulation s y m d = runState (runReaderT s $ mkContractInfo y m d) $ ContractState []
 
 -- Local Variables:
