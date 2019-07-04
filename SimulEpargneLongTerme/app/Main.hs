@@ -56,7 +56,7 @@ main =
   flip mapM_ [1965, 1969, 1973, 1977, 1981, 1985] $ \y -> do
     putStrLn $ "\n----- Born " ++ show y ++ "-01-01, starting " ++ show startDate ++ " -----"
     let (finalTotal, s, end) = fst $ runSimulation (simulation startDate) y 1 1
-    putStrLn $ "final total == " ++ showAmount finalTotal
+    putStrLn $ "final total == " ++ showAmount finalTotal ++ " on " ++ show end
     -- Show table of value of same deposits at various fixed interest rates:
     flip mapM_ [15, 20, 25, 30, 35 :: Int] $ \rate1000 ->
       putStrLn $ "fixed 0.0"
