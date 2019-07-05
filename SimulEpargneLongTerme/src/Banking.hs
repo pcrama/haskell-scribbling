@@ -14,6 +14,7 @@ module Banking (
   , showAmount
   , compoundAmount
   -- actions
+  , addYearlyInterest
   , balance
   , topUp
   , refundTax
@@ -78,7 +79,7 @@ instance Monoid Amount where
 data Account = Normal | LongTerm
   deriving (Show, Eq)
 
-data XComment = Deposit | Withdrawal | TaxRefund | Fee
+data XComment = Deposit | Withdrawal | TaxRefund | Fee | Interest
   deriving (Show, Eq)
 
 data Comment = Comment XComment String
@@ -122,12 +123,8 @@ balance date account =
   let isRelevantTransaction (Transaction { _account=a, _date=d }) =
         (a == account) && (d <= date)
   in do
-       rate <- asks (case account of
-                       Normal -> _normalRate
-                       LongTerm -> _longRate)
-       let compound (Transaction { _amount=a, _date=d }) = compoundAmount d rate date a
        transactions <- lift $ gets _transactions
-       return $ foldl' (\acc trnsctn -> acc <> compound trnsctn)
+       return $ foldl' (\acc trnsctn -> acc <> _amount trnsctn)
                        (Amount 0)
                      $ filter isRelevantTransaction transactions
 
@@ -181,6 +178,28 @@ deductFees day = do
                   (scaleAmount (-1.0) $ min feeCap $ scaleAmount feeRate blnc)
                   Fee
                 $ "Fee for " ++ showAmount blnc
+
+addYearlyInterest :: Integer -> Account -> Simulation ()
+addYearlyInterest year account = do
+    startBalance <- balance lastYearEnd account
+    rate <- asks (case account of
+                    Normal -> _normalRate
+                    LongTerm -> _longRate)
+    let interest (Transaction { _amount=a, _date=d }) =
+          compoundAmount d rate yearEnd a <> scaleAmount (-1.0) a
+    transactions <- lift $ gets _transactions
+    let interestOfTransactionsInThisYear =
+          foldl' (\acc trnsctn -> acc <> interest trnsctn)
+                 (Amount 0)
+               $ filter isRelevantTransaction transactions
+    makeTransaction yearEnd
+                    account
+                    (scaleAmount rate startBalance <> interestOfTransactionsInThisYear)
+                    Interest
+                  $ "Interest for " ++ show year
+  where [lastYearEnd, yearEnd] = map (\y -> fromGregorian y 12 31) [year - 1, year]
+        isRelevantTransaction (Transaction { _account=a, _date=d }) =
+          (a == account) && (lastYearEnd < d) && (d <= yearEnd)
 
 -- | Run simulation for a person
 runSimulation :: Simulation f -- ^ Simulation to run

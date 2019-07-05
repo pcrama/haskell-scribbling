@@ -37,6 +37,7 @@ simulation simulationStart = do
             else let depositDate = after start 1 1
                      taxDate = after depositDate 5 1
                      feeDate = after taxDate 12 31
+                     (year, _, _) = toGregorian feeDate
                  in do
                       depositLongTerm depositDate
                       refundTax taxDate
@@ -44,6 +45,8 @@ simulation simulationStart = do
                         then taxAt60
                         else return ()
                       deductFees feeDate
+                      addYearlyInterest year LongTerm
+                      addYearlyInterest year Normal
                       loop feeDate end sixtieth sixtyFirst
 
 balanceAtRate :: Day -> Double -> [Transaction] -> Amount
