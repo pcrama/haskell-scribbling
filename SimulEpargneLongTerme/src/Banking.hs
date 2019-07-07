@@ -195,9 +195,10 @@ refundTax date =
         && (x == Deposit)
         && (let (depositYear, _, _) = toGregorian d in depositYear + 1 == y)
   in do
+    entryFee <- asks _entryFee
     longDeposits <- fmap (filter longTermDepositInPreviousYear)
                        $ lift $ gets _transactions
-    let amountSpentLastYear = foldMap _amount longDeposits
+    let amountSpentLastYear = foldMap (addTax entryFee . _amount) longDeposits
     when (amountSpentLastYear > mempty) $ do
       let refund = scaleAmount 0.32 $ min amountSpentLastYear taxRefundableLongTermDeposit
       makeTransaction date Normal refund TaxRefund $ "Refund for " ++ showAmount amountSpentLastYear ++ " in " ++ show (y - 1)
@@ -210,11 +211,11 @@ taxAt60 = do
 
 depositLongTerm :: Day -> Simulation ()
 depositLongTerm day = do
-  amount <- fmap (\rate -> addTax rate taxRefundableLongTermDeposit)
-          $ asks _entryFee
-  topUp day amount
-  makeTransaction day Normal (scaleAmount (-1.0) amount) Withdrawal "Long term + fees"
-  makeTransaction day LongTerm taxRefundableLongTermDeposit Deposit $ show day
+  afterTax <- fmap (\rate -> addTax (-1.0 * rate) taxRefundableLongTermDeposit)
+            $ asks _entryFee
+  topUp day taxRefundableLongTermDeposit
+  makeTransaction day Normal (scaleAmount (-1.0) taxRefundableLongTermDeposit) Withdrawal "Long term + fees"
+  makeTransaction day LongTerm afterTax Deposit $ show day
 
 deductFees :: Day -> Simulation ()
 deductFees day = do
