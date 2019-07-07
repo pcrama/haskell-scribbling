@@ -10,7 +10,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.Trans.State (gets)
 import Banking
-  
+
 after :: Day -> Int -> Int -> Day
 after t month day =
   let (y, _, _) = toGregorian t
@@ -34,9 +34,10 @@ simulation simulationStart = do
   where loop start end sixtieth sixtyFirst = do
           if start > end
             then return ()
-            else let depositDate = after start 1 1
-                     taxDate = after depositDate 5 1
-                     feeDate = after taxDate 12 31
+            else let [_, depositDate, taxDate, takeOutDate, feeDate] =
+                       scanl (\p (m, d) -> after p m d)
+                             start
+                             [(1, 1), (5, 1),  (12, 1),     (12, 31)]
                      (year, _, _) = toGregorian feeDate
                  in do
                       depositLongTerm depositDate
@@ -44,6 +45,7 @@ simulation simulationStart = do
                       if (sixtieth == taxDate) || (sixtieth < taxDate && taxDate < sixtyFirst)
                         then taxAt60
                         else return ()
+                      takeOutOldMoney takeOutDate
                       deductFees feeDate
                       addYearlyInterest year LongTerm
                       addYearlyInterest year Normal

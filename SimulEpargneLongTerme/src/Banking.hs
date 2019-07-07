@@ -16,6 +16,7 @@ module Banking (
   -- actions
   , addYearlyInterest
   , balance
+  , takeOutOldMoney
   , topUp
   , refundTax
   , depositLongTerm
@@ -80,7 +81,7 @@ instance Monoid Amount where
 data Account = Normal | LongTerm
   deriving (Show, Eq)
 
-data XComment = Deposit | Withdrawal | TaxRefund | Fee | Interest
+data XComment = Deposit | Withdrawal | TaxRefund | Fee | Interest | OldMoney
   deriving (Show, Eq)
 
 data Comment = Comment XComment String
@@ -128,6 +129,39 @@ balance date account =
        return $ foldl' (\acc trnsctn -> acc <> _amount trnsctn)
                        (Amount 0)
                      $ filter isRelevantTransaction transactions
+
+funBalanceOlderThan :: Day -> Account -> [Transaction] -> Amount
+funBalanceOlderThan date account transactions =
+  let isRelevantTransaction (Transaction { _account=a, _date=d, _amount=(Amount m) }) =
+        (a == account) -- only for account uner scrutiny,
+        && ((d < date) -- all transactions that happened before
+         || (m < 0))   -- any withdrawal: oldest money gets spent first
+  in foldl' (\acc trnsctn -> acc <> _amount trnsctn)
+            (Amount 0)
+          $ filter isRelevantTransaction transactions
+
+-- It is allowed to recover money from the long term account after 10
+-- years without giving up the fiscal benefit:
+takeOutOldMoney :: Day -> Simulation ()
+takeOutOldMoney date = do
+    transactions <- lift $ gets _transactions
+    let oldFunds = funBalanceOlderThan date10YearsAgo LongTerm transactions
+    if oldFunds > Amount 0
+    then do
+      makeTransaction date
+                      LongTerm
+                      (scaleAmount (-1.0) oldFunds)
+                      Withdrawal
+                    $ "Older than " ++ show date10YearsAgo ++ " on " ++ show date
+      makeTransaction date
+                      Normal
+                      oldFunds
+                      OldMoney
+                    $ "Older than " ++ show date10YearsAgo ++ " on " ++ show date
+    else
+      return ()
+  where (y, m, d) = toGregorian date
+        date10YearsAgo = fromGregorian (y - 10) m d
 
 topUp :: Day -> Amount -> Simulation ()
 topUp date target = do
