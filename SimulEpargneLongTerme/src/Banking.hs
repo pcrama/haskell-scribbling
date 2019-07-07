@@ -151,6 +151,10 @@ funBalanceOlderThan date account transactions =
             (Amount 0)
           $ filter isRelevantTransaction transactions
 
+when :: Applicative m => Bool -> m () -> m ()
+when False _ = pure ()
+when True m = m
+
 -- It is allowed to recover money from the long term account after 10
 -- years without giving up the fiscal benefit:
 takeOutOldMoney :: Day -> Simulation ()
@@ -177,9 +181,8 @@ takeOutOldMoney date = do
 topUp :: Day -> Amount -> Simulation ()
 topUp date target = do
   blnc <- balance date Normal
-  if blnc < target
-  then makeTransaction date Normal (target <> scaleAmount (-1.0) blnc) Deposit $ "Top up to " ++ showAmount target
-  else return ()
+  when (blnc < target) $ do
+    makeTransaction date Normal (target <> scaleAmount (-1.0) blnc) Deposit $ "Top up to " ++ showAmount target
 
 taxRefundableLongTermDeposit :: Amount
 taxRefundableLongTermDeposit = Amount 226000
@@ -195,10 +198,9 @@ refundTax date =
     longDeposits <- fmap (filter longTermDepositInPreviousYear)
                        $ lift $ gets _transactions
     let amountSpentLastYear = foldMap _amount longDeposits
-    if amountSpentLastYear > mempty
-      then let refund = scaleAmount 0.32 $ min amountSpentLastYear taxRefundableLongTermDeposit
-           in makeTransaction date Normal refund TaxRefund $ "Refund for " ++ showAmount amountSpentLastYear ++ " in " ++ show (y - 1)
-      else return ()
+    when (amountSpentLastYear > mempty) $ do
+      let refund = scaleAmount 0.32 $ min amountSpentLastYear taxRefundableLongTermDeposit
+      makeTransaction date Normal refund TaxRefund $ "Refund for " ++ showAmount amountSpentLastYear ++ " in " ++ show (y - 1)
 
 taxAt60 :: Simulation ()
 taxAt60 = do
