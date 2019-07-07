@@ -156,25 +156,28 @@ when False _ = pure ()
 when True m = m
 
 -- It is allowed to recover money from the long term account after 10
--- years without giving up the fiscal benefit:
+-- years without giving up the fiscal benefit: use that to top up fors
+-- next year's deposit.  Do not take more than that: we assume that the
+-- long term account still has a better interest rate than the normal
+-- account.
 takeOutOldMoney :: Day -> Simulation ()
 takeOutOldMoney date = do
-    transactions <- lift $ gets _transactions
-    let oldFunds = funBalanceOlderThan date10YearsAgo LongTerm transactions
-    if oldFunds > Amount 0
-    then do
-      makeTransaction date
-                      LongTerm
-                      (scaleAmount (-1.0) oldFunds)
-                      Withdrawal
-                    $ "Older than " ++ show date10YearsAgo ++ " on " ++ show date
-      makeTransaction date
-                      Normal
-                      oldFunds
-                      OldMoney
-                    $ "Older than " ++ show date10YearsAgo ++ " on " ++ show date
-    else
-      return ()
+    blnc <- balance date Normal
+    when (blnc < taxRefundableLongTermDeposit) $ do
+      transactions <- lift $ gets _transactions
+      let oldFunds = funBalanceOlderThan date10YearsAgo LongTerm transactions
+      when (oldFunds > Amount 0) $ do
+        let toTake = min oldFunds $ taxRefundableLongTermDeposit <> (scaleAmount (-1.0) blnc)
+        makeTransaction date
+                        LongTerm
+                        (scaleAmount (-1.0) toTake)
+                        Withdrawal
+                      $ showAmount oldFunds ++ " older than " ++ show date10YearsAgo ++ " on " ++ show date
+        makeTransaction date
+                        Normal
+                        toTake
+                        OldMoney
+                      $ "Top up with older than " ++ show date10YearsAgo ++ " on " ++ show date
   where (y, m, d) = toGregorian date
         date10YearsAgo = fromGregorian (y - 10) m d
 
