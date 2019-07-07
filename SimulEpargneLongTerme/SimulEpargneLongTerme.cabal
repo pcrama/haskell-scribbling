@@ -7,14 +7,22 @@ build-type:          Simple
 license:             BSD3
 description:         Simulate long term saving contract with fiscal advantage to estimate net return.  Please see the README on Github at <https://github.com/pcrama/haskell-scribbling/SimulEpargneLongTerme#readme>
 
-
-executable SimulEpargneLongTerme
-  hs-source-dirs:      app
-                     , src
-  main-is:             Main.hs
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
+library
+  hs-source-dirs:      src
+  exposed-modules:     Banking
   build-depends:       base >= 4.7 && < 5
                      , time >= 1.6
                      , transformers
-  default-language: Haskell2010
-  other-modules:       Banking
+  default-language:    Haskell2010
+  ghc-options:         -Wall
+
+
+executable exe
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
+  default-language:    Haskell2010
+  build-depends:       SimulEpargneLongTerme
+                     , base >= 4.7 && < 5
+                     , time >= 1.6
+                     , transformers
