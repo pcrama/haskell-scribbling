@@ -59,14 +59,14 @@ normalDepositsAtRate date rate = foldMap valuateDeposit
 main :: IO ()
 main =
   let startDate = fromGregorian 2019 10 1 in
-  flip mapM_ [1965, 1969, 1973, 1977, 1981, 1985] $ \y -> do
+  flip mapM_ [1967, 1973, 1977, 1983, 1987] $ \y -> do
     putStrLn $ "\n----- Born " ++ show y ++ "-01-01, starting " ++ show startDate ++ " -----"
     let (finalTotal, allTransactions, end) = fst $ runSimulation (simulation startDate) y 1 1
     putStrLn $ "final total == " ++ showAmount finalTotal ++ " on " ++ show end
     -- Show table of value of same deposits at various fixed interest rates:
-    flip mapM_ [28, 30, 32, 34 :: Int] $ \rate1000 ->
-      putStrLn $ "fixed 0.0"
-                 ++ show rate1000 ++ "%-> "
+    flip mapM_ [22..25 :: Int] $ \rate1000 ->
+      putStrLn $ "fixed "
+                 ++ (show $ rate1000 `div` 10) ++ "." ++ (show $ rate1000 `mod` 10) ++ "%-> "
                  ++ (showAmount $ normalDepositsAtRate end (fromIntegral rate1000 / 1000.0) allTransactions)
     if y == 1977
     then mapM_ (putStrLn . tabulateTransaction) allTransactions

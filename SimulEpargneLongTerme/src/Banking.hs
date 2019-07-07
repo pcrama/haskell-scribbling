@@ -96,14 +96,16 @@ data Transaction = Transaction {
 } deriving (Show, Eq)
 
 tabulateTransaction :: Transaction -> String
-tabulateTransaction (Transaction { _account=a, _date=d, _amount=m, _comment=Comment x s }) =
-    show d ++ " " ++ showAccount a ++ " " ++ showAmount' ++ " " ++ showComment
+tabulateTransaction (Transaction { _account=a, _date=d, _amount=m, _comment=Comment _ s }) =
+    "| " ++ show d ++ " | "
+         ++ showAccount a ++ " | "
+         ++ showAmount' ++ " |  |  | "
+         ++ (take 30 $ s ++ repeat ' ') ++ " |"
   where showAccount Normal = "n"
         showAccount LongTerm = "L"
         showAmount' = let m' = showAmount m
                           p = "        "
                       in drop (length m') $ p ++ m'
-        showComment = show x ++ " " ++ s
 
 makeTransaction :: Day -> Account -> Amount -> XComment -> String -> Simulation ()
 makeTransaction date account amount xcomment s = 
@@ -217,8 +219,8 @@ depositLongTerm day = do
   afterTax <- fmap (\rate -> addTax (-1.0 * rate) taxRefundableLongTermDeposit)
             $ asks _entryFee
   topUp day taxRefundableLongTermDeposit
-  makeTransaction day Normal (scaleAmount (-1.0) taxRefundableLongTermDeposit) Withdrawal "Long term + fees"
-  makeTransaction day LongTerm afterTax Deposit $ show day
+  makeTransaction day Normal (scaleAmount (-1.0) taxRefundableLongTermDeposit) Withdrawal "Long term"
+  makeTransaction day LongTerm afterTax Deposit $ "Long term - fees"
 
 deductFees :: Day -> Simulation ()
 deductFees day = do
