@@ -62,12 +62,13 @@ newtype Amount = Amount Int
   deriving (Show, Eq, Ord)
 
 showAmount :: Amount -> String
-showAmount (Amount a) = let eur = a `div` 100
-                            cents = a `mod` 100
-                        in show eur ++ case cents of
-                                        x | x == 0 -> ""
-                                          | x < 10 -> ".0" ++ show x
-                                          | otherwise -> "." ++ show x
+showAmount (Amount a) = let eur = abs a `div` 100
+                            cents = abs a `mod` 100
+                            sign = if a < 0 then "-" else ""
+                        in sign ++ show eur ++ case cents of
+                                                 x | x == 0 -> ""
+                                                   | x < 10 -> ".0" ++ show x
+                                                   | otherwise -> "." ++ show x
 
 instance Semigroup Amount where
   (Amount a) <> (Amount b) = Amount $ a + b
