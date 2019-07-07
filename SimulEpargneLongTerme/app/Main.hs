@@ -26,11 +26,7 @@ simulation simulationStart = do
     normal <- balance end Normal
     long <- balance end LongTerm
     transactions <- lift $ gets _transactions
-    return $ (normal `mappend` long
-             , filter (\Transaction { _account=a, _comment=Comment x _ } ->
-                         (a == Normal) && (x == Deposit))
-                      transactions
-             , end)
+    return $ (normal `mappend` long, reverse transactions, end)
   where loop start end sixtieth sixtyFirst = do
           if start > end
             then return ()
@@ -51,19 +47,27 @@ simulation simulationStart = do
                       addYearlyInterest year Normal
                       loop feeDate end sixtieth sixtyFirst
 
-balanceAtRate :: Day -> Double -> [Transaction] -> Amount
-balanceAtRate date rate = foldMap (\(Transaction { _amount=a, _date=d }) ->
-                                     compoundAmount d rate date a)
-  
+normalDepositsAtRate :: Day -> Double -> [Transaction] -> Amount
+normalDepositsAtRate date rate = foldMap valuateDeposit
+  where valuateDeposit (Transaction { _amount=a
+                                    , _date=d
+                                    , _account=Normal
+                                    , _comment=Comment Deposit _}) =
+                             compoundAmount d rate date a
+        valuateDeposit _ = mempty -- only count deposits on Normal account
+
 main :: IO ()
 main =
   let startDate = fromGregorian 2019 10 1 in
   flip mapM_ [1965, 1969, 1973, 1977, 1981, 1985] $ \y -> do
     putStrLn $ "\n----- Born " ++ show y ++ "-01-01, starting " ++ show startDate ++ " -----"
-    let (finalTotal, s, end) = fst $ runSimulation (simulation startDate) y 1 1
+    let (finalTotal, allTransactions, end) = fst $ runSimulation (simulation startDate) y 1 1
     putStrLn $ "final total == " ++ showAmount finalTotal ++ " on " ++ show end
     -- Show table of value of same deposits at various fixed interest rates:
-    flip mapM_ [15, 20, 25, 30, 35 :: Int] $ \rate1000 ->
+    flip mapM_ [28, 30, 32, 34 :: Int] $ \rate1000 ->
       putStrLn $ "fixed 0.0"
                  ++ show rate1000 ++ "%-> "
-                 ++ (showAmount $ balanceAtRate end (fromIntegral rate1000 / 1000.0) s)
+                 ++ (showAmount $ normalDepositsAtRate end (fromIntegral rate1000 / 1000.0) allTransactions)
+    if y == 1977
+    then mapM_ (putStrLn . tabulateTransaction) allTransactions
+    else return ()

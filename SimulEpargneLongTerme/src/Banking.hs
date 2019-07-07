@@ -9,6 +9,7 @@ module Banking (
   , Transaction(..)
   , Comment(..)
   , makeTransaction
+  , tabulateTransaction
   , scaleAmount
   , addTax
   , showAmount
@@ -93,6 +94,16 @@ data Transaction = Transaction {
   , _amount :: Amount
   , _comment :: Comment
 } deriving (Show, Eq)
+
+tabulateTransaction :: Transaction -> String
+tabulateTransaction (Transaction { _account=a, _date=d, _amount=m, _comment=Comment x s }) =
+    show d ++ " " ++ showAccount a ++ " " ++ showAmount' ++ " " ++ showComment
+  where showAccount Normal = "n"
+        showAccount LongTerm = "L"
+        showAmount' = let m' = showAmount m
+                          p = "        "
+                      in drop (length m') $ p ++ m'
+        showComment = show x ++ " " ++ s
 
 makeTransaction :: Day -> Account -> Amount -> XComment -> String -> Simulation ()
 makeTransaction date account amount xcomment s = 
