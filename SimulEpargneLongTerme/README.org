@@ -1,1 +1,253 @@
-# SimulEpargneLongTerme
+#+TITLE: SimulEpargneLongTerme
+
+* Purpose
+
+Simulate long term saving with fiscal advantage to estimate its net
+interest rate.  The assumptions are:
+- There is a normal savings account with a low interest rate, from which
+  all long term deposits are taken.  This normal account is topped up
+  with `external' money on an as-needed basis.
+- The long term account has a slightly higher interest rate, but still
+  rather low.
+- The main gains are expected to be due to the tax returns.
+
+The benchmark to estimate the net interest rate is to take the same
+inputs to the normal savings account needed during the simulation and
+compound them at a fixed interest rate (higher than the long term saving
+account's rate).
+
+Hence the strategy is to use the tax return of one year to pay part
+of the deposit of the next.  Also, as soon as funds are allowed to be
+taken out of long term saving (after 10 years), take out what is needed
+to pay the rest of the long term deposit.  This limits external input to
+the normal savings account and thus the amount of money blocked on a low
+interest rate account.  Only what is needed it taken out because the long
+term saving account's interest rate is higher than the normal account.
+
+Note that this simulation is still slightly biased in favor of the
+benchmark: if the assumed high fixed rate investment used as benchmark is
+available, we could take out the money after 10 years that is not needed
+for next year's deposit and put in the same investment, improving the
+return of the scheme under test.  This would be slightly more complicated
+without gaining a lot of compelling advantage. so I didn't do it.
+
+* Example run for cbf51fed15ba5ce6ce7ce1e919d7c691e41604d0
+
+#+begin_example
+  ----- Born 1977-01-01, starting 2019-10-01 -----
+  final total == 35734.64 on 2044-12-31
+  fixed 2.9%-> 35237.78
+  fixed 3.0%-> 35986.58
+  fixed 3.1%-> 36750.88
+  fixed 3.2%-> 37530.98
+#+end_example
+
+So we can say that the proposed scheme is equivalent to an interest rate
+of between 2.9% and 3.0%.
+
+The logging output has been reformatted and augmented with running
+totals of both accounts during manual validation of the output.
+
+|       Date | A |   Amount |      Σn |       ΣL | Comment                                         |
+|------------+---+----------+---------+----------+-------------------------------------------------|
+| 2019-10-01 | n |     2260 |    2260 |        0 | Top up to 2260                                  |
+| 2019-10-01 | n |    -2260 |       0 |        0 | Long term                                       |
+| 2019-10-01 | L |  2124.40 |       0 |   2124.4 | Long term                                       |
+| 2019-12-31 | L |    -5.74 |       0 |  2118.66 | Fee for 2124.40                                 |
+| 2019-12-31 | L |     5.54 |       0 |   2124.2 | Interest for 2019                               |
+| 2019-12-31 | n |        0 |       0 |   2124.2 | Interest for 2019                               |
+| 2020-01-01 | n |     2260 |    2260 |   2124.2 | Top up to 2260                                  |
+| 2020-01-01 | n |    -2260 |       0 |   2124.2 | Long term                                       |
+| 2020-01-01 | L |  2124.40 |       0 |   4248.6 | Long term                                       |
+| 2020-12-31 | L |   -11.47 |       0 |  4237.13 | Fee for 4248.60                                 |
+| 2020-12-31 | L |    44.59 |       0 |  4281.72 | Interest for 2020                               |
+| 2020-12-31 | n |        0 |       0 |  4281.72 | Interest for 2020                               |
+| 2021-01-01 | n |     2260 |    2260 |  4281.72 | Top up to 2260                                  |
+| 2021-01-01 | n |    -2260 |       0 |  4281.72 | Long term                                       |
+| 2021-01-01 | L |  2124.40 |       0 |  6406.12 | Long term                                       |
+| 2021-05-01 | n |   723.20 |   723.2 |  6406.12 | Refund for 2260 in 2019                         |
+| 2021-12-31 | L |   -17.30 |   723.2 |  6388.82 | Fee for 6406.12                                 |
+| 2021-12-31 | L |    67.19 |   723.2 |  6456.01 | Interest for 2021                               |
+| 2021-12-31 | n |     2.41 |  725.61 |  6456.01 | Interest for 2021                               |
+| 2022-01-01 | n |  1534.39 |    2260 |  6456.01 | Top up to 2260                                  |
+| 2022-01-01 | n |    -2260 |       0 |  6456.01 | Long term                                       |
+| 2022-01-01 | L |  2124.40 |       0 |  8580.41 | Long term                                       |
+| 2022-05-01 | n |   723.20 |   723.2 |  8580.41 | Refund for 2260 in 2020                         |
+| 2022-12-31 | L |   -20.25 |   723.2 |  8560.16 | Fee for 8580.41                                 |
+| 2022-12-31 | L |    90.02 |   723.2 |  8650.18 | Interest for 2022                               |
+| 2022-12-31 | n |     2.43 |  725.63 |  8650.18 | Interest for 2022                               |
+| 2023-01-01 | n |  1534.37 |    2260 |  8650.18 | Top up to 2260                                  |
+| 2023-01-01 | n |    -2260 |       0 |  8650.18 | Long term                                       |
+| 2023-01-01 | L |  2124.40 |       0 | 10774.58 | Long term                                       |
+| 2023-05-01 | n |   723.20 |   723.2 | 10774.58 | Refund for 2260 in 2021                         |
+| 2023-12-31 | L |   -20.25 |   723.2 | 10754.33 | Fee for 10774.58                                |
+| 2023-12-31 | L |   113.06 |   723.2 | 10867.39 | Interest for 2023                               |
+| 2023-12-31 | n |     2.43 |  725.63 | 10867.39 | Interest for 2023                               |
+| 2024-01-01 | n |  1534.37 |    2260 | 10867.39 | Top up to 2260                                  |
+| 2024-01-01 | n |    -2260 |       0 | 10867.39 | Long term                                       |
+| 2024-01-01 | L |  2124.40 |       0 | 12991.79 | Long term                                       |
+| 2024-05-01 | n |   723.20 |   723.2 | 12991.79 | Refund for 2260 in 2022                         |
+| 2024-12-31 | L |   -20.25 |   723.2 | 12971.54 | Fee for 12991.79                                |
+| 2024-12-31 | L |   136.40 |   723.2 | 13107.94 | Interest for 2024                               |
+| 2024-12-31 | n |     2.42 |  725.62 | 13107.94 | Interest for 2024                               |
+| 2025-01-01 | n |  1534.38 |    2260 | 13107.94 | Top up to 2260                                  |
+| 2025-01-01 | n |    -2260 |       0 | 13107.94 | Long term                                       |
+| 2025-01-01 | L |  2124.40 |       0 | 15232.34 | Long term                                       |
+| 2025-05-01 | n |   723.20 |   723.2 | 15232.34 | Refund for 2260 in 2023                         |
+| 2025-12-31 | L |   -20.25 |   723.2 | 15212.09 | Fee for 15232.34                                |
+| 2025-12-31 | L |   159.86 |   723.2 | 15371.95 | Interest for 2025                               |
+| 2025-12-31 | n |     2.43 |  725.63 | 15371.95 | Interest for 2025                               |
+| 2026-01-01 | n |  1534.37 |    2260 | 15371.95 | Top up to 2260                                  |
+| 2026-01-01 | n |    -2260 |       0 | 15371.95 | Long term                                       |
+| 2026-01-01 | L |  2124.40 |       0 | 17496.35 | Long term                                       |
+| 2026-05-01 | n |   723.20 |   723.2 | 17496.35 | Refund for 2260 in 2024                         |
+| 2026-12-31 | L |   -20.25 |   723.2 |  17476.1 | Fee for 17496.35                                |
+| 2026-12-31 | L |   183.64 |   723.2 | 17659.74 | Interest for 2026                               |
+| 2026-12-31 | n |     2.43 |  725.63 | 17659.74 | Interest for 2026                               |
+| 2027-01-01 | n |  1534.37 |    2260 | 17659.74 | Top up to 2260                                  |
+| 2027-01-01 | n |    -2260 |       0 | 17659.74 | Long term                                       |
+| 2027-01-01 | L |  2124.40 |       0 | 19784.14 | Long term                                       |
+| 2027-05-01 | n |   723.20 |   723.2 | 19784.14 | Refund for 2260 in 2025                         |
+| 2027-12-31 | L |   -20.25 |   723.2 | 19763.89 | Fee for 19784.14                                |
+| 2027-12-31 | L |   207.66 |   723.2 | 19971.55 | Interest for 2027                               |
+| 2027-12-31 | n |     2.43 |  725.63 | 19971.55 | Interest for 2027                               |
+| 2028-01-01 | n |  1534.37 |    2260 | 19971.55 | Top up to 2260                                  |
+| 2028-01-01 | n |    -2260 |       0 | 19971.55 | Long term                                       |
+| 2028-01-01 | L |  2124.40 |       0 | 22095.95 | Long term                                       |
+| 2028-05-01 | n |   723.20 |   723.2 | 22095.95 | Refund for 2260 in 2026                         |
+| 2028-12-31 | L |   -20.25 |   723.2 |  22075.7 | Fee for 22095.95                                |
+| 2028-12-31 | L |   231.99 |   723.2 | 22307.69 | Interest for 2028                               |
+| 2028-12-31 | n |     2.42 |  725.62 | 22307.69 | Interest for 2028                               |
+| 2029-01-01 | n |  1534.38 |    2260 | 22307.69 | Top up to 2260                                  |
+| 2029-01-01 | n |    -2260 |       0 | 22307.69 | Long term                                       |
+| 2029-01-01 | L |  2124.40 |       0 | 24432.09 | Long term                                       |
+| 2029-05-01 | n |   723.20 |   723.2 | 24432.09 | Refund for 2260 in 2027                         |
+| 2029-12-01 | L | -1536.80 |   723.2 | 22895.29 | 1948.14 older than 2019-12-01 on 2029-12-01     |
+| 2029-12-01 | n |  1536.80 |    2260 | 22895.29 | Top up with older than 2019-12-01 on 2029-12-01 |
+| 2029-12-31 | L |   -20.25 |    2260 | 22875.04 | Fee for 22895.29                                |
+| 2029-12-31 | L |   255.14 |    2260 | 23130.18 | Interest for 2029                               |
+| 2029-12-31 | n |     3.06 | 2263.06 | 23130.18 | Interest for 2029                               |
+| 2030-01-01 | n |    -2260 |    3.06 | 23130.18 | Long term                                       |
+| 2030-01-01 | L |  2124.40 |    3.06 | 25254.58 | Long term                                       |
+| 2030-05-01 | n |   723.20 |  726.26 | 25254.58 | Refund for 2260 in 2028                         |
+| 2030-12-01 | L | -1533.74 |  726.26 | 23720.84 | 2521.03 older than 2020-12-01 on 2030-12-01     |
+| 2030-12-01 | n |  1533.74 |    2260 | 23720.84 | Top up with older than 2020-12-01 on 2030-12-01 |
+| 2030-12-31 | L |   -20.25 |    2260 | 23700.59 | Fee for 23720.84                                |
+| 2030-12-31 | L |   263.78 |    2260 | 23964.37 | Interest for 2030                               |
+| 2030-12-31 | n |     3.10 |  2263.1 | 23964.37 | Interest for 2030                               |
+| 2031-01-01 | n |    -2260 |     3.1 | 23964.37 | Long term                                       |
+| 2031-01-01 | L |  2124.40 |     3.1 | 26088.77 | Long term                                       |
+| 2031-05-01 | n |   723.20 |   726.3 | 26088.77 | Refund for 2260 in 2029                         |
+| 2031-12-01 | L | -1533.70 |   726.3 | 24555.07 | 3136.03 older than 2021-12-01 on 2031-12-01     |
+| 2031-12-01 | n |  1533.70 |    2260 | 24555.07 | Top up with older than 2021-12-01 on 2031-12-01 |
+| 2031-12-31 | L |   -20.25 |    2260 | 24534.82 | Fee for 24555.07                                |
+| 2031-12-31 | L |   272.54 |    2260 | 24807.36 | Interest for 2031                               |
+| 2031-12-31 | n |     3.10 |  2263.1 | 24807.36 | Interest for 2031                               |
+| 2032-01-01 | n |    -2260 |     3.1 | 24807.36 | Long term                                       |
+| 2032-01-01 | L |  2124.40 |     3.1 | 26931.76 | Long term                                       |
+| 2032-05-01 | n |   723.20 |   726.3 | 26931.76 | Refund for 2260 in 2030                         |
+| 2032-12-01 | L | -1533.70 |   726.3 | 25398.06 | 3773.67 older than 2022-12-01 on 2032-12-01     |
+| 2032-12-01 | n |  1533.70 |    2260 | 25398.06 | Top up with older than 2022-12-01 on 2032-12-01 |
+| 2032-12-31 | L |   -20.25 |    2260 | 25377.81 | Fee for 25398.06                                |
+| 2032-12-31 | L |   281.45 |    2260 | 25659.26 | Interest for 2032                               |
+| 2032-12-31 | n |     3.07 | 2263.07 | 25659.26 | Interest for 2032                               |
+| 2033-01-01 | n |    -2260 |    3.07 | 25659.26 | Long term                                       |
+| 2033-01-01 | L |  2124.40 |    3.07 | 27783.66 | Long term                                       |
+| 2033-05-01 | n |   723.20 |  726.27 | 27783.66 | Refund for 2260 in 2031                         |
+| 2033-12-01 | L | -1533.73 |  726.27 | 26249.93 | 4434.14 older than 2023-12-01 on 2033-12-01     |
+| 2033-12-01 | n |  1533.73 |    2260 | 26249.93 | Top up with older than 2023-12-01 on 2033-12-01 |
+| 2033-12-31 | L |   -20.25 |    2260 | 26229.68 | Fee for 26249.93                                |
+| 2033-12-31 | L |   290.33 |    2260 | 26520.01 | Interest for 2033                               |
+| 2033-12-31 | n |     3.10 |  2263.1 | 26520.01 | Interest for 2033                               |
+| 2034-01-01 | n |    -2260 |     3.1 | 26520.01 | Long term                                       |
+| 2034-01-01 | L |  2124.40 |     3.1 | 28644.41 | Long term                                       |
+| 2034-05-01 | n |   723.20 |   726.3 | 28644.41 | Refund for 2260 in 2032                         |
+| 2034-12-01 | L | -1533.70 |   726.3 | 27110.71 | 5117.62 older than 2024-12-01 on 2034-12-01     |
+| 2034-12-01 | n |  1533.70 |    2260 | 27110.71 | Top up with older than 2024-12-01 on 2034-12-01 |
+| 2034-12-31 | L |   -20.25 |    2260 | 27090.46 | Fee for 27110.71                                |
+| 2034-12-31 | L |   299.37 |    2260 | 27389.83 | Interest for 2034                               |
+| 2034-12-31 | n |     3.10 |  2263.1 | 27389.83 | Interest for 2034                               |
+| 2035-01-01 | n |    -2260 |     3.1 | 27389.83 | Long term                                       |
+| 2035-01-01 | L |  2124.40 |     3.1 | 29514.23 | Long term                                       |
+| 2035-05-01 | n |   723.20 |   726.3 | 29514.23 | Refund for 2260 in 2033                         |
+| 2035-12-01 | L | -1533.70 |   726.3 | 27980.53 | 5824.47 older than 2025-12-01 on 2035-12-01     |
+| 2035-12-01 | n |  1533.70 |    2260 | 27980.53 | Top up with older than 2025-12-01 on 2035-12-01 |
+| 2035-12-31 | L |   -20.25 |    2260 | 27960.28 | Fee for 27980.53                                |
+| 2035-12-31 | L |   308.50 |    2260 | 28268.78 | Interest for 2035                               |
+| 2035-12-31 | n |     3.10 |  2263.1 | 28268.78 | Interest for 2035                               |
+| 2036-01-01 | n |    -2260 |     3.1 | 28268.78 | Long term                                       |
+| 2036-01-01 | L |  2124.40 |     3.1 | 30393.18 | Long term                                       |
+| 2036-05-01 | n |   723.20 |   726.3 | 30393.18 | Refund for 2260 in 2034                         |
+| 2036-12-01 | L | -1533.70 |   726.3 | 28859.48 | 6554.78 older than 2026-12-01 on 2036-12-01     |
+| 2036-12-01 | n |  1533.70 |    2260 | 28859.48 | Top up with older than 2026-12-01 on 2036-12-01 |
+| 2036-12-31 | L |   -20.25 |    2260 | 28839.23 | Fee for 28859.48                                |
+| 2036-12-31 | L |   317.79 |    2260 | 29157.02 | Interest for 2036                               |
+| 2036-12-31 | n |     3.07 | 2263.07 | 29157.02 | Interest for 2036                               |
+| 2037-01-01 | n |    -2260 |    3.07 | 29157.02 | Long term                                       |
+| 2037-01-01 | L |  2124.40 |    3.07 | 31281.42 | Long term                                       |
+| 2037-01-01 | L | -3128.14 |    3.07 | 28153.28 | Tax at 60                                       |
+| 2037-05-01 | n |   723.20 |  726.27 | 28153.28 | Refund for 2260 in 2035                         |
+| 2037-12-01 | L | -1533.73 |  726.27 | 26619.55 | 4180.73 older than 2027-12-01 on 2037-12-01     |
+| 2037-12-01 | n |  1533.73 |    2260 | 26619.55 | Top up with older than 2027-12-01 on 2037-12-01 |
+| 2037-12-31 | L |   -20.25 |    2260 |  26599.3 | Fee for 26619.55                                |
+| 2037-12-31 | L |   294.33 |    2260 | 26893.63 | Interest for 2037                               |
+| 2037-12-31 | n |     3.10 |  2263.1 | 26893.63 | Interest for 2037                               |
+| 2038-01-01 | n |    -2260 |     3.1 | 26893.63 | Long term                                       |
+| 2038-01-01 | L |  2124.40 |     3.1 | 29018.03 | Long term                                       |
+| 2038-05-01 | n |   723.20 |   726.3 | 29018.03 | Refund for 2260 in 2036                         |
+| 2038-12-01 | L | -1533.70 |   726.3 | 27484.33 | 4958.81 older than 2028-12-01 on 2038-12-01     |
+| 2038-12-01 | n |  1533.70 |    2260 | 27484.33 | Top up with older than 2028-12-01 on 2038-12-01 |
+| 2038-12-31 | L |   -20.25 |    2260 | 27464.08 | Fee for 27484.33                                |
+| 2038-12-31 | L |   303.29 |    2260 | 27767.37 | Interest for 2038                               |
+| 2038-12-31 | n |     3.10 |  2263.1 | 27767.37 | Interest for 2038                               |
+| 2039-01-01 | n |    -2260 |     3.1 | 27767.37 | Long term                                       |
+| 2039-01-01 | L |  2124.40 |     3.1 | 29891.77 | Long term                                       |
+| 2039-05-01 | n |   723.20 |   726.3 | 29891.77 | Refund for 2260 in 2037                         |
+| 2039-12-01 | L | -1533.70 |   726.3 | 28358.07 | 5761.25 older than 2029-12-01 on 2039-12-01     |
+| 2039-12-01 | n |  1533.70 |    2260 | 28358.07 | Top up with older than 2029-12-01 on 2039-12-01 |
+| 2039-12-31 | L |   -20.25 |    2260 | 28337.82 | Fee for 28358.07                                |
+| 2039-12-31 | L |   312.47 |    2260 | 28650.29 | Interest for 2039                               |
+| 2039-12-31 | n |     3.10 |  2263.1 | 28650.29 | Interest for 2039                               |
+| 2040-01-01 | n |    -2260 |     3.1 | 28650.29 | Long term                                       |
+| 2040-01-01 | L |  2124.40 |     3.1 | 30774.69 | Long term                                       |
+| 2040-05-01 | n |   723.20 |   726.3 | 30774.69 | Refund for 2260 in 2038                         |
+| 2040-12-01 | L | -1533.70 |   726.3 | 29240.99 | 6586.84 older than 2030-12-01 on 2040-12-01     |
+| 2040-12-01 | n |  1533.70 |    2260 | 29240.99 | Top up with older than 2030-12-01 on 2040-12-01 |
+| 2040-12-31 | L |   -20.25 |    2260 | 29220.74 | Fee for 29240.99                                |
+| 2040-12-31 | L |   321.80 |    2260 | 29542.54 | Interest for 2040                               |
+| 2040-12-31 | n |     3.07 | 2263.07 | 29542.54 | Interest for 2040                               |
+| 2041-01-01 | n |    -2260 |    3.07 | 29542.54 | Long term                                       |
+| 2041-01-01 | L |  2124.40 |    3.07 | 31666.94 | Long term                                       |
+| 2041-05-01 | n |   723.20 |  726.27 | 31666.94 | Refund for 2260 in 2039                         |
+| 2041-12-01 | L | -1533.73 |  726.27 | 30133.21 | 7421.07 older than 2031-12-01 on 2041-12-01     |
+| 2041-12-01 | n |  1533.73 |    2260 | 30133.21 | Top up with older than 2031-12-01 on 2041-12-01 |
+| 2041-12-31 | L |   -20.25 |    2260 | 30112.96 | Fee for 30133.21                                |
+| 2041-12-31 | L |   331.11 |    2260 | 30444.07 | Interest for 2041                               |
+| 2041-12-31 | n |     3.10 |  2263.1 | 30444.07 | Interest for 2041                               |
+| 2042-01-01 | n |    -2260 |     3.1 | 30444.07 | Long term                                       |
+| 2042-01-01 | L |  2124.40 |     3.1 | 32568.47 | Long term                                       |
+| 2042-05-01 | n |   723.20 |   726.3 | 32568.47 | Refund for 2260 in 2040                         |
+| 2042-12-31 | L |   -20.25 |   726.3 | 32548.22 | Fee for 32568.47                                |
+| 2042-12-31 | L |   341.89 |   726.3 | 32890.11 | Interest for 2042                               |
+| 2042-12-31 | n |     2.47 |  728.77 | 32890.11 | Interest for 2042                               |
+| 2043-05-01 | n |   723.20 | 1451.97 | 32890.11 | Refund for 2260 in 2041                         |
+| 2043-12-31 | L |   -20.25 | 1451.97 | 32869.86 | Fee for 32890.11                                |
+| 2043-12-31 | L |   345.35 | 1451.97 | 33215.21 | Interest for 2043                               |
+| 2043-12-31 | n |     6.05 | 1458.02 | 33215.21 | Interest for 2043                               |
+| 2044-05-01 | n |   723.20 | 2181.22 | 33215.21 | Refund for 2260 in 2042                         |
+| 2044-12-31 | L |   -20.25 | 2181.22 | 33194.96 | Fee for 33215.21                                |
+| 2044-12-31 | L |   348.76 | 2181.22 | 33543.72 | Interest for 2044                               |
+| 2044-12-31 | n |     9.70 | 2190.92 | 33543.72 | Interest for 2044                               |
+
+* Further questions
+** TODO check taxation at 60
+Currently (cbf51fed15ba5ce6ce7ce1e919d7c691e41604d0), taxation is on
+value on 60th birthday, without taking penalizing for taking money out
+before.  If it really is the case that there is no penalty for taking
+money (that is older than 10 years) out before 60th birthday, do it to
+reduce the taxation.
+
+** TODO update with current interest rates
+
+** TODO sensitivity analysis
+What happens if long term interest rates drop to 0.5%?
