@@ -192,21 +192,25 @@ topUp date target = do
 taxRefundableLongTermDeposit :: Amount
 taxRefundableLongTermDeposit = Amount 226000
 
-refundTax :: Day -> Simulation ()
+refundTax :: Day -> Simulation Bool
 refundTax date =
   let (y, _, _) = toGregorian date
-      longTermDepositInPreviousYear (Transaction { _account=a, _date=d, _comment=Comment x _ }) =
+      -- There is a 2 year delay: money deposited in year n is declared
+      -- during year n + 1 and the state gives back the money in year n + 2
+      declarationYear = y - 2
+      longTermDepositTwoYearsAgo (Transaction { _account=a, _date=d, _comment=Comment x _ }) =
         (a == LongTerm)
         && (x == Deposit)
-        && (let (depositYear, _, _) = toGregorian d in depositYear + 1 == y)
+        && (let (depositYear, _, _) = toGregorian d in depositYear == declarationYear)
   in do
-    entryFee <- asks _entryFee
-    longDeposits <- fmap (filter longTermDepositInPreviousYear)
+    longDeposits <- fmap (filter longTermDepositTwoYearsAgo)
                        $ lift $ gets _transactions
-    let amountSpentLastYear = foldMap (addTax entryFee . _amount) longDeposits
-    when (amountSpentLastYear > mempty) $ do
-      let refund = scaleAmount 0.32 $ min amountSpentLastYear taxRefundableLongTermDeposit
-      makeTransaction date Normal refund TaxRefund $ "Refund for " ++ showAmount amountSpentLastYear ++ " in " ++ show (y - 1)
+    let amountSpentTwoYearsAgo = foldMap _amount longDeposits
+    let gotRefund = amountSpentTwoYearsAgo > mempty
+    when gotRefund $ do
+      let refund = scaleAmount 0.32 $ min amountSpentTwoYearsAgo taxRefundableLongTermDeposit
+      makeTransaction date Normal refund TaxRefund $ "Refund for " ++ showAmount amountSpentTwoYearsAgo ++ " in " ++ show declarationYear
+    return gotRefund
 
 taxAt60 :: Simulation ()
 taxAt60 = do
@@ -216,11 +220,11 @@ taxAt60 = do
 
 depositLongTerm :: Day -> Simulation ()
 depositLongTerm day = do
-  afterTax <- fmap (\rate -> addTax (-1.0 * rate) taxRefundableLongTermDeposit)
-            $ asks _entryFee
+  entryFee <- asks _entryFee
   topUp day taxRefundableLongTermDeposit
   makeTransaction day Normal (scaleAmount (-1.0) taxRefundableLongTermDeposit) Withdrawal "Long term"
-  makeTransaction day LongTerm afterTax Deposit $ "Long term - fees"
+  makeTransaction day LongTerm taxRefundableLongTermDeposit Deposit $ "Long term"
+  makeTransaction day LongTerm (scaleAmount (-1.0 * entryFee) taxRefundableLongTermDeposit) Fee $ "Entry fee"
 
 deductFees :: Day -> Simulation ()
 deductFees day = do

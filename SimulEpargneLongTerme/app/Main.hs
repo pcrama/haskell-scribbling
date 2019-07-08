@@ -1,11 +1,14 @@
 module Main where
 
+import Data.Function (on)
+import Data.List (sortBy)
 import Data.Time.Calendar
   ( Day
   , addGregorianYearsClip
   , fromGregorian
   , toGregorian
   )
+import Control.Monad (when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.Trans.State (gets)
@@ -26,26 +29,33 @@ simulation simulationStart = do
     normal <- balance end Normal
     long <- balance end LongTerm
     transactions <- lift $ gets _transactions
-    return $ (normal `mappend` long, reverse transactions, end)
-  where loop start end sixtieth sixtyFirst = do
-          if start > end
-            then return ()
-            else let [_, depositDate, taxDate, takeOutDate, feeDate] =
-                       scanl (\p (m, d) -> after p m d)
-                             start
-                             [(1, 1), (5, 1),  (12, 1),     (12, 31)]
-                     (year, _, _) = toGregorian feeDate
-                 in do
-                      depositLongTerm depositDate
-                      refundTax taxDate
-                      if (sixtieth == taxDate) || (sixtieth < taxDate && taxDate < sixtyFirst)
-                        then taxAt60
-                        else return ()
-                      takeOutOldMoney takeOutDate
-                      deductFees feeDate
-                      addYearlyInterest year LongTerm
-                      addYearlyInterest year Normal
-                      loop feeDate end sixtieth sixtyFirst
+    return $ (normal `mappend` long
+             -- normally, reversing the transaction list should be
+             -- sufficient, sorting the transactions just to be on the
+             -- safe side & explicit about the goal:
+             , sortBy (compare `on` _date) $ reverse transactions
+             , maximum $ map _date transactions)
+  where loop start end sixtieth sixtyFirst =
+          let [_, depositDate, taxDate, takeOutDate, feeDate] =
+                scanl (\p (m, d) -> after p m d)
+                      start
+                      [(1, 1), (5, 1),  (12, 1),     (12, 31)]
+              (year, _, _) = toGregorian feeDate
+              depositThisYear = start <= end
+              depositNextYear = depositThisYear && addGregorianYearsClip 1 start <= end
+          in do
+               when depositThisYear $
+                 depositLongTerm depositDate
+               gotRefund <- refundTax taxDate
+               when (sixtieth <= taxDate && taxDate < sixtyFirst)
+                 taxAt60
+               when (depositThisYear || gotRefund) $ do
+                 when depositNextYear $
+                   takeOutOldMoney takeOutDate
+                 deductFees feeDate
+                 addYearlyInterest year LongTerm
+                 addYearlyInterest year Normal
+                 loop feeDate end sixtieth sixtyFirst
 
 normalDepositsAtRate :: Day -> Double -> [Transaction] -> Amount
 normalDepositsAtRate date rate = foldMap valuateDeposit
