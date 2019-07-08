@@ -25,6 +25,14 @@ simulation :: Day -> Simulation (Amount, [Transaction], Day)
 simulation simulationStart = do
     end <- asks _end
     sixtieth <- asks _60th
+    -- first year is special: long term deposit happens on
+    -- simulationStart which isn't necessarily Jan 1st.
+    depositLongTerm simulationStart
+    deductFees $ after simulationStart 12 31
+    let (firstYear, _, _) = toGregorian simulationStart
+    addYearlyInterest firstYear LongTerm
+    addYearlyInterest firstYear Normal
+    -- `loop' will first advance to Jan 1 after simulationStart
     loop simulationStart end sixtieth $ addGregorianYearsClip 1 sixtieth
     normal <- balance end Normal
     long <- balance end LongTerm
