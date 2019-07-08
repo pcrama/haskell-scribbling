@@ -29,6 +29,7 @@ where
 import Data.Time.Calendar
 import Data.List (foldl')
 import Data.Monoid ((<>))
+import Control.Monad (when)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.State
@@ -100,7 +101,7 @@ tabulateTransaction (Transaction { _account=a, _date=d, _amount=m, _comment=Comm
     "| " ++ show d ++ " | "
          ++ showAccount a ++ " | "
          ++ showAmount' ++ " |  |  | "
-         ++ (take 30 $ s ++ repeat ' ') ++ " |"
+         ++ (take (max 30 $ length s) $ s ++ repeat ' ') ++ " |"
   where showAccount Normal = "n"
         showAccount LongTerm = "L"
         showAmount' = let m' = showAmount m
@@ -153,10 +154,6 @@ funBalanceOlderThan date account transactions =
             (Amount 0)
           $ filter isRelevantTransaction transactions
 
-when :: Applicative m => Bool -> m () -> m ()
-when False _ = pure ()
-when True m = m
-
 -- It is allowed to recover money from the long term account after 10
 -- years without giving up the fiscal benefit: use that to top up fors
 -- next year's deposit.  Do not take more than that: we assume that the
@@ -199,13 +196,13 @@ refundTax date =
       -- during year n + 1 and the state gives back the money in year n + 2
       declarationYear = y - 2
       longTermDepositTwoYearsAgo (Transaction { _account=a, _date=d, _comment=Comment x _ }) =
-        (a == LongTerm)
-        && (x == Deposit)
+        (a == Normal)
+        && (x == Withdrawal)
         && (let (depositYear, _, _) = toGregorian d in depositYear == declarationYear)
   in do
     longDeposits <- fmap (filter longTermDepositTwoYearsAgo)
                        $ lift $ gets _transactions
-    let amountSpentTwoYearsAgo = foldMap _amount longDeposits
+    let amountSpentTwoYearsAgo = scaleAmount (-1.0) $ foldMap _amount longDeposits
     let gotRefund = amountSpentTwoYearsAgo > mempty
     when gotRefund $ do
       let refund = scaleAmount 0.32 $ min amountSpentTwoYearsAgo taxRefundableLongTermDeposit
@@ -223,8 +220,7 @@ depositLongTerm day = do
   entryFee <- asks _entryFee
   topUp day taxRefundableLongTermDeposit
   makeTransaction day Normal (scaleAmount (-1.0) taxRefundableLongTermDeposit) Withdrawal "Long term"
-  makeTransaction day LongTerm taxRefundableLongTermDeposit Deposit $ "Long term"
-  makeTransaction day LongTerm (scaleAmount (-1.0 * entryFee) taxRefundableLongTermDeposit) Fee $ "Entry fee"
+  makeTransaction day LongTerm (addTax (-1.0 * entryFee) taxRefundableLongTermDeposit) Deposit $ "Long term"
 
 deductFees :: Day -> Simulation ()
 deductFees day = do
