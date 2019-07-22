@@ -9,13 +9,12 @@ module Main (main) where
 
 import qualified SDL
 import SDL.Image
-import qualified SDL.Raw
 
+import Control.Exception      (handle, throw)
 import Control.Monad          (unless, void)
-import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Monoid            (First(..))
 import Data.Text              (Text)
-
--- import SDL (($=))
 
 
 withSDL :: (MonadIO m) => m a -> m ()
@@ -85,17 +84,15 @@ win1 w = do
 
 win2 :: MonadIO m => SDL.Window -> m ()
 win2 w = do
-    defaultRenderer <- mkRenderer 2 SDL.defaultRenderer
-    -- unacceleratedRenderer <- mkRenderer 2 SDL.RendererConfig {
-    --                                         SDL.rendererType = SDL.SoftwareRenderer
-    --                                       , SDL.rendererTargetTexture = True
-    --                                       }
-    -- liftIO (app defaultRenderer
-    --         `catch`
-    --         ((\e -> putStrLn ("<<< " ++ show e) >> app unacceleratedRenderer) :: IOException -> IO ()))
-    app defaultRenderer
-  where mkRenderer = SDL.createRenderer w
-        app = appLoop False
+    renderer <- liftIO $ handle ((\e -> do
+                                    backupRendererIndex <- getSoftwareRendererIndex
+                                    case backupRendererIndex of
+                                      Just i -> putStrLn (show e ++ ", retrying with " ++ show i) >> mkRenderer i
+                                      Nothing -> putStrLn "Can't find backup driver" >> throw e
+                                 ) :: SDL.SDLException -> IO SDL.Renderer)
+                              $ mkRenderer (-1)
+    appLoop False renderer
+  where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
 
 
 eventIsPress :: SDL.Keycode -> SDL.Event -> Bool
@@ -118,12 +115,20 @@ appLoop isRed renderer = do
   unless qPressed $ appLoop (rPressed /= isRed) renderer
 
 
+getSoftwareRendererIndex :: (Num a, Enum a) => MonadIO m => m (Maybe a)
+getSoftwareRendererIndex = do
+    drivers <- SDL.getRenderDriverInfo
+    return $ getFirst $ foldMap indexIfIsSoftwareRenderer $ zip [0..] drivers
+  where indexIfIsSoftwareRenderer (idx
+                                  , SDL.RendererInfo {
+                                      SDL.rendererInfoFlags = SDL.RendererConfig {
+                                        SDL.rendererType = SDL.SoftwareRenderer}}
+                                  ) = First $ Just idx
+        indexIfIsSoftwareRenderer _ = First $ Nothing
+
+
 main :: IO ()
 main = do
-  _ <- SDL.getRenderDriverInfo >>= mapM (\i -> print i >> putStrLn "")
-  nr <- SDL.Raw.getNumRenderDrivers
-  nv <- SDL.Raw.getNumVideoDrivers
-  putStrLn . show $ ('1', nr, nv)
   withSDL $ do
     -- Space or quit or close window to progress...
     withWindow "Lesson 01" (640, 480) win1
