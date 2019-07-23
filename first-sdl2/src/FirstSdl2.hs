@@ -11,10 +11,11 @@ import qualified SDL
 import SDL.Image
 
 import Control.Exception      (handle, throw)
-import Control.Monad          (unless, void)
+import Control.Monad          (unless, void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Monoid            (First(..))
 import Data.Text              (Text)
+import Data.Word              (Word32)
 
 
 withSDL :: (MonadIO m) => m a -> m ()
@@ -91,7 +92,8 @@ win2 w = do
                                       Nothing -> putStrLn "Can't find backup driver" >> throw e
                                  ) :: SDL.SDLException -> IO SDL.Renderer)
                               $ mkRenderer (-1)
-    appLoop False renderer
+    startTicks <- SDL.ticks
+    appLoop (AppState False startTicks 0) renderer
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
 
 
@@ -104,15 +106,44 @@ eventIsPress keycode event =
     _ -> False
 
 
-appLoop :: MonadIO m => Bool -> SDL.Renderer -> m ()
-appLoop isRed renderer = do
+data AppState = AppState {
+  _isRed :: Bool
+  , _lastTicks :: Word32
+  , _frameCount :: Int
+  } deriving (Show, Eq)
+
+
+appLoop :: MonadIO m => AppState -> SDL.Renderer -> m ()
+appLoop oldState@(AppState isRed lastTicks frames) renderer = do
   events <- SDL.pollEvents
+  now <- SDL.ticks
   let qPressed = any (eventIsPress SDL.KeycodeQ) events
       rPressed = any (eventIsPress SDL.KeycodeR) events
+  let timeDiff = now - lastTicks
+  let atLeastOneSecond = timeDiff >= 1000
+  let n = (480 * fromIntegral timeDiff) `div` 1000
   SDL.rendererDrawColor renderer SDL.$= (if isRed then (SDL.V4 0 0 255 255) else (SDL.V4 0 255 0 255))
   SDL.clear renderer
+  SDL.rendererDrawColor renderer SDL.$= (if isRed then (SDL.V4 0 255 0 255) else (SDL.V4 0 0 255 255))
+  SDL.fillRect renderer (Just $ SDL.Rectangle (SDL.P $ SDL.V2 0 0) (SDL.V2 n n))
   SDL.present renderer
-  unless qPressed $ appLoop (rPressed /= isRed) renderer
+  let (newFrameCount, newLastTicks) = if atLeastOneSecond
+                                      then (0, now)
+                                      else (frames + 1, lastTicks)
+  let newState = if rPressed || atLeastOneSecond
+                 then oldState { _isRed = not isRed
+                               , _lastTicks = now
+                               , _frameCount = newFrameCount
+                               }
+                 else oldState { _lastTicks = newLastTicks
+                               , _frameCount = newFrameCount
+                               }
+  unless qPressed $ do
+    when atLeastOneSecond $
+      liftIO $ putStrLn $ show now
+                       ++ ": FPS = "
+                       ++ show (fromIntegral frames * (1000.0 :: Double) / fromIntegral timeDiff)
+    appLoop newState renderer
 
 
 getSoftwareRendererIndex :: (Num a, Enum a) => MonadIO m => m (Maybe a)
