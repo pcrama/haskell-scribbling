@@ -1,0 +1,15 @@
+* Purpose
+
+Test SDL2 to make a simple graphic game.
+
+* Setup
+
+Install the following packages:
+- apt install ghc cabal-install
+- apt install pkg-config
+- apt install libsdl2-dev
+- apt install libsdl2-image-dev
+
+* Run
+
+Use ~cabal new-run~.
