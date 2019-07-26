@@ -110,8 +110,9 @@ win2 font w = do
                                  ) :: SDL.SDLException -> IO SDL.Renderer)
                               $ mkRenderer (-1)
     fpsTexture <- textTexture renderer font black "???"
+    heroTexture <- SDL.Image.loadTexture renderer "./assets/sheet_hero_walk.png"
     startTicks <- SDL.ticks
-    appLoop (AppState False startTicks 0 font fpsTexture) renderer
+    appLoop (AppState False startTicks 0 font fpsTexture heroTexture) renderer
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
 
 
@@ -130,6 +131,7 @@ data AppState = AppState {
   , _frameCount :: Int
   , _font :: SDL.Font.Font
   , _fps :: SDL.Texture
+  , _hero :: SDL.Texture
   }
 
 
@@ -149,7 +151,7 @@ winWidth = 640
 
 
 appLoop :: MonadIO m => AppState -> SDL.Renderer -> m ()
-appLoop oldState@(AppState isRed lastTicks frames font fpsTexture) renderer = do
+appLoop oldState@(AppState isRed lastTicks frames font fpsTexture heroTexture) renderer = do
   events <- SDL.pollEvents
   now <- SDL.ticks
   let qPressed = any (eventIsPress SDL.KeycodeQ) events
@@ -182,12 +184,20 @@ appLoop oldState@(AppState isRed lastTicks frames font fpsTexture) renderer = do
                                                 * (revT - 500) * (revT - 500)
                                                 `div` (2 * 500 * 500))
                               $ SDL.V2 textWidth textHeight
+  let frame = (now `div` 50) `mod` 3
+  SDL.copy renderer
+           heroTexture
+           (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
+         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth `div` 2) (winHeight `div` 2))
+                              $ SDL.V2 128 128
   SDL.present renderer
   let (newFrameCount, newLastTicks) = if atLeastOneSecond
                                       then (0, now)
                                       else (frames + 1, lastTicks)
   if qPressed
-  then SDL.destroyTexture fpsTexture'
+  then do
+    SDL.destroyTexture fpsTexture'
+    SDL.destroyTexture heroTexture
   else appLoop oldState { _isRed = if rPressed || atLeastOneSecond then not isRed else isRed
                         , _lastTicks = newLastTicks
                         , _frameCount = newFrameCount
