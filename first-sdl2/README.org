@@ -1,3 +1,7 @@
+* Credits
+** Game assets
+[[https://itch.io/queue/c/333596/characters?game_id=146646][Cute Knight]] by [[https://goglilol.itch.io][goglilol]]
+
 * Purpose
 
 Test SDL2 to make a simple graphic game.
