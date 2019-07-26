@@ -17,4 +17,4 @@ Install the following packages:
 
 * Run
 
-Use ~cabal new-run first-sdl2 "$(fc-match --format "%{file}" | head -n 1)"~.
+Use ~cabal new-run first-sdl2 "$(fc-match --format "%{file}")"~.

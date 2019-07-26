@@ -215,8 +215,8 @@ main = do
     withWindow "Lesson 01" (fromIntegral winWidth, fromIntegral winHeight) win1
     -- (q)uit and `r' to toggle color
     getArgs >>= \case
-      [] -> putStrLn "Second demo only with a font...\
-                    \ncabal new-run first-sdl2 \"$(fc-match --format \"%{file}\" | head -n 1)\""
+      [] -> putStrLn "Second demo only with a font...\n\
+                     \cabal new-run first-sdl2 \"$(fc-match --format \"%{file}\")\""
       [fontPath] ->
         withSDLFont fontPath 72 $ \font ->
           withWindow "http://hackage.haskell.org/package/sdl2-2.5.0.0/docs/SDL.html"
