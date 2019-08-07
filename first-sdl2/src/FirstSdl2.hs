@@ -13,13 +13,14 @@ import qualified SDL.Font
 import SDL.Image
 
 import Control.Exception      (handle, throw)
-import Control.Monad          (void)
+import Control.Monad          (void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Monoid            (First(..))
 import Data.Text              (Text, pack)
-import Data.Word              (Word32, Word8)
-import Foreign.C.Types        (CInt)
+import Data.Word              (Word8)
 import System.Environment     (getArgs)
+
+import Physics
 
 
 withSDL :: (MonadIO m) => m a -> m ()
@@ -109,10 +110,9 @@ win2 font w = do
                                       Nothing -> putStrLn "Can't find backup driver" >> throw e
                                  ) :: SDL.SDLException -> IO SDL.Renderer)
                               $ mkRenderer (-1)
-    fpsTexture <- textTexture renderer font black "???"
     heroTexture <- SDL.Image.loadTexture renderer "./assets/sheet_hero_walk.png"
     startTicks <- SDL.ticks
-    appLoop (AppState False startTicks 0 font fpsTexture heroTexture) renderer
+    appLoop (AppState False (IdleHero startTicks 2) startTicks 0.0 font heroTexture) renderer
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
 
 
@@ -125,13 +125,18 @@ eventIsPress keycode event =
     _ -> False
 
 
+data Hero =
+  IdleHero GameTime Position
+  | RunningHero MUA
+
+
 data AppState = AppState {
   _isRed :: Bool
-  , _lastTicks :: Word32
-  , _frameCount :: Int
+  , _heroState :: Hero
+  , _lastTicks :: GameTime
+  , _fpsEst :: Double
   , _font :: SDL.Font.Font
-  , _fps :: SDL.Texture
-  , _hero :: SDL.Texture
+  , _heroTexture :: SDL.Texture
   }
 
 
@@ -145,65 +150,106 @@ green = SDL.V4 0 255 0 0
 red = SDL.V4 255 0 0 0
 
 
-winHeight, winWidth :: CInt
+winHeight, winWidth :: Position
 winHeight = 480
 winWidth = 640
 
 
+updateAppTime :: GameTime -> AppState -> AppState
+updateAppTime now s0@(AppState { _lastTicks=t0, _fpsEst=fps0, _heroState=hero })
+  | now > t0 = s0 { _lastTicks=now
+                  , _fpsEst=(pastWeight * fps0 + timeScaling / (fromIntegral $ now - t0))
+                              / (pastWeight + 1)
+                  , _heroState=case hero of
+                                 IdleHero _ _ -> hero
+                                 RunningHero mua
+                                   | muaSpeed mua now > speedZero -> hero
+                                   | otherwise -> IdleHero (muaTimeOfMaxDistance mua)
+                                                         $ muaX0 mua + muaMaxDistance mua
+                  }
+  | otherwise = s0
+  where pastWeight = 9 -- higher values mean more weight of the past FPS estimates in current estimate
+
+
+updateAppForEvent :: SDL.Event -> AppState -> Maybe AppState
+updateAppForEvent (SDL.Event _t SDL.QuitEvent) _ = Nothing
+updateAppForEvent e@(SDL.Event now _) s0
+  | eventIsPress SDL.KeycodeQ e = Nothing
+  | eventIsPress SDL.KeycodeB e = Just $ s0 { _isRed = not $ _isRed s0 }
+  | eventIsPress SDL.KeycodeR e = Just $ s0 { _heroState =
+      case _heroState s0 of
+        IdleHero _ x0 -> RunningHero $ MUA heroAccel now heroSpeed x0
+        RunningHero mua -> let (GS currentSpeed) = muaSpeed mua now
+                               (GS initSpeed) = heroSpeed in
+                           RunningHero $ MUA heroAccel
+                                             now
+                                             (GS $ initSpeed + (currentSpeed / 2))
+                                           $ muaX0 mua + muaDistance mua now
+    }
+  | otherwise = Just s0
+  where heroAccel = GA (-3.0)
+        heroSpeed = GS (15.0)
+
+
 appLoop :: MonadIO m => AppState -> SDL.Renderer -> m ()
-appLoop oldState@(AppState isRed lastTicks frames font fpsTexture heroTexture) renderer = do
+appLoop oldState renderer = do
   events <- SDL.pollEvents
-  now <- SDL.ticks
-  let qPressed = any (eventIsPress SDL.KeycodeQ) events
-      rPressed = any (eventIsPress SDL.KeycodeR) events
-  let timeDiff = now - lastTicks
-  let atLeastOneSecond = timeDiff >= 1000
-  let n = (winHeight * fromIntegral timeDiff) `div` 1000
+  case foldr (\e mbS -> mbS >>= updateAppForEvent e) (Just oldState) events of
+    Nothing -> return ()
+    Just s -> do
+                now <- SDL.ticks
+                let nextState = updateAppTime now s
+                drawApp now nextState renderer
+                appLoop nextState renderer
+
+
+heroDrawInfo :: GameTime -> Hero -> (Int, Position, Position)
+heroDrawInfo now (IdleHero t0 x0) =
+  let timeDiff = now - t0
+      jitter = max 0 $ (timeDiff `div` (round $ timeScaling / 2)) `mod` 3 - 1 in
+    (fromIntegral $ (timeDiff `div` (round $ timeScaling / 3)) `mod` 2
+    , x0
+    , winHeight `div` 2 + fromIntegral jitter)
+heroDrawInfo now (RunningHero mua) =
+  let timeDiff = now - muaT0 mua
+      frameCount = 3
+      distance = muaDistance mua now
+      GS speed = muaSpeed mua now in
+    (-- switch from speed based animation to time based to maintain illusion
+     -- of movement at low speeds
+     if speed > 5
+     then fromIntegral distance `mod` frameCount
+     else (fromIntegral timeDiff `div` (round $ timeScaling / 5)) `mod` frameCount
+    , muaX0 mua + distance
+    , winHeight `div` 2)
+
+
+drawApp :: MonadIO m => GameTime -> AppState -> SDL.Renderer -> m ()
+drawApp now (AppState isRed heroState _ fpsEst font heroTexture) renderer = do
   SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
   SDL.clear renderer
-  SDL.rendererDrawColor renderer SDL.$= (if isRed then green else blue)
-  SDL.fillRect renderer (Just $ SDL.Rectangle (SDL.P $ SDL.V2 0 0) (SDL.V2 n n))
-  fpsTexture' <- case atLeastOneSecond of
-    True -> do
-      let fps = show (fromIntegral frames * (1000.0 :: Double) / fromIntegral timeDiff)
-      liftIO $ putStrLn $ show now ++ ": FPS = " ++ fps
-      SDL.destroyTexture fpsTexture
-      r <- textTexture renderer font black $ pack $ take 7 fps
-      return r
-    False ->
-      return fpsTexture
-  SDL.TextureInfo { SDL.textureWidth = textWidth
-                  , SDL.textureHeight = textHeight
-                  } <- SDL.queryTexture fpsTexture'
-  let revT = max 0 $ 1000 - fromIntegral timeDiff -- from 1000 downto 0
-  SDL.copy renderer
-           fpsTexture'
-           Nothing -- use complete fpsTexture' as source
-         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 ((winWidth - textWidth) * revT `div` 1000)
-                                              $ (winHeight - textHeight)
-                                                * (revT - 500) * (revT - 500)
-                                                `div` (2 * 500 * 500))
-                              $ SDL.V2 textWidth textHeight
-  let frame = (now `div` 50) `mod` 3
+  let fps = (take 7 $ show fpsEst)
+         ++ case heroState of
+              IdleHero _ _ -> ""
+              RunningHero mua -> " " ++ (take 7 . show $ muaSpeed mua now)
+  liftIO $ putStrLn $ show now ++ ": FPS = " ++ fps
+  when (fpsEst > 25) $ do
+    fpsTexture <- textTexture renderer font (if isRed then blue else black) $ pack fps
+    SDL.TextureInfo { SDL.textureWidth = textWidth
+                    , SDL.textureHeight = textHeight
+                    } <- SDL.queryTexture fpsTexture
+    SDL.copy renderer
+             fpsTexture
+             Nothing -- use complete fpsTexture as source
+           $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) (winHeight - textHeight))
+                                $ SDL.V2 textWidth textHeight
+    SDL.destroyTexture fpsTexture
+  let (frame, x, y) = heroDrawInfo now heroState
   SDL.copy renderer
            heroTexture
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
-         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth `div` 2) (winHeight `div` 2))
-                              $ SDL.V2 128 128
+         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 x y) $ SDL.V2 128 128
   SDL.present renderer
-  let (newFrameCount, newLastTicks) = if atLeastOneSecond
-                                      then (0, now)
-                                      else (frames + 1, lastTicks)
-  if qPressed
-  then do
-    SDL.destroyTexture fpsTexture'
-    SDL.destroyTexture heroTexture
-  else appLoop oldState { _isRed = if rPressed || atLeastOneSecond then not isRed else isRed
-                        , _lastTicks = newLastTicks
-                        , _frameCount = newFrameCount
-                        , _fps = fpsTexture'
-                        }
-               renderer
 
 
 getSoftwareRendererIndex :: (Num a, Enum a) => MonadIO m => m (Maybe a)
@@ -223,7 +269,7 @@ main = do
   withSDL $ do
     -- Space or quit or close window to progress...
     withWindow "Lesson 01" (fromIntegral winWidth, fromIntegral winHeight) win1
-    -- (q)uit and `r' to toggle color
+    -- (q)uit, `b' to toggle color and `r' to make hero move
     getArgs >>= \case
       [] -> putStrLn "Second demo only with a font...\n\
                      \cabal new-run first-sdl2 \"$(fc-match --format \"%{file}\")\""
