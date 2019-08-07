@@ -54,4 +54,4 @@ muaDistance (MUA { muaA=(GA a)
                  , muaT0=t0 })
             t =
   let t_t0 = t `timeDiff` t0 in
-  round $ (a * t_t0 + v) * t_t0
+  round $ (a * t_t0 / 2 + v) * t_t0
