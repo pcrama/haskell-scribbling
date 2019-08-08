@@ -111,8 +111,12 @@ win2 font w = do
                                  ) :: SDL.SDLException -> IO SDL.Renderer)
                               $ mkRenderer (-1)
     heroTexture <- SDL.Image.loadTexture renderer "./assets/sheet_hero_walk.png"
+    catTexture <- SDL.Image.loadTexture renderer "./assets/cat100x100.png"
     startTicks <- SDL.ticks
-    appLoop (AppState False (IdleHero startTicks 2) startTicks 0.0 font heroTexture) renderer
+    appLoop (AppState False startTicks 0 (IdleHero startTicks 2) startTicks 0.0 font heroTexture catTexture)
+            renderer
+    SDL.destroyTexture catTexture
+    SDL.destroyTexture heroTexture
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
 
 
@@ -132,11 +136,14 @@ data Hero =
 
 data AppState = AppState {
   _isRed :: Bool
+  , _sceneLastMove :: GameTime
+  , _sceneOrigin :: Position
   , _heroState :: Hero
   , _lastTicks :: GameTime
   , _fpsEst :: Double
   , _font :: SDL.Font.Font
   , _heroTexture :: SDL.Texture
+  , _catTexture :: SDL.Texture
   }
 
 
@@ -154,10 +161,16 @@ winHeight, winWidth :: Position
 winHeight = 480
 winWidth = 640
 
+maxScreenPos, minScreenPos :: Position
+maxScreenPos = 2 * winWidth `div` 3
+minScreenPos = winWidth `div` 8
+
 
 updateAppTime :: GameTime -> AppState -> AppState
-updateAppTime now s0@(AppState { _lastTicks=t0, _fpsEst=fps0, _heroState=hero })
+updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero })
   | now > t0 = s0 { _lastTicks=now
+                  , _sceneLastMove=newSceneLastMove
+                  , _sceneOrigin=newSceneOrigin
                   , _fpsEst=(pastWeight * fps0 + timeScaling / (fromIntegral $ now - t0))
                               / (pastWeight + 1)
                   , _heroState=case hero of
@@ -169,6 +182,17 @@ updateAppTime now s0@(AppState { _lastTicks=t0, _fpsEst=fps0, _heroState=hero })
                   }
   | otherwise = s0
   where pastWeight = 9 -- higher values mean more weight of the past FPS estimates in current estimate
+        (newSceneLastMove, newSceneOrigin) =
+          let heroPos = case hero of
+                          IdleHero _ x0 -> x0
+                          RunningHero mua -> muaX0 mua + muaDistance mua now in
+            case (sceneLastMove + (round $ timeScaling / 4) < now -- update regularly
+                 , heroPos > sceneOrigin + maxScreenPos -- don't let hero go too far to the right
+                 , heroPos > sceneOrigin + minScreenPos -- but don't scroll when more or less in middle
+                 ) of
+              (_, True, _) -> (now, heroPos - maxScreenPos)
+              (True, False, True) -> (now, sceneOrigin + 1)
+              _ -> (sceneLastMove, sceneOrigin)
 
 
 updateAppForEvent :: SDL.Event -> AppState -> Maybe AppState
@@ -208,7 +232,7 @@ heroDrawInfo now (IdleHero t0 x0) =
   let timeDiff = now - t0
       jitter = max 0 $ (timeDiff `div` (round $ timeScaling / 2)) `mod` 3 - 1 in
     (fromIntegral $ (timeDiff `div` (round $ timeScaling / 3)) `mod` 2
-    , x0
+    , x0 - 32
     , winHeight `div` 2 + fromIntegral jitter)
 heroDrawInfo now (RunningHero mua) =
   let timeDiff = now - muaT0 mua
@@ -220,19 +244,26 @@ heroDrawInfo now (RunningHero mua) =
      if speed > 5
      then fromIntegral distance `mod` frameCount
      else (fromIntegral timeDiff `div` (round $ timeScaling / 5)) `mod` frameCount
-    , muaX0 mua + distance
+    , muaX0 mua + distance - 32
     , winHeight `div` 2)
 
 
 drawApp :: MonadIO m => GameTime -> AppState -> SDL.Renderer -> m ()
-drawApp now (AppState isRed heroState _ fpsEst font heroTexture) renderer = do
+drawApp now (AppState isRed _ sceneOrigin heroState _ fpsEst font heroTexture catTexture) renderer = do
   SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
   SDL.clear renderer
+  SDL.rendererDrawColor renderer SDL.$= black
+  SDL.drawLine renderer (SDL.P $ SDL.V2 minScreenPos 0) (SDL.P $ SDL.V2 minScreenPos winHeight)
+  SDL.drawLine renderer (SDL.P $ SDL.V2 maxScreenPos 0) (SDL.P $ SDL.V2 maxScreenPos winHeight)
   let fps = (take 7 $ show fpsEst)
          ++ case heroState of
               IdleHero _ _ -> ""
               RunningHero mua -> " " ++ (take 7 . show $ muaSpeed mua now)
   liftIO $ putStrLn $ show now ++ ": FPS = " ++ fps
+  case heroState of
+    IdleHero _ _ -> return ()
+    RunningHero mua ->
+      liftIO $ putStrLn $ "  mua = " ++ (show $ muaDistance mua now) ++ " " ++ (show $ muaMaxDistance mua)
   when (fpsEst > 25) $ do
     fpsTexture <- textTexture renderer font (if isRed then blue else black) $ pack fps
     SDL.TextureInfo { SDL.textureWidth = textWidth
@@ -244,11 +275,20 @@ drawApp now (AppState isRed heroState _ fpsEst font heroTexture) renderer = do
            $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) (winHeight - textHeight))
                                 $ SDL.V2 textWidth textHeight
     SDL.destroyTexture fpsTexture
+  let catWidth = 100
+  let catXs = take 2 $ filter (\x -> (x + catWidth > sceneOrigin))
+                              [50, winWidth * 10 `div` 9 ..]
+  flip mapM_ catXs $ \catX -> do
+    SDL.copy renderer
+             catTexture
+             Nothing
+           $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (catX - sceneOrigin) $ winHeight `div` 4)
+                                $ SDL.V2 catWidth 100
   let (frame, x, y) = heroDrawInfo now heroState
   SDL.copy renderer
            heroTexture
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
-         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 x y) $ SDL.V2 128 128
+         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin) y) $ SDL.V2 128 128
   SDL.present renderer
 
 
