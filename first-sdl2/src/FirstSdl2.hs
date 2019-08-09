@@ -111,9 +111,10 @@ win2 font w = do
                                  ) :: SDL.SDLException -> IO SDL.Renderer)
                               $ mkRenderer (-1)
     heroTexture <- SDL.Image.loadTexture renderer "./assets/sheet_hero_walk.png"
+    heroIdleTexture <- SDL.Image.loadTexture renderer "./assets/sheet_hero_idle.png"
     catTexture <- SDL.Image.loadTexture renderer "./assets/cat100x100.png"
     startTicks <- SDL.ticks
-    appLoop (AppState False startTicks 0 (IdleHero startTicks 2) startTicks 0.0 font heroTexture catTexture)
+    appLoop (AppState False startTicks 0 (IdleHero startTicks 2) startTicks 0.0 font heroTexture heroIdleTexture catTexture)
             renderer
     SDL.destroyTexture catTexture
     SDL.destroyTexture heroTexture
@@ -143,6 +144,7 @@ data AppState = AppState {
   , _fpsEst :: Double
   , _font :: SDL.Font.Font
   , _heroTexture :: SDL.Texture
+  , _heroIdleTexture :: SDL.Texture
   , _catTexture :: SDL.Texture
   }
 
@@ -227,29 +229,30 @@ appLoop oldState renderer = do
                 appLoop nextState renderer
 
 
-heroDrawInfo :: GameTime -> Hero -> (Int, Position, Position)
-heroDrawInfo now (IdleHero t0 x0) =
-  let timeDiff = now - t0
-      jitter = max 0 $ (timeDiff `div` (round $ timeScaling / 2)) `mod` 3 - 1 in
-    (fromIntegral $ (timeDiff `div` (round $ timeScaling / 3)) `mod` 2
+heroDrawInfo :: GameTime -> Hero -> SDL.Texture -> SDL.Texture -> (SDL.Texture, Int, Position, Position)
+heroDrawInfo now (IdleHero t0 x0) walk idle =
+  let timeDiff = now - t0 in
+    (idle
+    , fromIntegral $ (timeDiff `div` (round $ timeScaling / 4)) `mod` 8
     , x0 - 32
-    , winHeight `div` 2 + fromIntegral jitter)
-heroDrawInfo now (RunningHero mua) =
+    , winHeight `div` 2)
+heroDrawInfo now (RunningHero mua) walk idle =
   let timeDiff = now - muaT0 mua
       frameCount = 3
       distance = muaDistance mua now
       GS speed = muaSpeed mua now in
-    (-- switch from speed based animation to time based to maintain illusion
+    (walk
+     -- switch from speed based animation to time based to maintain illusion
      -- of movement at low speeds
-     if speed > 5
-     then fromIntegral distance `mod` frameCount
-     else (fromIntegral timeDiff `div` (round $ timeScaling / 5)) `mod` frameCount
+    , if speed > 5
+      then fromIntegral distance `mod` frameCount
+      else (fromIntegral timeDiff `div` (round $ timeScaling / 5)) `mod` frameCount
     , muaX0 mua + distance - 32
     , winHeight `div` 2)
 
 
 drawApp :: MonadIO m => GameTime -> AppState -> SDL.Renderer -> m ()
-drawApp now (AppState isRed _ sceneOrigin heroState _ fpsEst font heroTexture catTexture) renderer = do
+drawApp now (AppState isRed _ sceneOrigin heroState _ fpsEst font heroTexture heroIdleTexture catTexture) renderer = do
   SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
   SDL.clear renderer
   SDL.rendererDrawColor renderer SDL.$= black
@@ -284,9 +287,9 @@ drawApp now (AppState isRed _ sceneOrigin heroState _ fpsEst font heroTexture ca
              Nothing
            $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (catX - sceneOrigin) $ winHeight `div` 4)
                                 $ SDL.V2 catWidth 100
-  let (frame, x, y) = heroDrawInfo now heroState
+  let (texture, frame, x, y) = heroDrawInfo now heroState heroTexture heroIdleTexture
   SDL.copy renderer
-           heroTexture
+           texture
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
          $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin) y) $ SDL.V2 128 128
   SDL.present renderer
