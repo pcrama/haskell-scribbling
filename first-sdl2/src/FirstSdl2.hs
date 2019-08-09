@@ -12,6 +12,7 @@ import qualified SDL
 import qualified SDL.Font
 import SDL.Image
 
+import Control.Concurrent     (threadDelay)
 import Control.Exception      (handle, throw)
 import Control.Monad          (void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -226,6 +227,8 @@ appLoop oldState renderer = do
                 now <- SDL.ticks
                 let nextState = updateAppTime now s
                 drawApp now nextState renderer
+                when (_fpsEst nextState > 100) $
+                  liftIO $ threadDelay $ 10 * 1000 -- microseconds
                 appLoop nextState renderer
 
 
