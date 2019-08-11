@@ -102,6 +102,14 @@ textTexture renderer font color text = do
   return result
 
 
+withImageTexture :: MonadIO m => SDL.Renderer -> FilePath -> (SDL.Texture -> m a) -> m a
+withImageTexture renderer path action = do
+  texture <- SDL.Image.loadTexture renderer path
+  result <- action texture
+  SDL.destroyTexture texture
+  return result
+
+
 win2 :: MonadIO m => SDL.Font.Font -> SDL.Window -> m ()
 win2 font w = do
     renderer <- liftIO $ handle ((\e -> do
@@ -111,14 +119,12 @@ win2 font w = do
                                       Nothing -> putStrLn "Can't find backup driver" >> throw e
                                  ) :: SDL.SDLException -> IO SDL.Renderer)
                               $ mkRenderer (-1)
-    heroTexture <- SDL.Image.loadTexture renderer "./assets/sheet_hero_walk.png"
-    heroIdleTexture <- SDL.Image.loadTexture renderer "./assets/sheet_hero_idle.png"
-    catTexture <- SDL.Image.loadTexture renderer "./assets/cat100x100.png"
-    startTicks <- SDL.ticks
-    appLoop (AppState False startTicks 0 (IdleHero startTicks 2) startTicks 0.0 font heroTexture heroIdleTexture catTexture)
-            renderer
-    SDL.destroyTexture catTexture
-    SDL.destroyTexture heroTexture
+    withImageTexture renderer "./assets/sheet_hero_walk.png" $ \heroTexture ->
+      withImageTexture renderer "./assets/sheet_hero_idle.png" $ \heroIdleTexture ->
+        withImageTexture renderer "./assets/cat100x100.png" $ \catTexture -> do
+          startTicks <- SDL.ticks
+          appLoop (AppState False startTicks 0 (IdleHero startTicks 2) startTicks 0.0)
+                $ AppContext renderer font heroTexture heroIdleTexture catTexture
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
 
 
@@ -143,6 +149,11 @@ data AppState = AppState {
   , _heroState :: Hero
   , _lastTicks :: GameTime
   , _fpsEst :: Double
+  }
+
+
+data AppContext = AppContext {
+  _renderer :: SDL.Renderer
   , _font :: SDL.Font.Font
   , _heroTexture :: SDL.Texture
   , _heroIdleTexture :: SDL.Texture
@@ -218,33 +229,33 @@ updateAppForEvent e@(SDL.Event now _) s0
         heroSpeed = GS (15.0)
 
 
-appLoop :: MonadIO m => AppState -> SDL.Renderer -> m ()
-appLoop oldState renderer = do
+appLoop :: MonadIO m => AppState -> AppContext -> m ()
+appLoop oldState context = do
   events <- SDL.pollEvents
   case foldr (\e mbS -> mbS >>= updateAppForEvent e) (Just oldState) events of
     Nothing -> return ()
     Just s -> do
                 now <- SDL.ticks
                 let nextState = updateAppTime now s
-                drawApp now nextState renderer
+                drawApp now nextState context
                 when (_fpsEst nextState > 100) $
                   liftIO $ threadDelay $ 10 * 1000 -- microseconds
-                appLoop nextState renderer
+                appLoop nextState context
 
 
-heroDrawInfo :: GameTime -> Hero -> SDL.Texture -> SDL.Texture -> (SDL.Texture, Int, Position, Position)
-heroDrawInfo now (IdleHero t0 x0) walk idle =
+heroDrawInfo :: GameTime -> Hero -> AppContext -> (SDL.Texture, Int, Position, Position)
+heroDrawInfo now (IdleHero t0 x0) context =
   let timeDiff = now - t0 in
-    (idle
+    (_heroIdleTexture context
     , fromIntegral $ (timeDiff `div` (round $ timeScaling / 4)) `mod` 8
     , x0 - 32
     , winHeight `div` 2)
-heroDrawInfo now (RunningHero mua) walk idle =
+heroDrawInfo now (RunningHero mua) context =
   let timeDiff = now - muaT0 mua
       frameCount = 3
       distance = muaDistance mua now
       GS speed = muaSpeed mua now in
-    (walk
+    (_heroTexture context
      -- switch from speed based animation to time based to maintain illusion
      -- of movement at low speeds
     , if speed > 5
@@ -254,8 +265,10 @@ heroDrawInfo now (RunningHero mua) walk idle =
     , winHeight `div` 2)
 
 
-drawApp :: MonadIO m => GameTime -> AppState -> SDL.Renderer -> m ()
-drawApp now (AppState isRed _ sceneOrigin heroState _ fpsEst font heroTexture heroIdleTexture catTexture) renderer = do
+drawApp :: MonadIO m => GameTime -> AppState -> AppContext -> m ()
+drawApp now
+        (AppState isRed _ sceneOrigin heroState _ fpsEst)
+        context@(AppContext { _renderer=renderer , _font=font , _catTexture=catTexture }) = do
   SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
   SDL.clear renderer
   SDL.rendererDrawColor renderer SDL.$= black
@@ -290,7 +303,7 @@ drawApp now (AppState isRed _ sceneOrigin heroState _ fpsEst font heroTexture he
              Nothing
            $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (catX - sceneOrigin) $ winHeight `div` 4)
                                 $ SDL.V2 catWidth 100
-  let (texture, frame, x, y) = heroDrawInfo now heroState heroTexture heroIdleTexture
+  let (texture, frame, x, y) = heroDrawInfo now heroState context
   SDL.copy renderer
            texture
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
