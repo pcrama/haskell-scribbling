@@ -22,6 +22,7 @@ import Data.Word              (Word8)
 import System.Environment     (getArgs)
 
 import Physics
+import Keymaps
 
 
 withSDL :: (MonadIO m) => m a -> m ()
@@ -212,8 +213,8 @@ updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _s
 updateAppForEvent :: SDL.Event -> AppState -> Maybe AppState
 updateAppForEvent (SDL.Event _t SDL.QuitEvent) _ = Nothing
 updateAppForEvent e@(SDL.Event now _) s0
-  | eventIsPress SDL.KeycodeQ e = Nothing
-  | eventIsPress SDL.KeycodeB e = Just $ s0 { _isRed = not $ _isRed s0 }
+  | eventIsPress SDL.KeycodeEscape e = Nothing
+  | eventIsPress SDL.KeycodeSpace e = Just $ s0 { _isRed = not $ _isRed s0 }
   | eventIsPress SDL.KeycodeR e = Just $ s0 { _heroState =
       case _heroState s0 of
         IdleHero _ x0 -> RunningHero $ MUA heroAccel now heroSpeed x0
@@ -282,7 +283,11 @@ drawApp now
   case heroState of
     IdleHero _ _ -> return ()
     RunningHero mua ->
-      liftIO $ putStrLn $ "  mua = " ++ (show $ muaDistance mua now) ++ " " ++ (show $ muaMaxDistance mua)
+      liftIO $ putStrLn $ "  mua = "
+                       ++ (show $ muaDistance mua now)
+                       ++ " " ++ (show $ muaMaxDistance mua)
+                       ++ " x = " ++ (show $ muaDistance mua now + muaX0 mua)
+                       ++ " o = " ++ (show $ sceneOrigin)
   when (fpsEst > 25) $ do
     fpsTexture <- textTexture renderer font (if isRed then blue else black) $ pack fps
     SDL.TextureInfo { SDL.textureWidth = textWidth
