@@ -1,5 +1,5 @@
-name:                fist-sdl2
-version:             0.0.0.1
+name:                first-sdl2
+version:             0.0.0.2
 author:              Philippe Crama
 maintainer:          pcfeb0009@gmx.com
 cabal-version:       >=1.10
@@ -10,6 +10,7 @@ executable first-sdl2
   hs-source-dirs:      src
   main-is:             FirstSdl2.hs
   other-modules:       Physics
+                     , Keymaps
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:       base
                      , sdl2

@@ -17,6 +17,7 @@ import Control.Exception      (handle, throw)
 import Control.Monad          (void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Monoid            (First(..))
+import Data.List.NonEmpty     (NonEmpty(..))
 import Data.Text              (Text, pack)
 import Data.Word              (Word8)
 import System.Environment     (getArgs)
@@ -103,6 +104,31 @@ textTexture renderer font color text = do
   return result
 
 
+withStringTexture :: MonadIO m
+                  => SDL.Renderer
+                  -> SDL.Font.Font
+                  -> ColorPlusAlpha
+                  -> String
+                  -> (SDL.Texture -> m a)
+                  -> m a
+withStringTexture renderer font color s f = do
+  texture <- textTexture renderer font color $ pack s
+  result <- f texture
+  SDL.destroyTexture texture
+  return result
+
+
+withNonEmptyTexture :: MonadIO m
+                    => SDL.Renderer
+                    -> SDL.Font.Font
+                    -> ColorPlusAlpha
+                    -> NonEmpty Char
+                    -> (SDL.Texture -> m a)
+                    -> m a
+withNonEmptyTexture renderer font color (x:|xs) f =
+  withStringTexture renderer font color (x:xs) f
+
+
 withImageTexture :: MonadIO m => SDL.Renderer -> FilePath -> (SDL.Texture -> m a) -> m a
 withImageTexture renderer path action = do
   texture <- SDL.Image.loadTexture renderer path
@@ -124,8 +150,8 @@ win2 font w = do
       withImageTexture renderer "./assets/sheet_hero_idle.png" $ \heroIdleTexture ->
         withImageTexture renderer "./assets/cat100x100.png" $ \catTexture -> do
           startTicks <- SDL.ticks
-          appLoop (AppState False startTicks 0 (IdleHero startTicks 2) startTicks 0.0)
-                $ AppContext renderer font heroTexture heroIdleTexture catTexture
+          appLoop (AppState False startTicks 0 (IdleHero startTicks 2) startTicks 0.0 (Waiting ('f':|"osse") ('j':|"oie")) [(100, 's':|"osie", 'u':|"tile"), (200, 'g':|"out", 'l':|"oup")])
+                $ AppContext renderer font heroTexture heroIdleTexture catTexture azerty_on_qwerty
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
 
 
@@ -135,6 +161,15 @@ eventIsPress keycode event =
     SDL.KeyboardEvent keyboardEvent ->
       SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed &&
       SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == keycode
+    _ -> False
+
+
+eventIsChar :: (SDL.Keycode -> Maybe Char) -> Char -> SDL.Event -> Bool
+eventIsChar keymap c event =
+  case SDL.eventPayload event of
+    SDL.KeyboardEvent keyboardEvent ->
+      SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
+      && (keymap $ SDL.keysymKeycode $ SDL.keyboardEventKeysym keyboardEvent) == Just c
     _ -> False
 
 
@@ -150,6 +185,8 @@ data AppState = AppState {
   , _heroState :: Hero
   , _lastTicks :: GameTime
   , _fpsEst :: Double
+  , _typing :: TypingState
+  , _words :: [(Position, NonEmpty Char, NonEmpty Char)]
   }
 
 
@@ -159,7 +196,30 @@ data AppContext = AppContext {
   , _heroTexture :: SDL.Texture
   , _heroIdleTexture :: SDL.Texture
   , _catTexture :: SDL.Texture
+  , _keymap :: SDL.Keycode -> Maybe Char
   }
+
+-- | States for typing exercise
+--
+-- - Waiting: no recognizable key has been pressed yet.  Two words may be
+--   typed, one to initiate running and one to initiate jumping.  As soon
+--   as the hero gets far enough for a new word, go to the Transition state.
+--   As soon the first key of either is pressed, go to the Typing state.
+--
+-- - Transition: this presents the player with new words to run or jump, but
+--   allows the player to still start with the older words.  As soon as a
+--   key matching any of the 4 first characters is pressed, go to the Typing
+--   state.
+--
+-- - Typing: a part of a word has been entered, remember how much was typed
+--   and how much remains.  This information is updated each time a key
+--   matching the first character is typed.  As soon as the last character
+--   is seen, go back to the Waiting state.  The state also carries the
+--   words to use when going back to the Waiting state.
+data TypingState =
+  Waiting (NonEmpty Char) (NonEmpty Char) -- ^ type to run, type to jump
+  | Transition GameTime (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) -- ^ when to switch, old run, old jump, new run, new jump
+  | Typing (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) -- ^ already typed, still to type, type to run to fall back to Waiting, type to jump to fall back to Waiting
 
 
 type ColorPlusAlpha = SDL.V4 Word8
@@ -182,7 +242,7 @@ minScreenPos = winWidth `div` 8
 
 
 updateAppTime :: GameTime -> AppState -> AppState
-updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero })
+updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _words=words })
   | now > t0 = s0 { _lastTicks=now
                   , _sceneLastMove=newSceneLastMove
                   , _sceneOrigin=newSceneOrigin
@@ -194,46 +254,97 @@ updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _s
                                    | muaSpeed mua now > speedZero -> hero
                                    | otherwise -> IdleHero (muaTimeOfMaxDistance mua)
                                                          $ muaX0 mua + muaMaxDistance mua
+                  , _typing=typing'
+                  , _words=words'
                   }
   | otherwise = s0
   where pastWeight = 9 -- higher values mean more weight of the past FPS estimates in current estimate
+        heroPos = case hero of
+                    IdleHero _ x0 -> x0
+                    RunningHero mua -> muaX0 mua + muaDistance mua now
         (newSceneLastMove, newSceneOrigin) =
-          let heroPos = case hero of
-                          IdleHero _ x0 -> x0
-                          RunningHero mua -> muaX0 mua + muaDistance mua now in
-            case (sceneLastMove + (round $ timeScaling / 4) < now -- update regularly
-                 , heroPos > sceneOrigin + maxScreenPos -- don't let hero go too far to the right
-                 , heroPos > sceneOrigin + minScreenPos -- but don't scroll when more or less in middle
-                 ) of
-              (_, True, _) -> (now, heroPos - maxScreenPos)
-              (True, False, True) -> (now, sceneOrigin + 1)
-              _ -> (sceneLastMove, sceneOrigin)
+          case (sceneLastMove + (round $ timeScaling / 4) < now -- update regularly
+               , heroPos > sceneOrigin + maxScreenPos -- don't let hero go too far to the right
+               , heroPos > sceneOrigin + minScreenPos -- but don't scroll when more or less in middle
+               ) of
+            (_, True, _) -> (now, heroPos - maxScreenPos)
+            (True, False, True) -> (now, sceneOrigin + 1)
+            _ -> (sceneLastMove, sceneOrigin)
+        (typing', words') =
+          let noChange = (typing, words)
+              mbNewWords = case words of
+                             (x, newRun, newJump):nextWords -> Just (x, newRun, newJump, nextWords)
+                             [] -> Nothing in
+          case (typing, mbNewWords) of
+            (Waiting _ _, Nothing) -> noChange
+            (Waiting oldRun oldJump, Just (x, newRun, newJump, nextWords))
+              | heroPos > x -> (Transition (now + (round $ timeScaling / 2))
+                                           oldRun oldJump newRun newJump
+                               , nextWords)
+              | otherwise -> noChange
+            (Transition t _ _ newRun newJump, _)
+              | now > t -> (Waiting newRun newJump, words)
+              | otherwise -> noChange
+            (Typing _ _ _ _, _) -> noChange
 
 
-updateAppForEvent :: SDL.Event -> AppState -> Maybe AppState
-updateAppForEvent (SDL.Event _t SDL.QuitEvent) _ = Nothing
-updateAppForEvent e@(SDL.Event now _) s0
+updateAppForEvent :: SDL.Event -> AppContext -> AppState -> Maybe AppState
+updateAppForEvent (SDL.Event _t SDL.QuitEvent) _ _ = Nothing
+updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
   | eventIsPress SDL.KeycodeEscape e = Nothing
   | eventIsPress SDL.KeycodeSpace e = Just $ s0 { _isRed = not $ _isRed s0 }
-  | eventIsPress SDL.KeycodeR e = Just $ s0 { _heroState =
-      case _heroState s0 of
-        IdleHero _ x0 -> RunningHero $ MUA heroAccel now heroSpeed x0
-        RunningHero mua -> let (GS currentSpeed) = muaSpeed mua now
-                               (GS initSpeed) = heroSpeed in
-                           RunningHero $ MUA heroAccel
-                                             now
-                                             (GS $ initSpeed + (currentSpeed / 2))
-                                           $ muaX0 mua + muaDistance mua now
-    }
-  | otherwise = Just s0
+  | eventIsPress SDL.KeycodeBackspace e =
+                case _typing s0 of
+                  Waiting _ _ -> noChange
+                  Typing _ _ oldRun oldJump -> Just $ s0 { _typing=Waiting oldRun oldJump }
+                  Transition _ _ _ _ _ -> noChange
+  | otherwise = case _typing s0 of
+                  Waiting run@(x:|xs) jump -> if eventIsChar keymap x e
+                                              then startToType x xs run jump
+                                              else noChange
+                  Typing already
+                         (x:|xs)
+                         oldRun
+                         oldJump -> if eventIsChar keymap x e
+                                    then case xs of
+                                           [] -> startToRun oldRun oldJump
+                                           (y:ys) -> Just $ s0 { _typing=Typing (already <> (x:|[]))
+                                                                                (y:|ys)
+                                                                                oldRun
+                                                                                oldJump
+                                                               }
+                                    else noChange
+                  Transition _
+                             (x:|xs)
+                             _
+                             newRun@(y:|ys)
+                             newJump -> case (eventIsChar keymap x e
+                                             , eventIsChar keymap y e) of
+                                          (True, _) -> startToType x xs newRun newJump
+                                          (_, True) -> startToType y ys newRun newJump
+                                          (_, _) -> noChange
   where heroAccel = GA (-3.0)
         heroSpeed = GS (15.0)
+        noChange = Just s0
+        startToType x (n:xs) run jump = Just $ s0 { _typing=Typing (x:|[]) (n:|xs) run jump }
+        startToType _ _ _ _ = Nothing -- aborts the game if a 1 letter word is used
+        startToRun run jump = Just $ s0 {
+          _typing=Waiting run jump
+          , _heroState=case _heroState s0 of
+              IdleHero _ x0 -> RunningHero $ MUA heroAccel now heroSpeed x0
+              RunningHero mua -> let (GS currentSpeed) = muaSpeed mua now
+                                     (GS initSpeed) = heroSpeed in
+                                 RunningHero $ MUA heroAccel
+                                                   now
+                                                   (GS $ initSpeed + (currentSpeed / 2))
+                                                 $ muaX0 mua + muaDistance mua now
+          }
 
 
 appLoop :: MonadIO m => AppState -> AppContext -> m ()
 appLoop oldState context = do
   events <- SDL.pollEvents
-  case foldr (\e mbS -> mbS >>= updateAppForEvent e) (Just oldState) events of
+  case foldr (\e mbS -> mbS >>= updateAppForEvent e context) (Just oldState) events of
     Nothing -> return ()
     Just s -> do
                 now <- SDL.ticks
@@ -268,8 +379,8 @@ heroDrawInfo now (RunningHero mua) context =
 
 drawApp :: MonadIO m => GameTime -> AppState -> AppContext -> m ()
 drawApp now
-        (AppState isRed _ sceneOrigin heroState _ fpsEst)
-        context@(AppContext { _renderer=renderer , _font=font , _catTexture=catTexture }) = do
+        (AppState isRed _ sceneOrigin heroState _ fpsEst typing _)
+        context@(AppContext { _renderer=renderer, _font=font, _catTexture=catTexture }) = do
   SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
   SDL.clear renderer
   SDL.rendererDrawColor renderer SDL.$= black
@@ -289,16 +400,15 @@ drawApp now
                        ++ " x = " ++ (show $ muaDistance mua now + muaX0 mua)
                        ++ " o = " ++ (show $ sceneOrigin)
   when (fpsEst > 25) $ do
-    fpsTexture <- textTexture renderer font (if isRed then blue else black) $ pack fps
-    SDL.TextureInfo { SDL.textureWidth = textWidth
-                    , SDL.textureHeight = textHeight
-                    } <- SDL.queryTexture fpsTexture
-    SDL.copy renderer
-             fpsTexture
-             Nothing -- use complete fpsTexture as source
-           $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) (winHeight - textHeight))
-                                $ SDL.V2 textWidth textHeight
-    SDL.destroyTexture fpsTexture
+    withStringTexture renderer font (if isRed then blue else black) fps $ \fpsTexture -> do
+      SDL.TextureInfo { SDL.textureWidth = textWidth
+                      , SDL.textureHeight = textHeight
+                      } <- SDL.queryTexture fpsTexture
+      SDL.copy renderer
+               fpsTexture
+               Nothing -- use complete fpsTexture as source
+             $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) (winHeight - textHeight))
+                                  $ SDL.V2 textWidth textHeight
   let catWidth = 100
   let catXs = take 2 $ filter (\x -> (x + catWidth > sceneOrigin))
                               [50, winWidth * 10 `div` 9 ..]
@@ -308,6 +418,46 @@ drawApp now
              Nothing
            $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (catX - sceneOrigin) $ winHeight `div` 4)
                                 $ SDL.V2 catWidth 100
+  case typing of
+    Waiting toRun _ ->
+      withNonEmptyTexture renderer font black toRun $ \text -> do
+        SDL.TextureInfo { SDL.textureWidth = textWidth
+                        , SDL.textureHeight = textHeight
+                        } <- SDL.queryTexture text
+        SDL.copy renderer
+                 text
+                 Nothing -- use complete texture as source
+               $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) 0)
+                                    $ SDL.V2 textWidth textHeight
+    Transition _ _ _ toRun _ ->
+      withNonEmptyTexture renderer font black toRun $ \text -> do
+        SDL.TextureInfo { SDL.textureWidth = textWidth
+                        , SDL.textureHeight = textHeight
+                        } <- SDL.queryTexture text
+        SDL.copy renderer
+                 text
+                 Nothing -- use complete texture as source
+               $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) 0)
+                                    $ SDL.V2 textWidth textHeight
+    Typing done toType _ _ ->
+      withNonEmptyTexture renderer font (if isRed then blue else black) done $ \doneTexture -> do
+        withNonEmptyTexture renderer font (if isRed then black else blue) toType $ \toTypeTexture -> do
+          SDL.TextureInfo { SDL.textureWidth = textWidth
+                          , SDL.textureHeight = textHeight
+                          } <- SDL.queryTexture toTypeTexture
+          SDL.copy renderer
+                   toTypeTexture
+                   Nothing -- use complete texture as source
+                 $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) 0)
+                                      $ SDL.V2 textWidth textHeight
+          SDL.TextureInfo { SDL.textureWidth = doneWidth
+                          , SDL.textureHeight = _
+                          } <- SDL.queryTexture doneTexture
+          SDL.copy renderer
+                   doneTexture
+                   Nothing -- use complete texture as source
+                 $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth - doneWidth) 0)
+                                      $ SDL.V2 doneWidth textHeight
   let (texture, frame, x, y) = heroDrawInfo now heroState context
   SDL.copy renderer
            texture
