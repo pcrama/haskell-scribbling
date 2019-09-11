@@ -2,8 +2,13 @@ module Physics (
   GameAcceleration(..)
   , GameSpeed(..)
   , GameTime
+  , Jump(..)
   , MUA(..)
   , Position
+  , jumpDistance
+  , jumpDuration
+  , jumpEndTime
+  , jumpPosition
   , muaDistance
   , muaMaxDistance
   , muaSpeed
@@ -77,3 +82,50 @@ muaTimeOfMaxDistance (MUA { muaT0=t0, muaA=GA a, muaV=GS v }) = t0 + round (time
 muaMaxDistance :: MUA -> Position
 -- (a * (-v / a) / 2 + v) * (-v / a) = -1/2 * v^2 / a
 muaMaxDistance (MUA { muaA=GA a, muaV=GS v }) = round $ (-0.5) * v * v / a
+
+
+-- | Jumping hero: constant horizontal speed, MUA for vertical movement
+data Jump = Jump {
+  jumpX0 :: !Position -- | ^ starting x position
+  , jumpVx0 :: !GameSpeed -- | ^ initial horizontal speed
+  , jumpYMvt :: !MUA -- | ^ movement along vertical axis (also contains starting time)
+  }
+
+
+jumpHeight :: Jump -> GameTime -> Position
+jumpHeight (Jump {jumpYMvt=mua}) t = muaDistance mua t
+
+
+jumpDistance :: Jump -> GameTime -> Position
+jumpDistance (Jump {jumpYMvt=mua, jumpVx0=GS v}) t = round $ v * (t `timeDiff` muaT0 mua)
+
+
+-- | How many seconds the hero will be jumping before landing
+jumpDuration :: Jump -> Double
+jumpDuration (Jump {jumpYMvt=mua}) = 0 - (v + (sqrt $ v * v - 2 * a * x0)) / a
+  -- solve x0 + a/2 * t^2 + v * t = 0 for t
+  -- (take larger of the 2 and assume that a < 0 because of gravity)
+  -- t = (-v - sqrt (v^2 - 2 * a * x0)) / a
+  where GA a = muaA mua
+        GS v = muaV mua
+        x0 = fromIntegral $ muaX0 mua
+
+
+-- | How far the hero will travel horizontally before landing on the ground
+maxJumpDistance :: Jump -> Position
+maxJumpDistance j@(Jump {jumpVx0=GS v}) = round $ v * jumpDuration j
+
+
+-- | When the hero will land
+jumpEndTime :: Jump -> GameTime
+jumpEndTime j = (muaT0 $ jumpYMvt j) + (round $ timeScaling * jumpDuration j)
+
+
+-- | Position of hero during jump as (x, y) tuple
+jumpPosition :: Jump -> GameTime -> (Position, Position)
+jumpPosition j t = (x, y)
+  where y' = (muaX0 $ jumpYMvt j) + jumpHeight j t -- theoretical y position without collision detection
+        y = max 0 y' -- can't fall through the floor
+        x = jumpX0 j + if y' < 0
+                       then maxJumpDistance j -- once back on the floor, movement stops
+                       else jumpDistance j t

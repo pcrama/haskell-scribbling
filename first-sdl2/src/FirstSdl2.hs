@@ -148,10 +148,17 @@ win2 font w = do
                               $ mkRenderer (-1)
     withImageTexture renderer "./assets/sheet_hero_walk.png" $ \heroTexture ->
       withImageTexture renderer "./assets/sheet_hero_idle.png" $ \heroIdleTexture ->
-        withImageTexture renderer "./assets/cat100x100.png" $ \catTexture -> do
-          startTicks <- SDL.ticks
-          appLoop (AppState False startTicks 0 (IdleHero startTicks 2) startTicks 0.0 (Waiting ('f':|"osse") ('j':|"oie")) [(100, 's':|"osie", 'u':|"tile"), (200, 'g':|"out", 'l':|"oup")])
-                $ AppContext renderer font heroTexture heroIdleTexture catTexture azerty_on_qwerty
+        withImageTexture renderer "./assets/sheet_hero_jump.png" $ \heroJumpTexture -> do
+          withImageTexture renderer "./assets/cat100x100.png" $ \catTexture -> do
+            startTicks <- SDL.ticks
+            appLoop (AppState False startTicks 0 (IdleHero startTicks minScreenPos) startTicks 0.0 (Waiting ('f':|"osse") ('j':|"o")) [(100, 's':|"osie", 'l':|"ollipops"), (200, 'g':|"out", 't':|"oi"), (300, 'b':|"oire", 'p':|"oisse")])
+                  $ AppContext renderer
+                               font
+                               heroTexture
+                               heroIdleTexture
+                               heroJumpTexture
+                               catTexture
+                               azerty_on_qwerty
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
 
 
@@ -176,6 +183,7 @@ eventIsChar keymap c event =
 data Hero =
   IdleHero GameTime Position
   | RunningHero MUA
+  | JumpingHero Jump
 
 
 data AppState = AppState {
@@ -195,6 +203,7 @@ data AppContext = AppContext {
   , _font :: SDL.Font.Font
   , _heroTexture :: SDL.Texture
   , _heroIdleTexture :: SDL.Texture
+  , _heroJumpTexture :: SDL.Texture
   , _catTexture :: SDL.Texture
   , _keymap :: SDL.Keycode -> Maybe Char
   }
@@ -219,7 +228,7 @@ data AppContext = AppContext {
 data TypingState =
   Waiting (NonEmpty Char) (NonEmpty Char) -- ^ type to run, type to jump
   | Transition GameTime (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) -- ^ when to switch, old run, old jump, new run, new jump
-  | Typing (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) -- ^ already typed, still to type, type to run to fall back to Waiting, type to jump to fall back to Waiting
+  | Typing (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState) -- ^ already typed, still to type, type to run to fall back to Waiting, type to jump to fall back to Waiting, continuation once the word is typed in full
 
 
 type ColorPlusAlpha = SDL.V4 Word8
@@ -242,7 +251,7 @@ minScreenPos = winWidth `div` 8
 
 
 updateAppTime :: GameTime -> AppState -> AppState
-updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _words=words })
+updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _words=wordList })
   | now > t0 = s0 { _lastTicks=now
                   , _sceneLastMove=newSceneLastMove
                   , _sceneOrigin=newSceneOrigin
@@ -254,6 +263,12 @@ updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _s
                                    | muaSpeed mua now > speedZero -> hero
                                    | otherwise -> IdleHero (muaTimeOfMaxDistance mua)
                                                          $ muaX0 mua + muaMaxDistance mua
+                                 JumpingHero jump ->
+                                   let maxJumpTime = jumpEndTime jump in
+                                   if now > maxJumpTime
+                                   then IdleHero maxJumpTime
+                                               $ jumpX0 jump + jumpDistance jump maxJumpTime
+                                   else hero
                   , _typing=typing'
                   , _words=words'
                   }
@@ -262,6 +277,7 @@ updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _s
         heroPos = case hero of
                     IdleHero _ x0 -> x0
                     RunningHero mua -> muaX0 mua + muaDistance mua now
+                    JumpingHero jump -> fst $ jumpPosition jump now
         (newSceneLastMove, newSceneOrigin) =
           case (sceneLastMove + (round $ timeScaling / 4) < now -- update regularly
                , heroPos > sceneOrigin + maxScreenPos -- don't let hero go too far to the right
@@ -271,8 +287,8 @@ updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _s
             (True, False, True) -> (now, sceneOrigin + 1)
             _ -> (sceneLastMove, sceneOrigin)
         (typing', words') =
-          let noChange = (typing, words)
-              mbNewWords = case words of
+          let noChange = (typing, wordList)
+              mbNewWords = case wordList of
                              (x, newRun, newJump):nextWords -> Just (x, newRun, newJump, nextWords)
                              [] -> Nothing in
           case (typing, mbNewWords) of
@@ -283,9 +299,9 @@ updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _s
                                , nextWords)
               | otherwise -> noChange
             (Transition t _ _ newRun newJump, _)
-              | now > t -> (Waiting newRun newJump, words)
+              | now > t -> (Waiting newRun newJump, wordList)
               | otherwise -> noChange
-            (Typing _ _ _ _, _) -> noChange
+            (Typing _ _ _ _ _, _) -> noChange
 
 
 updateAppForEvent :: SDL.Event -> AppContext -> AppState -> Maybe AppState
@@ -296,41 +312,51 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
   | eventIsPress SDL.KeycodeBackspace e =
                 case _typing s0 of
                   Waiting _ _ -> noChange
-                  Typing _ _ oldRun oldJump -> Just $ s0 { _typing=Waiting oldRun oldJump }
+                  Typing _ _ oldRun oldJump _ -> Just $ s0 { _typing=Waiting oldRun oldJump }
                   Transition _ _ _ _ _ -> noChange
   | otherwise = case _typing s0 of
-                  Waiting run@(x:|xs) jump -> if eventIsChar keymap x e
-                                              then startToType x xs run jump
-                                              else noChange
+                  Waiting run@(x:|xs) jump@(j:|js) ->
+                    case (eventIsChar keymap x e, eventIsChar keymap j e) of
+                      (True, _) -> startToType x xs run jump startToRun
+                      (_, True) -> startToType j js run jump startToJump
+                      _ -> noChange
                   Typing already
                          (x:|xs)
                          oldRun
-                         oldJump -> if eventIsChar keymap x e
-                                    then case xs of
-                                           [] -> startToRun oldRun oldJump
-                                           (y:ys) -> Just $ s0 { _typing=Typing (already <> (x:|[]))
-                                                                                (y:|ys)
-                                                                                oldRun
-                                                                                oldJump
-                                                               }
-                                    else noChange
+                         oldJump
+                         cont -> if eventIsChar keymap x e
+                                 then case xs of
+                                        [] -> cont oldRun oldJump s0
+                                        (y:ys) -> Just $ s0 { _typing=Typing (already <> (x:|[]))
+                                                                             (y:|ys)
+                                                                             oldRun
+                                                                             oldJump
+                                                                             cont
+                                                            }
+                                 else noChange
                   Transition _
                              (x:|xs)
-                             _
+                             (j:|js)
                              newRun@(y:|ys)
-                             newJump -> case (eventIsChar keymap x e
-                                             , eventIsChar keymap y e) of
-                                          (True, _) -> startToType x xs newRun newJump
-                                          (_, True) -> startToType y ys newRun newJump
-                                          (_, _) -> noChange
+                             newJump@(z:|zs) ->
+                               case (eventIsChar keymap x e
+                                    , eventIsChar keymap y e
+                                    , eventIsChar keymap j e
+                                    , eventIsChar keymap z e) of
+                                 (_, True, _, _) -> startToType y ys newRun newJump startToRun
+                                 (_, _, _, True) -> startToType z zs newRun newJump startToJump
+                                 (True, _, _, _) -> startToType x xs newRun newJump startToRun
+                                 (_, _, True, _) -> startToType j js newRun newJump startToJump
+                                 (_, _, _, _) -> noChange
   where heroAccel = GA (-3.0)
         heroSpeed = GS (15.0)
+        jumpHorizSpeed = GS (5.0)
         noChange = Just s0
-        startToType x (n:xs) run jump = Just $ s0 { _typing=Typing (x:|[]) (n:|xs) run jump }
-        startToType _ _ _ _ = Nothing -- aborts the game if a 1 letter word is used
-        startToRun run jump = Just $ s0 {
+        startToType x (n:xs) r j f = Just $ s0 { _typing=Typing (x:|[]) (n:|xs) r j f }
+        startToType  _ _ _ _ _ = Nothing -- aborts the game if a 1 letter word is used
+        startToRun run jump s = Just $ s {
           _typing=Waiting run jump
-          , _heroState=case _heroState s0 of
+          , _heroState=case _heroState s of
               IdleHero _ x0 -> RunningHero $ MUA heroAccel now heroSpeed x0
               RunningHero mua -> let (GS currentSpeed) = muaSpeed mua now
                                      (GS initSpeed) = heroSpeed in
@@ -338,6 +364,28 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                                                    now
                                                    (GS $ initSpeed + (currentSpeed / 2))
                                                  $ muaX0 mua + muaDistance mua now
+              JumpingHero _ -> _heroState s -- you can't run if you're already jumping
+          }
+        startToJump runWord jumpWord s = Just $ s {
+          _typing=Waiting runWord jumpWord
+          , _heroState=case _heroState s of
+              IdleHero _ x0 -> JumpingHero $ Jump x0
+                                                  jumpHorizSpeed
+                                                $ MUA heroAccel now heroSpeed 0
+              RunningHero mua -> let (GS currentSpeed) = muaSpeed mua now
+                                     (GS initSpeed) = jumpHorizSpeed in
+                                 JumpingHero $ Jump (muaX0 mua + muaDistance mua now)
+                                                    (GS $ currentSpeed + initSpeed / 2)
+                                                  $ MUA heroAccel now heroSpeed 0
+              JumpingHero jump -> let (GS currentSpeed) = muaSpeed (jumpYMvt jump) now
+                                      (GS initSpeed) = heroSpeed
+                                      (x, y) = jumpPosition jump now in
+                                  JumpingHero $ Jump x
+                                                     (jumpVx0 jump)
+                                                   $ MUA heroAccel
+                                                         now 
+                                                         (GS $ initSpeed + currentSpeed / 2)
+                                                         y
           }
 
 
@@ -375,6 +423,15 @@ heroDrawInfo now (RunningHero mua) context =
       else (fromIntegral timeDiff `div` (round $ timeScaling / 5)) `mod` frameCount
     , muaX0 mua + distance - 32
     , winHeight `div` 2)
+heroDrawInfo now (JumpingHero jump) context =
+  let timeDiff = now - (muaT0 $ jumpYMvt jump)
+      step = fromIntegral timeDiff `div` (round $ timeScaling / 6)
+      frameCount = 5
+      (x, y) = jumpPosition jump now in
+    (_heroJumpTexture context
+    , abs $ (step `mod` (frameCount * 2 - 2)) - (frameCount - 1)
+    , x - 32
+    , winHeight `div` 2 - y)
 
 
 drawApp :: MonadIO m => GameTime -> AppState -> AppContext -> m ()
@@ -386,10 +443,13 @@ drawApp now
   SDL.rendererDrawColor renderer SDL.$= black
   SDL.drawLine renderer (SDL.P $ SDL.V2 minScreenPos 0) (SDL.P $ SDL.V2 minScreenPos winHeight)
   SDL.drawLine renderer (SDL.P $ SDL.V2 maxScreenPos 0) (SDL.P $ SDL.V2 maxScreenPos winHeight)
+  let y = winHeight `div` 2 + 128 in
+    SDL.drawLine renderer (SDL.P $ SDL.V2 0 y) (SDL.P $ SDL.V2 winWidth y)
   let fps = (take 7 $ show fpsEst)
          ++ case heroState of
               IdleHero _ _ -> ""
               RunningHero mua -> " " ++ (take 7 . show $ muaSpeed mua now)
+              JumpingHero _ -> " jumping"
   liftIO $ putStrLn $ show now ++ ": FPS = " ++ fps
   case heroState of
     IdleHero _ _ -> return ()
@@ -399,6 +459,7 @@ drawApp now
                        ++ " " ++ (show $ muaMaxDistance mua)
                        ++ " x = " ++ (show $ muaDistance mua now + muaX0 mua)
                        ++ " o = " ++ (show $ sceneOrigin)
+    JumpingHero _ -> return ()
   when (fpsEst > 25) $ do
     withStringTexture renderer font (if isRed then blue else black) fps $ \fpsTexture -> do
       SDL.TextureInfo { SDL.textureWidth = textWidth
@@ -418,28 +479,33 @@ drawApp now
              Nothing
            $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (catX - sceneOrigin) $ winHeight `div` 4)
                                 $ SDL.V2 catWidth 100
+  let (texture, frame, x, y) = heroDrawInfo now heroState context
+  let drawRunText toRun = do
+        withNonEmptyTexture renderer font black toRun $ \text -> do
+          SDL.TextureInfo { SDL.textureWidth = textWidth
+                          , SDL.textureHeight = textHeight
+                          } <- SDL.queryTexture text
+          SDL.copy renderer
+                   text
+                   Nothing -- use complete texture as source
+                 $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) 0)
+                                      $ SDL.V2 textWidth textHeight
+  let drawJumpText toJump = do
+        withNonEmptyTexture renderer font black toJump $ \text -> do
+          SDL.TextureInfo { SDL.textureWidth = textWidth
+                          , SDL.textureHeight = textHeight
+                          } <- SDL.queryTexture text
+          SDL.copy renderer
+                   text
+                   Nothing -- use complete texture as source
+                 $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin + (128 - textWidth) `div` 2) $ y - 16)
+                                      $ SDL.V2 textWidth textHeight
   case typing of
-    Waiting toRun _ ->
-      withNonEmptyTexture renderer font black toRun $ \text -> do
-        SDL.TextureInfo { SDL.textureWidth = textWidth
-                        , SDL.textureHeight = textHeight
-                        } <- SDL.queryTexture text
-        SDL.copy renderer
-                 text
-                 Nothing -- use complete texture as source
-               $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) 0)
-                                    $ SDL.V2 textWidth textHeight
-    Transition _ _ _ toRun _ ->
-      withNonEmptyTexture renderer font black toRun $ \text -> do
-        SDL.TextureInfo { SDL.textureWidth = textWidth
-                        , SDL.textureHeight = textHeight
-                        } <- SDL.queryTexture text
-        SDL.copy renderer
-                 text
-                 Nothing -- use complete texture as source
-               $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) 0)
-                                    $ SDL.V2 textWidth textHeight
-    Typing done toType _ _ ->
+    Waiting toRun toJump ->
+      drawRunText toRun >> drawJumpText toJump
+    Transition _ _ _ toRun toJump ->
+      drawRunText toRun >> drawJumpText toJump
+    Typing done toType _ _ _ ->
       withNonEmptyTexture renderer font (if isRed then blue else black) done $ \doneTexture -> do
         withNonEmptyTexture renderer font (if isRed then black else blue) toType $ \toTypeTexture -> do
           SDL.TextureInfo { SDL.textureWidth = textWidth
@@ -458,7 +524,6 @@ drawApp now
                    Nothing -- use complete texture as source
                  $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth - doneWidth) 0)
                                       $ SDL.V2 doneWidth textHeight
-  let (texture, frame, x, y) = heroDrawInfo now heroState context
   SDL.copy renderer
            texture
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
