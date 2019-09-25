@@ -14,6 +14,7 @@ module Physics (
   , muaSpeed
   , muaTimeOfMaxDistance
   , speedZero
+  , timeDiff
   , timeScaling
   )
 where

@@ -405,14 +405,12 @@ appLoop oldState context = do
 
 heroDrawInfo :: GameTime -> Hero -> AppContext -> (SDL.Texture, Int, Position, Position)
 heroDrawInfo now (IdleHero t0 x0) context =
-  let timeDiff = now - t0 in
     (_heroIdleTexture context
-    , fromIntegral $ (timeDiff `div` (round $ timeScaling / 4)) `mod` 8
+    , (round $ 4 * (now `timeDiff` t0)) `mod` 8
     , x0 - 32
     , winHeight `div` 2)
 heroDrawInfo now (RunningHero mua) context =
-  let timeDiff = now - muaT0 mua
-      frameCount = 3
+  let frameCount = 3
       distance = muaDistance mua now
       GS speed = muaSpeed mua now in
     (_heroTexture context
@@ -420,12 +418,11 @@ heroDrawInfo now (RunningHero mua) context =
      -- of movement at low speeds
     , if speed > 5
       then fromIntegral distance `mod` frameCount
-      else (fromIntegral timeDiff `div` (round $ timeScaling / 5)) `mod` frameCount
+      else (round $ 5 * (now `timeDiff` muaT0 mua)) `mod` frameCount
     , muaX0 mua + distance - 32
     , winHeight `div` 2)
 heroDrawInfo now (JumpingHero jump) context =
-  let timeDiff = now - (muaT0 $ jumpYMvt jump)
-      step = fromIntegral timeDiff `div` (round $ timeScaling / 6)
+  let step = round $ 6 * (now `timeDiff` (muaT0 $ jumpYMvt jump))
       frameCount = 5
       (x, y) = jumpPosition jump now in
     (_heroJumpTexture context
