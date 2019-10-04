@@ -431,6 +431,26 @@ heroDrawInfo now (JumpingHero jump) context =
     , winHeight `div` 2 - y)
 
 
+-- | Wrapper around SDL.copy, adding bounding box
+lSDLcopy :: MonadIO m
+         => SDL.Renderer
+         -> SDL.Texture
+         -> Maybe (SDL.Rectangle Position)
+         -> Maybe (SDL.Rectangle Position)
+         -> m ()
+lSDLcopy renderer texture src dest = do
+  case dest of
+    Just (SDL.Rectangle (SDL.P (SDL.V2 x0 y0)) (SDL.V2 w h)) -> do
+      let x1 = x0 + w
+      let y1 = y0 + h
+      SDL.drawLine renderer (SDL.P $ SDL.V2 x0 y0) (SDL.P $ SDL.V2 x1 y0)
+      SDL.drawLine renderer (SDL.P $ SDL.V2 x0 y0) (SDL.P $ SDL.V2 x0 y1)
+      SDL.drawLine renderer (SDL.P $ SDL.V2 x1 y1) (SDL.P $ SDL.V2 x1 y0)
+      SDL.drawLine renderer (SDL.P $ SDL.V2 x1 y1) (SDL.P $ SDL.V2 x0 y1)
+    Nothing -> return ()
+  SDL.copy renderer texture src dest
+
+
 drawApp :: MonadIO m => GameTime -> AppState -> AppContext -> m ()
 drawApp now
         (AppState isRed _ sceneOrigin heroState _ fpsEst typing _)
@@ -521,7 +541,8 @@ drawApp now
                    Nothing -- use complete texture as source
                  $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth - doneWidth) 0)
                                       $ SDL.V2 doneWidth textHeight
-  SDL.copy renderer
+  -- draw hero last, i.e. on top of all the rest:
+  lSDLcopy renderer
            texture
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
          $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin) y) $ SDL.V2 128 128
