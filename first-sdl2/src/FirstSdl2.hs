@@ -129,12 +129,20 @@ withNonEmptyTexture renderer font color (x:|xs) f =
   withStringTexture renderer font color (x:xs) f
 
 
-withImageTexture :: MonadIO m => SDL.Renderer -> FilePath -> (SDL.Texture -> m a) -> m a
-withImageTexture renderer path action = do
-  texture <- SDL.Image.loadTexture renderer path
-  result <- action texture
-  SDL.destroyTexture texture
-  return result
+-- | Execute action with images loaded from files & clean up
+withImageTextures :: MonadIO m
+                  => SDL.Renderer -- ^ SDL renderer
+                  -> [FilePath] -- ^ List of images to load
+                  -> ([SDL.Texture] -> m a) -- ^ Action to execute, param count must match image count
+                  -> m a -- ^ result of action
+withImageTextures renderer = go []
+  where go acc [] f = f $ reverse acc
+        go acc (x:xs) f = withTexture x (\t -> go (t:acc) xs f)
+        withTexture path action = do
+          texture <- SDL.Image.loadTexture renderer path
+          result <- action texture
+          SDL.destroyTexture texture
+          return result
 
 
 win2 :: MonadIO m => SDL.Font.Font -> SDL.Window -> m ()
@@ -146,20 +154,34 @@ win2 font w = do
                                       Nothing -> putStrLn "Can't find backup driver" >> throw e
                                  ) :: SDL.SDLException -> IO SDL.Renderer)
                               $ mkRenderer (-1)
-    withImageTexture renderer "./assets/sheet_hero_walk.png" $ \heroTexture ->
-      withImageTexture renderer "./assets/sheet_hero_idle.png" $ \heroIdleTexture ->
-        withImageTexture renderer "./assets/sheet_hero_jump.png" $ \heroJumpTexture -> do
-          withImageTexture renderer "./assets/cat100x100.png" $ \catTexture -> do
+    withImageTextures renderer
+                      ["./assets/sheet_hero_walk.png"
+                      , "./assets/sheet_hero_idle.png"
+                      , "./assets/sheet_hero_jump.png"
+                      , "./assets/cat100x100.png"
+                      , "./assets/sheet_snake_walk.png"
+                      , "./assets/sheet_snake_hurt.png"]
+                    $ \[heroTexture
+                       , heroIdleTexture
+                       , heroJumpTexture
+                       , catTexture
+                       , snakeTexture
+                       , snakeDieTexture] -> do
             startTicks <- SDL.ticks
-            appLoop (AppState False startTicks 0 (IdleHero startTicks minScreenPos) startTicks 0.0 (Waiting ('f':|"osse") ('j':|"o")) [(100, 's':|"osie", 'l':|"ollipops"), (200, 'g':|"out", 't':|"oi"), (300, 'b':|"oire", 'p':|"oisse")])
+            appLoop (AppState False startTicks 0 (IdleHero startTicks minScreenPos) startTicks 0.0 (Waiting ('f':|"osse") ('j':|"o")) [(100, 's':|"osie", 'l':|"ollipops"), (200, 'g':|"out", 't':|"oi"), (300, 'b':|"oire", 'p':|"oisse")] (snakes startTicks))
                   $ AppContext renderer
                                font
                                heroTexture
                                heroIdleTexture
                                heroJumpTexture
                                catTexture
+                               snakeTexture
+                               snakeDieTexture
                                azerty_on_qwerty
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
+        snakes t0 = zipWith (\idx word -> MovingSnake (idx * winWidth + (winWidth * 3 `div` 4)) t0 word)
+                            [0..]
+                          $ cycle ['d':|"ur", 'd':|"oux", 'm':|"olle", 'r':|"ose"]
 
 
 eventIsPress :: SDL.Keycode -> SDL.Event -> Bool
@@ -186,6 +208,18 @@ data Hero =
   | JumpingHero Jump
 
 
+data Snake =
+  MovingSnake Position GameTime (NonEmpty Char) -- initial position, `kill' word
+  | DyingSnake Position GameTime -- static position, time at which snake should disappear
+
+
+snakePosition :: Snake -> GameTime -> Position
+snakePosition (MovingSnake x0 t0 _) now
+  | now > t0 = x0 - (round $ 5 * (now `timeDiff` t0))
+  | otherwise = x0
+snakePosition (DyingSnake x _) _ = x
+
+
 data AppState = AppState {
   _isRed :: Bool
   , _sceneLastMove :: GameTime
@@ -195,6 +229,7 @@ data AppState = AppState {
   , _fpsEst :: Double
   , _typing :: TypingState
   , _words :: [(Position, NonEmpty Char, NonEmpty Char)]
+  , _snakes :: [Snake]
   }
 
 
@@ -205,6 +240,8 @@ data AppContext = AppContext {
   , _heroIdleTexture :: SDL.Texture
   , _heroJumpTexture :: SDL.Texture
   , _catTexture :: SDL.Texture
+  , _snakeTexture :: SDL.Texture
+  , _snakeDieTexture :: SDL.Texture
   , _keymap :: SDL.Keycode -> Maybe Char
   }
 
@@ -251,7 +288,7 @@ minScreenPos = winWidth `div` 8
 
 
 updateAppTime :: GameTime -> AppState -> AppState
-updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _words=wordList })
+updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _words=wordList, _snakes=snakes })
   | now > t0 = s0 { _lastTicks=now
                   , _sceneLastMove=newSceneLastMove
                   , _sceneOrigin=newSceneOrigin
@@ -271,6 +308,7 @@ updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _s
                                    else hero
                   , _typing=typing'
                   , _words=words'
+                  , _snakes=snakes'
                   }
   | otherwise = s0
   where pastWeight = 9 -- higher values mean more weight of the past FPS estimates in current estimate
@@ -302,6 +340,16 @@ updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _s
               | now > t -> (Waiting newRun newJump, wordList)
               | otherwise -> noChange
             (Typing _ _ _ _ _, _) -> noChange
+        snakes' = removeSnakes snakes
+        removeSnakes [] = []
+        removeSnakes (s@(MovingSnake _ _ _):rest)
+            | snakePos > heroPos + winWidth = s:rest -- no more filtering: snakes are outside of hero's view
+            | snakePos < heroPos - winWidth = removeSnakes rest
+            | otherwise = s:removeSnakes rest
+          where snakePos = snakePosition s now
+        removeSnakes (s@(DyingSnake _ timeout):rest)
+            | now > timeout = removeSnakes rest
+            | otherwise = s:removeSnakes rest
 
 
 updateAppForEvent :: SDL.Event -> AppContext -> AppState -> Maybe AppState
@@ -431,6 +479,55 @@ heroDrawInfo now (JumpingHero jump) context =
     , winHeight `div` 2 - y)
 
 
+snakeDrawInfo :: GameTime -- ^ current time
+              -> Position -- ^ scene origin (to filter out snakes based on visibility)
+              -> [Snake] -- ^ snakes
+              -> AppContext -- ^ context holding textures to draw
+              -> [(Snake, SDL.Texture, Int, Position, Position)] -- ^ (snake, texture, frame, x, y)
+snakeDrawInfo _ _ [] _ = []
+snakeDrawInfo now sceneOrigin (s:ss) context
+  | snakePos < sceneOrigin - 64 = snakeDrawInfo now sceneOrigin ss context
+  | snakePos > sceneOrigin + winWidth = []
+  | otherwise = oneSnakeDrawInfo s:snakeDrawInfo now sceneOrigin ss context
+  where snakePos = snakePosition s now
+        snakeY = winHeight `div` 2 + 128 - 64
+        oneSnakeDrawInfo (DyingSnake _ _) = (s, _snakeDieTexture context, 0, snakePos, snakeY)
+        oneSnakeDrawInfo (MovingSnake _ _ _) = (s
+                                               , _snakeTexture context
+                                               , fromIntegral $ snakePos `mod` 6
+                                               , snakePos
+                                               , snakeY)
+
+
+drawSnake :: MonadIO m
+          => SDL.Renderer -- ^ SDL renderer
+          -> Position -- ^ Scene origin
+          -> SDL.Font.Font -- ^ Font for drawing `kill' word above snake
+          -> Position -- ^ hero position
+          -> (Snake, SDL.Texture, Int, Position, Position) -- ^ see snakeDrawInfo
+          -> m ()
+drawSnake renderer sceneOrigin font heroPos (snake, texture, frame, x, y) = do
+  case snake of
+    MovingSnake _ _ toKill -- draw `kill' word
+      | heroPos > x - 64 -> return () -- can't shoot backwards or if snake is too close
+      | otherwise ->
+          withNonEmptyTexture renderer font black toKill $ \text -> do
+            SDL.TextureInfo { SDL.textureWidth = textWidth
+                            , SDL.textureHeight = textHeight
+                            } <- SDL.queryTexture text
+            lSDLcopy renderer
+                     text
+                     Nothing -- use complete texture as source
+                   $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin + (64 - textWidth) `div` 2)
+                                                        $ y + 64 + 16)
+                                        $ SDL.V2 textWidth textHeight
+    DyingSnake _ _ -> return ()
+  lSDLcopy renderer
+           texture
+           (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
+         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin) y) $ SDL.V2 64 64
+
+
 -- | Wrapper around SDL.copy, adding bounding box
 lSDLcopy :: MonadIO m
          => SDL.Renderer
@@ -453,7 +550,7 @@ lSDLcopy renderer texture src dest = do
 
 drawApp :: MonadIO m => GameTime -> AppState -> AppContext -> m ()
 drawApp now
-        (AppState isRed _ sceneOrigin heroState _ fpsEst typing _)
+        (AppState isRed _ sceneOrigin heroState _ fpsEst typing _ snakes)
         context@(AppContext { _renderer=renderer, _font=font, _catTexture=catTexture }) = do
   SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
   SDL.clear renderer
@@ -497,6 +594,8 @@ drawApp now
            $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (catX - sceneOrigin) $ winHeight `div` 4)
                                 $ SDL.V2 catWidth 100
   let (texture, frame, x, y) = heroDrawInfo now heroState context
+  mapM_ (drawSnake renderer sceneOrigin font x)
+      $ snakeDrawInfo now sceneOrigin snakes context
   let drawRunText toRun = do
         withNonEmptyTexture renderer font black toRun $ \text -> do
           SDL.TextureInfo { SDL.textureWidth = textWidth
