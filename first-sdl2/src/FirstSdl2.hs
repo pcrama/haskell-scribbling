@@ -193,8 +193,8 @@ eventIsPress keycode event =
     _ -> False
 
 
-eventIsChar :: (SDL.Keycode -> Maybe Char) -> Char -> SDL.Event -> Bool
-eventIsChar keymap c event =
+eventIsChar :: (SDL.Keycode -> Maybe Char) -> SDL.Event -> Char -> Bool
+eventIsChar keymap event c =
   case SDL.eventPayload event of
     SDL.KeyboardEvent keyboardEvent ->
       SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
@@ -287,6 +287,12 @@ maxScreenPos = 2 * winWidth `div` 3
 minScreenPos = winWidth `div` 8
 
 
+heroPosition :: GameTime -> Hero -> Position
+heroPosition _   (IdleHero _ x0)    = x0
+heroPosition now (RunningHero mua)  = muaX0 mua + muaDistance mua now
+heroPosition now (JumpingHero jump) = fst $ jumpPosition jump now
+
+
 updateAppTime :: GameTime -> AppState -> AppState
 updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _words=wordList, _snakes=snakes })
   | now > t0 = s0 { _lastTicks=now
@@ -312,10 +318,7 @@ updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _s
                   }
   | otherwise = s0
   where pastWeight = 9 -- higher values mean more weight of the past FPS estimates in current estimate
-        heroPos = case hero of
-                    IdleHero _ x0 -> x0
-                    RunningHero mua -> muaX0 mua + muaDistance mua now
-                    JumpingHero jump -> fst $ jumpPosition jump now
+        heroPos = heroPosition now hero
         (newSceneLastMove, newSceneOrigin) =
           case (sceneLastMove + (round $ timeScaling / 4) < now -- update regularly
                , heroPos > sceneOrigin + maxScreenPos -- don't let hero go too far to the right
@@ -364,15 +367,19 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                   Transition _ _ _ _ _ -> noChange
   | otherwise = case _typing s0 of
                   Waiting run@(x:|xs) jump@(j:|js) ->
-                    case (eventIsChar keymap x e, eventIsChar keymap j e) of
-                      (True, _) -> startToType x xs run jump startToRun
-                      (_, True) -> startToType j js run jump startToJump
-                      _ -> noChange
+                    case lookup True
+                              $ (matchChar x
+                                 , startToType x xs run jump startToRun
+                              ):(matchChar j
+                                 , startToType j js run jump startToJump
+                              ):snakeKiller run jump of
+                      Just r -> r
+                      Nothing -> noChange
                   Typing already
                          (x:|xs)
                          oldRun
                          oldJump
-                         cont -> if eventIsChar keymap x e
+                         cont -> if matchChar x
                                  then case xs of
                                         [] -> cont oldRun oldJump s0
                                         (y:ys) -> Just $ s0 { _typing=Typing (already <> (x:|[]))
@@ -387,21 +394,42 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                              (j:|js)
                              newRun@(y:|ys)
                              newJump@(z:|zs) ->
-                               case (eventIsChar keymap x e
-                                    , eventIsChar keymap y e
-                                    , eventIsChar keymap j e
-                                    , eventIsChar keymap z e) of
-                                 (_, True, _, _) -> startToType y ys newRun newJump startToRun
-                                 (_, _, _, True) -> startToType z zs newRun newJump startToJump
-                                 (True, _, _, _) -> startToType x xs newRun newJump startToRun
-                                 (_, _, True, _) -> startToType j js newRun newJump startToJump
-                                 (_, _, _, _) -> noChange
+                               case lookup True
+                                         $ (matchChar y
+                                            , startToType y ys newRun newJump startToRun
+                                         ):(matchChar z
+                                            , startToType z zs newRun newJump startToJump
+                                         ):(snakeKiller newRun newJump
+                                            ++ [(matchChar x
+                                                , startToType x xs newRun newJump startToRun)
+                                               , (matchChar j
+                                                 , startToType j js newRun newJump startToJump)]) of
+                                 Just r -> r
+                                 Nothing -> noChange
   where heroAccel = GA (-3.0)
         heroSpeed = GS (15.0)
         jumpHorizSpeed = GS (5.0)
         noChange = Just s0
+        matchChar = eventIsChar keymap e
+        snakeKiller r j = let heroPos = heroPosition now $ _heroState s0
+                              snakes = _snakes s0
+                              sceneOrigin = _sceneOrigin s0 in
+                            map (\ (x0, s:|ss) -> (matchChar s
+                                                  , startToType s ss r j $ startToKill x0))
+                              $ killableSnakes now sceneOrigin heroPos snakes
         startToType x (n:xs) r j f = Just $ s0 { _typing=Typing (x:|[]) (n:|xs) r j f }
         startToType  _ _ _ _ _ = Nothing -- aborts the game if a 1 letter word is used
+        killASnake _ [] = []
+        killASnake x0 (s@(MovingSnake y0 _ _):tl)
+          | x0 == y0 = (DyingSnake (snakePosition s now)
+                                 $ now + (round $ 0.5 * timeScaling)):tl
+          | x0 < y0 = tl -- avoid looping through infinite list of snakes
+          | otherwise = s:killASnake x0 tl
+        killASnake x0 (s@(DyingSnake _ _):tl) = s:killASnake x0 tl
+        startToKill x0 run jump s@(AppState { _snakes=snakes0 }) = Just $ s {
+          _typing=Waiting run jump
+          , _snakes=killASnake x0 snakes0
+          }
         startToRun run jump s = Just $ s {
           _typing=Waiting run jump
           , _heroState=case _heroState s of
@@ -479,6 +507,28 @@ heroDrawInfo now (JumpingHero jump) context =
     , winHeight `div` 2 - y)
 
 
+snakeInKillablePosition :: Position -- ^ snake's position
+                        -> Position -- ^ hero's position
+                        -> Bool
+snakeInKillablePosition snakePos heroPos = snakePos - 64 - 32 < heroPos
+
+
+killableSnakes :: GameTime -- ^ current time
+               -> Position -- ^ scene origin (to filter out snakes based on visibility)
+               -> Position -- ^ hero's position
+               -> [Snake] -- ^ snakes
+               -> [(Position, NonEmpty Char)] -- ^ snakes that can be killed, identified by their init position
+killableSnakes _ _ _ [] = []
+killableSnakes now sceneOrigin heroPos (s:ss)
+  | snakePos `snakeInKillablePosition` heroPos = processTail
+  | snakePos > sceneOrigin + winWidth = []
+  | otherwise = case s of
+                  MovingSnake x0 _ w -> (x0, w):processTail
+                  DyingSnake _ _ -> processTail
+  where snakePos = snakePosition s now
+        processTail = killableSnakes now sceneOrigin heroPos ss
+
+
 snakeDrawInfo :: GameTime -- ^ current time
               -> Position -- ^ scene origin (to filter out snakes based on visibility)
               -> [Snake] -- ^ snakes
@@ -509,7 +559,7 @@ drawSnake :: MonadIO m
 drawSnake renderer sceneOrigin font heroPos (snake, texture, frame, x, y) = do
   case snake of
     MovingSnake _ _ toKill -- draw `kill' word
-      | heroPos > x - 64 -> return () -- can't shoot backwards or if snake is too close
+      | x `snakeInKillablePosition` heroPos -> return () -- can't shoot backwards or if snake is too close
       | otherwise ->
           withNonEmptyTexture renderer font black toKill $ \text -> do
             SDL.TextureInfo { SDL.textureWidth = textWidth
