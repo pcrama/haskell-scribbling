@@ -9,9 +9,11 @@ build-type:          Simple
 executable first-sdl2
   hs-source-dirs:      src
   main-is:             FirstSdl2.hs
-  other-modules:       Hero
+  other-modules:       AllSDL
+                     , Hero
                      , Keymaps
                      , Physics
+                     , Snake
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:       base
                      , sdl2

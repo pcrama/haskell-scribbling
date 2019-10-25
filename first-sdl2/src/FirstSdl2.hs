@@ -14,46 +14,16 @@ import SDL.Image
 
 import Control.Concurrent     (threadDelay)
 import Control.Exception      (handle, throw)
-import Control.Monad          (void, when)
+import Control.Monad          (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Monoid            (First(..))
 import Data.List.NonEmpty     (NonEmpty(..))
-import Data.Text              (Text, pack)
-import Data.Word              (Word8)
 import System.Environment     (getArgs)
 
+import AllSDL
 import Hero
 import Physics
 import Keymaps
-
-
-withSDL :: (MonadIO m) => m a -> m ()
-withSDL op = do
-  SDL.initialize []
-  void op
-  SDL.quit
-
-
-withSDLFont :: (MonadIO m) => FilePath -> SDL.Font.PointSize -> (SDL.Font.Font -> m a) -> m a
-withSDLFont path fontSize op = do
-  SDL.Font.initialize
-  font <- SDL.Font.load path fontSize
-  r <- op font
-  SDL.Font.free font
-  SDL.Font.quit
-  return r
-
-
-withWindow :: (MonadIO m) => Text -> (Int, Int) -> (SDL.Window -> m a) -> m ()
-withWindow title (x, y) op = do
-  w <- SDL.createWindow title p
-  SDL.showWindow w
-  void $ op w
-  SDL.destroyWindow w
-
-    where
-      p = SDL.defaultWindow { SDL.windowInitialSize = z }
-      z = SDL.V2 (fromIntegral x) (fromIntegral y)
+import Snake
 
 
 renderSurfaceToWindow :: (MonadIO m) => SDL.Window -> SDL.Surface -> SDL.Surface -> m ()
@@ -97,55 +67,6 @@ win1 w = do
     SDL.freeSurface screen
 
 
-textTexture :: MonadIO m => SDL.Renderer -> SDL.Font.Font -> ColorPlusAlpha -> Text -> m SDL.Texture
-textTexture renderer font color text = do
-  textSurface <- SDL.Font.solid font color text
-  result <- SDL.createTextureFromSurface renderer textSurface
-  SDL.freeSurface textSurface
-  return result
-
-
-withStringTexture :: MonadIO m
-                  => SDL.Renderer
-                  -> SDL.Font.Font
-                  -> ColorPlusAlpha
-                  -> String
-                  -> (SDL.Texture -> m a)
-                  -> m a
-withStringTexture renderer font color s f = do
-  texture <- textTexture renderer font color $ pack s
-  result <- f texture
-  SDL.destroyTexture texture
-  return result
-
-
-withNonEmptyTexture :: MonadIO m
-                    => SDL.Renderer
-                    -> SDL.Font.Font
-                    -> ColorPlusAlpha
-                    -> NonEmpty Char
-                    -> (SDL.Texture -> m a)
-                    -> m a
-withNonEmptyTexture renderer font color (x:|xs) f =
-  withStringTexture renderer font color (x:xs) f
-
-
--- | Execute action with images loaded from files & clean up
-withImageTextures :: MonadIO m
-                  => SDL.Renderer -- ^ SDL renderer
-                  -> [FilePath] -- ^ List of images to load
-                  -> ([SDL.Texture] -> m a) -- ^ Action to execute, param count must match image count
-                  -> m a -- ^ result of action
-withImageTextures renderer = go []
-  where go acc [] f = f $ reverse acc
-        go acc (x:xs) f = withTexture x (\t -> go (t:acc) xs f)
-        withTexture path action = do
-          texture <- SDL.Image.loadTexture renderer path
-          result <- action texture
-          SDL.destroyTexture texture
-          return result
-
-
 win2 :: MonadIO m => SDL.Font.Font -> SDL.Window -> m ()
 win2 font w = do
     renderer <- liftIO $ handle ((\e -> do
@@ -174,43 +95,12 @@ win2 font w = do
                                font
                                (HeroTextures heroTexture heroIdleTexture heroJumpTexture)
                                catTexture
-                               snakeTexture
-                               snakeDieTexture
+                               (SnakeTextures snakeTexture snakeDieTexture)
                                azerty_on_qwerty
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
         snakes t0 = zipWith (\idx word -> MovingSnake (idx * winWidth + (winWidth * 3 `div` 4)) t0 word)
                             [0..]
                           $ cycle ['d':|"ur", 'd':|"oux", 'm':|"olle", 'r':|"ose"]
-
-
-eventIsPress :: SDL.Keycode -> SDL.Event -> Bool
-eventIsPress keycode event =
-  case SDL.eventPayload event of
-    SDL.KeyboardEvent keyboardEvent ->
-      SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed &&
-      SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == keycode
-    _ -> False
-
-
-eventIsChar :: (SDL.Keycode -> Maybe Char) -> SDL.Event -> Char -> Bool
-eventIsChar keymap event c =
-  case SDL.eventPayload event of
-    SDL.KeyboardEvent keyboardEvent ->
-      SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
-      && (keymap $ SDL.keysymKeycode $ SDL.keyboardEventKeysym keyboardEvent) == Just c
-    _ -> False
-
-
-data Snake =
-  MovingSnake Position GameTime (NonEmpty Char) -- initial position, `kill' word
-  | DyingSnake Position GameTime -- static position, time at which snake should disappear
-
-
-snakePosition :: Snake -> GameTime -> Position
-snakePosition (MovingSnake x0 t0 _) now
-  | now > t0 = x0 - (round $ 5 * (now `timeDiff` t0))
-  | otherwise = x0
-snakePosition (DyingSnake x _) _ = x
 
 
 data AppState = AppState {
@@ -231,8 +121,7 @@ data AppContext = AppContext {
   , _font :: SDL.Font.Font
   , _heroTextures :: HeroTextures
   , _catTexture :: SDL.Texture
-  , _snakeTexture :: SDL.Texture
-  , _snakeDieTexture :: SDL.Texture
+  , _snakeTextures :: SnakeTextures
   , _keymap :: SDL.Keycode -> Maybe Char
   }
 
@@ -257,21 +146,6 @@ data TypingState =
   Waiting (NonEmpty Char) (NonEmpty Char) -- ^ type to run, type to jump
   | Transition GameTime (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) -- ^ when to switch, old run, old jump, new run, new jump
   | Typing (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState) -- ^ already typed, still to type, type to run to fall back to Waiting, type to jump to fall back to Waiting, continuation once the word is typed in full
-
-
-type ColorPlusAlpha = SDL.V4 Word8
-
-
-black, blue, green, red :: ColorPlusAlpha
-black = SDL.V4 0 0 0 0
-blue = SDL.V4 0 0 255 0
-green = SDL.V4 0 255 0 0
-red = SDL.V4 255 0 0 0
-
-
-winHeight, winWidth :: Position
-winHeight = 480
-winWidth = 640
 
 maxScreenPos, minScreenPos :: Position
 maxScreenPos = 2 * winWidth `div` 3
@@ -464,97 +338,6 @@ appLoop oldState context = do
                 appLoop nextState context
 
 
-snakeInKillablePosition :: Position -- ^ snake's position
-                        -> Position -- ^ hero's position
-                        -> Bool
-snakeInKillablePosition snakePos heroPos = snakePos - 64 - 32 < heroPos
-
-
-killableSnakes :: GameTime -- ^ current time
-               -> Position -- ^ scene origin (to filter out snakes based on visibility)
-               -> Position -- ^ hero's position
-               -> [Snake] -- ^ snakes
-               -> [(Position, NonEmpty Char)] -- ^ snakes that can be killed, identified by their init position
-killableSnakes _ _ _ [] = []
-killableSnakes now sceneOrigin heroPos (s:ss)
-  | snakePos `snakeInKillablePosition` heroPos = processTail
-  | snakePos > sceneOrigin + winWidth = []
-  | otherwise = case s of
-                  MovingSnake x0 _ w -> (x0, w):processTail
-                  DyingSnake _ _ -> processTail
-  where snakePos = snakePosition s now
-        processTail = killableSnakes now sceneOrigin heroPos ss
-
-
-snakeDrawInfo :: GameTime -- ^ current time
-              -> Position -- ^ scene origin (to filter out snakes based on visibility)
-              -> [Snake] -- ^ snakes
-              -> AppContext -- ^ context holding textures to draw
-              -> [(Snake, SDL.Texture, Int, Position, Position)] -- ^ (snake, texture, frame, x, y)
-snakeDrawInfo _ _ [] _ = []
-snakeDrawInfo now sceneOrigin (s:ss) context
-  | snakePos < sceneOrigin - 64 = snakeDrawInfo now sceneOrigin ss context
-  | snakePos > sceneOrigin + winWidth = []
-  | otherwise = oneSnakeDrawInfo s:snakeDrawInfo now sceneOrigin ss context
-  where snakePos = snakePosition s now
-        snakeY = winHeight `div` 2 + 128 - 64
-        oneSnakeDrawInfo (DyingSnake _ _) = (s, _snakeDieTexture context, 0, snakePos, snakeY)
-        oneSnakeDrawInfo (MovingSnake _ _ _) = (s
-                                               , _snakeTexture context
-                                               , fromIntegral $ snakePos `mod` 6
-                                               , snakePos
-                                               , snakeY)
-
-
-drawSnake :: MonadIO m
-          => SDL.Renderer -- ^ SDL renderer
-          -> Position -- ^ Scene origin
-          -> SDL.Font.Font -- ^ Font for drawing `kill' word above snake
-          -> Position -- ^ hero position
-          -> (Snake, SDL.Texture, Int, Position, Position) -- ^ see snakeDrawInfo
-          -> m ()
-drawSnake renderer sceneOrigin font heroPos (snake, texture, frame, x, y) = do
-  case snake of
-    MovingSnake _ _ toKill -- draw `kill' word
-      | x `snakeInKillablePosition` heroPos -> return () -- can't shoot backwards or if snake is too close
-      | otherwise ->
-          withNonEmptyTexture renderer font black toKill $ \text -> do
-            SDL.TextureInfo { SDL.textureWidth = textWidth
-                            , SDL.textureHeight = textHeight
-                            } <- SDL.queryTexture text
-            lSDLcopy renderer
-                     text
-                     Nothing -- use complete texture as source
-                   $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin + (64 - textWidth) `div` 2)
-                                                        $ y + 64 + 16)
-                                        $ SDL.V2 textWidth textHeight
-    DyingSnake _ _ -> return ()
-  lSDLcopy renderer
-           texture
-           (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
-         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin) y) $ SDL.V2 64 64
-
-
--- | Wrapper around SDL.copy, adding bounding box
-lSDLcopy :: MonadIO m
-         => SDL.Renderer
-         -> SDL.Texture
-         -> Maybe (SDL.Rectangle Position)
-         -> Maybe (SDL.Rectangle Position)
-         -> m ()
-lSDLcopy renderer texture src dest = do
-  case dest of
-    Just (SDL.Rectangle (SDL.P (SDL.V2 x0 y0)) (SDL.V2 w h)) -> do
-      let x1 = x0 + w
-      let y1 = y0 + h
-      SDL.drawLine renderer (SDL.P $ SDL.V2 x0 y0) (SDL.P $ SDL.V2 x1 y0)
-      SDL.drawLine renderer (SDL.P $ SDL.V2 x0 y0) (SDL.P $ SDL.V2 x0 y1)
-      SDL.drawLine renderer (SDL.P $ SDL.V2 x1 y1) (SDL.P $ SDL.V2 x1 y0)
-      SDL.drawLine renderer (SDL.P $ SDL.V2 x1 y1) (SDL.P $ SDL.V2 x0 y1)
-    Nothing -> return ()
-  SDL.copy renderer texture src dest
-
-
 drawApp :: MonadIO m => GameTime -> AppState -> AppContext -> m ()
 drawApp now
         (AppState isRed _ sceneOrigin heroState _ fpsEst typing _ snakes)
@@ -602,7 +385,7 @@ drawApp now
                                 $ SDL.V2 catWidth 100
   let (texture, frame, x, y) = heroDrawInfo now heroState (_heroTextures context) $ winHeight `div` 2
   mapM_ (drawSnake renderer sceneOrigin font x)
-      $ snakeDrawInfo now sceneOrigin snakes context
+      $ snakeDrawInfo now sceneOrigin snakes $ _snakeTextures context
   let drawRunText toRun = do
         withNonEmptyTexture renderer font black toRun $ \text -> do
           SDL.TextureInfo { SDL.textureWidth = textWidth
@@ -653,18 +436,6 @@ drawApp now
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
          $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin) y) $ SDL.V2 128 128
   SDL.present renderer
-
-
-getSoftwareRendererIndex :: (Num a, Enum a) => MonadIO m => m (Maybe a)
-getSoftwareRendererIndex = do
-    drivers <- SDL.getRenderDriverInfo
-    return $ getFirst $ foldMap indexIfIsSoftwareRenderer $ zip [0..] drivers
-  where indexIfIsSoftwareRenderer (idx
-                                  , SDL.RendererInfo {
-                                      SDL.rendererInfoFlags = SDL.RendererConfig {
-                                        SDL.rendererType = SDL.SoftwareRenderer}}
-                                  ) = First $ Just idx
-        indexIfIsSoftwareRenderer _ = First $ Nothing
 
 
 main :: IO ()
