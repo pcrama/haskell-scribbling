@@ -22,6 +22,7 @@ import Data.Text              (Text, pack)
 import Data.Word              (Word8)
 import System.Environment     (getArgs)
 
+import Hero
 import Physics
 import Keymaps
 
@@ -171,9 +172,7 @@ win2 font w = do
             appLoop (AppState False startTicks 0 (IdleHero startTicks minScreenPos) startTicks 0.0 (Waiting ('f':|"osse") ('j':|"o")) [(100, 's':|"osie", 'l':|"ollipops"), (200, 'g':|"out", 't':|"oi"), (300, 'b':|"oire", 'p':|"oisse")] (snakes startTicks))
                   $ AppContext renderer
                                font
-                               heroTexture
-                               heroIdleTexture
-                               heroJumpTexture
+                               (HeroTextures heroTexture heroIdleTexture heroJumpTexture)
                                catTexture
                                snakeTexture
                                snakeDieTexture
@@ -200,12 +199,6 @@ eventIsChar keymap event c =
       SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
       && (keymap $ SDL.keysymKeycode $ SDL.keyboardEventKeysym keyboardEvent) == Just c
     _ -> False
-
-
-data Hero =
-  IdleHero GameTime Position
-  | RunningHero MUA
-  | JumpingHero Jump
 
 
 data Snake =
@@ -236,9 +229,7 @@ data AppState = AppState {
 data AppContext = AppContext {
   _renderer :: SDL.Renderer
   , _font :: SDL.Font.Font
-  , _heroTexture :: SDL.Texture
-  , _heroIdleTexture :: SDL.Texture
-  , _heroJumpTexture :: SDL.Texture
+  , _heroTextures :: HeroTextures
   , _catTexture :: SDL.Texture
   , _snakeTexture :: SDL.Texture
   , _snakeDieTexture :: SDL.Texture
@@ -285,12 +276,6 @@ winWidth = 640
 maxScreenPos, minScreenPos :: Position
 maxScreenPos = 2 * winWidth `div` 3
 minScreenPos = winWidth `div` 8
-
-
-heroPosition :: GameTime -> Hero -> Position
-heroPosition _   (IdleHero _ x0)    = x0
-heroPosition now (RunningHero mua)  = muaX0 mua + muaDistance mua now
-heroPosition now (JumpingHero jump) = fst $ jumpPosition jump now
 
 
 updateAppTime :: GameTime -> AppState -> AppState
@@ -479,34 +464,6 @@ appLoop oldState context = do
                 appLoop nextState context
 
 
-heroDrawInfo :: GameTime -> Hero -> AppContext -> (SDL.Texture, Int, Position, Position)
-heroDrawInfo now (IdleHero t0 x0) context =
-    (_heroIdleTexture context
-    , (round $ 4 * (now `timeDiff` t0)) `mod` 8
-    , x0 - 32
-    , winHeight `div` 2)
-heroDrawInfo now (RunningHero mua) context =
-  let frameCount = 3
-      distance = muaDistance mua now
-      GS speed = muaSpeed mua now in
-    (_heroTexture context
-     -- switch from speed based animation to time based to maintain illusion
-     -- of movement at low speeds
-    , if speed > 5
-      then fromIntegral distance `mod` frameCount
-      else (round $ 5 * (now `timeDiff` muaT0 mua)) `mod` frameCount
-    , muaX0 mua + distance - 32
-    , winHeight `div` 2)
-heroDrawInfo now (JumpingHero jump) context =
-  let step = round $ 6 * (now `timeDiff` (muaT0 $ jumpYMvt jump))
-      frameCount = 5
-      (x, y) = jumpPosition jump now in
-    (_heroJumpTexture context
-    , abs $ (step `mod` (frameCount * 2 - 2)) - (frameCount - 1)
-    , x - 32
-    , winHeight `div` 2 - y)
-
-
 snakeInKillablePosition :: Position -- ^ snake's position
                         -> Position -- ^ hero's position
                         -> Bool
@@ -643,7 +600,7 @@ drawApp now
              Nothing
            $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (catX - sceneOrigin) $ winHeight `div` 4)
                                 $ SDL.V2 catWidth 100
-  let (texture, frame, x, y) = heroDrawInfo now heroState context
+  let (texture, frame, x, y) = heroDrawInfo now heroState (_heroTextures context) $ winHeight `div` 2
   mapM_ (drawSnake renderer sceneOrigin font x)
       $ snakeDrawInfo now sceneOrigin snakes context
   let drawRunText toRun = do

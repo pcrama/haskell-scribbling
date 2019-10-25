@@ -9,8 +9,9 @@ build-type:          Simple
 executable first-sdl2
   hs-source-dirs:      src
   main-is:             FirstSdl2.hs
-  other-modules:       Physics
+  other-modules:       Hero
                      , Keymaps
+                     , Physics
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:       base
                      , sdl2
