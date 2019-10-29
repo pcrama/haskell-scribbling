@@ -10,7 +10,6 @@ module Main (main) where
 
 import qualified SDL
 import qualified SDL.Font
-import SDL.Image
 
 import Control.Concurrent     (threadDelay)
 import Control.Exception      (handle, throw)
@@ -24,47 +23,6 @@ import Hero
 import Physics
 import Keymaps
 import Snake
-
-
-renderSurfaceToWindow :: (MonadIO m) => SDL.Window -> SDL.Surface -> SDL.Surface -> m ()
-renderSurfaceToWindow w s i
-  = SDL.surfaceBlit i Nothing s Nothing
-  >> SDL.updateWindowSurface w
-
-
-isContinue :: Maybe SDL.Event -> Bool
-isContinue = maybe True (not . isQuitEvent)
-
-
-isQuitEvent :: SDL.Event -> Bool
-isQuitEvent (SDL.Event _t SDL.QuitEvent) = True
-isQuitEvent x = eventIsPress SDL.KeycodeSpace x
-
-
-conditionallyRun :: Applicative m => m () -> Bool -> m Bool
-conditionallyRun f True = True <$ f
-conditionallyRun _ False = pure False
-
-
-whileM :: Monad m => m Bool -> m ()
-whileM a = do
-  cont <- a
-  case cont of
-    True -> whileM a
-    False -> return ()
-
-
-win1 :: MonadIO m => SDL.Window -> m ()
-win1 w = do
-    screen <- SDL.getWindowSurface w
-    image <- SDL.Image.load "./assets/cat100x100.png"
-    let doRender = renderSurfaceToWindow w screen image
-    whileM $
-      isContinue <$> SDL.pollEvent
-      >>= conditionallyRun doRender
-    -- SDL.delay 5000 -- ms
-    SDL.freeSurface image
-    SDL.freeSurface screen
 
 
 win2 :: MonadIO m => SDL.Font.Font -> SDL.Window -> m ()
@@ -441,15 +399,12 @@ drawApp now
 main :: IO ()
 main = do
   withSDL $ do
-    -- Space or quit or close window to progress...
-    withWindow "Lesson 01" (fromIntegral winWidth, fromIntegral winHeight) win1
-    -- (q)uit, `b' to toggle color and `r' to make hero move
     getArgs >>= \case
       [] -> putStrLn "Second demo only with a font...\n\
                      \cabal new-run first-sdl2 \"$(fc-match --format \"%{file}\")\""
       [fontPath] ->
         withSDLFont fontPath 72 $ \font ->
-          withWindow "http://hackage.haskell.org/package/sdl2-2.5.0.0/docs/SDL.html"
+          withWindow "Typing hero"
                      (fromIntegral winWidth, fromIntegral winHeight)
                    $ win2 font
       _ -> putStrLn "Only one font allowed"
