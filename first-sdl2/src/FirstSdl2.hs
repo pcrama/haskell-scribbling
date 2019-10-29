@@ -239,7 +239,7 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
         killASnake _ [] = []
         killASnake x0 (s@(MovingSnake y0 _ _):tl)
           | x0 == y0 = (DyingSnake (snakePosition s now)
-                                 $ now + (round $ 0.5 * timeScaling)):tl
+                                 $ now + (round $ 2 * timeScaling)):tl
           | x0 < y0 = tl -- avoid looping through infinite list of snakes
           | otherwise = s:killASnake x0 tl
         killASnake x0 (s@(DyingSnake _ _):tl) = s:killASnake x0 tl

@@ -67,7 +67,13 @@ snakeDrawInfo now sceneOrigin (s:ss) context
   | otherwise = oneSnakeDrawInfo s:snakeDrawInfo now sceneOrigin ss context
   where snakePos = snakePosition s now
         snakeY = winHeight `div` 2 + 128 - 64
-        oneSnakeDrawInfo (DyingSnake _ _) = (s, _snakeDieTexture context, 0, snakePos, snakeY)
+        oneSnakeDrawInfo (DyingSnake _ timeout) = (s
+                                                  , _snakeDieTexture context
+                                                  , (round $ (fromIntegral $ timeout - now)
+                                                             * 4 / timeScaling
+                                                     ) `mod` 2
+                                                  , snakePos
+                                                  , snakeY)
         oneSnakeDrawInfo (MovingSnake _ _ _) = (s
                                                , _snakeTexture context
                                                , fromIntegral $ snakePos `mod` 6
