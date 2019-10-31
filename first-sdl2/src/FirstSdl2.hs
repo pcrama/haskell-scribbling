@@ -15,6 +15,7 @@ import Control.Concurrent     (threadDelay)
 import Control.Exception      (handle, throw)
 import Control.Monad          (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.List              (foldl')
 import Data.List.NonEmpty     (NonEmpty(..))
 import System.Environment     (getArgs)
 
@@ -306,7 +307,7 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
 appLoop :: MonadIO m => AppState -> AppContext -> m ()
 appLoop oldState context = do
   events <- SDL.pollEvents
-  case foldr (\e mbS -> mbS >>= updateAppForEvent e context) (Just oldState) events of
+  case foldl' (\mbS e -> mbS >>= updateAppForEvent e context) (Just oldState) events of
     Nothing -> return ()
     Just s1 -> do
       now <- SDL.ticks
