@@ -1,5 +1,6 @@
 module Hero(
   Hero(..)
+  , HeroDrawingInfo
   , HeroTextures(..)
   , heroDrawInfo
   , heroPosition
@@ -29,7 +30,10 @@ heroPosition now (RunningHero mua)  = muaX0 mua + muaDistance mua now
 heroPosition now (JumpingHero jump) = fst $ jumpPosition jump now
 
 
-heroDrawInfo :: GameTime -> Hero -> HeroTextures -> Position -> (SDL.Texture, Int, Position, Position)
+type HeroDrawingInfo = (SDL.Texture, Int, Position, Position)
+
+
+heroDrawInfo :: GameTime -> Hero -> HeroTextures -> Position -> HeroDrawingInfo
 heroDrawInfo now (IdleHero t0 x0) context baseLine =
     (_heroIdleTexture context
     , (round $ 4 * (now `timeDiff` t0)) `mod` 8

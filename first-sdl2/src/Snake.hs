@@ -1,5 +1,6 @@
 module Snake (
   Snake(..)
+  , SnakeDrawingInfo
   , SnakeTextures(..)
   , drawSnake
   , killableSnakes
@@ -55,11 +56,14 @@ killableSnakes now sceneOrigin heroPos (s:ss)
         processTail = killableSnakes now sceneOrigin heroPos ss
 
 
+type SnakeDrawingInfo = (Snake, SDL.Texture, Int, Position, Position) -- (snake, texture, frame, x, y)
+
+
 snakeDrawInfo :: GameTime -- ^ current time
               -> Position -- ^ scene origin (to filter out snakes based on visibility)
               -> [Snake] -- ^ snakes
               -> SnakeTextures -- ^ snake images
-              -> [(Snake, SDL.Texture, Int, Position, Position)] -- ^ (snake, texture, frame, x, y)
+              -> [SnakeDrawingInfo] -- ^ list of (snake, texture, frame, x, y)
 snakeDrawInfo _ _ [] _ = []
 snakeDrawInfo now sceneOrigin (s:ss) context
   | snakePos < sceneOrigin - 64 = snakeDrawInfo now sceneOrigin ss context

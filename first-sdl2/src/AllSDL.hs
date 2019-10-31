@@ -6,6 +6,8 @@ module AllSDL (
   , eventIsPress
   , getSoftwareRendererIndex
   , green
+  , insideRectangle
+  , intersectRectangle
   , lSDLcopy
   , red
   , winHeight
@@ -122,6 +124,26 @@ withImageTextures renderer = go []
           result <- action texture
           SDL.destroyTexture texture
           return result
+
+
+insideRectangle :: (Ord a, Num a) =>
+                   SDL.Point SDL.V2 a -> SDL.Rectangle a -> Bool
+insideRectangle (SDL.P (SDL.V2 px py)) (SDL.Rectangle (SDL.P (SDL.V2 x0 y0)) (SDL.V2 w h)) =
+  x0 <= px && px <= (x0 + w) && y0 <= py && py <= (y0 + h)
+
+
+intersectRectangle :: (Ord a, Num a) =>
+                      SDL.Rectangle a -> SDL.Rectangle a -> Bool
+intersectRectangle r0@(SDL.Rectangle p0@(SDL.P (SDL.V2 x0 y0)) (SDL.V2 w0 h0))
+                   r1@(SDL.Rectangle p1@(SDL.P (SDL.V2 x1 y1)) (SDL.V2 w1 h1)) =
+  p0 `insideRectangle` r1
+  || (SDL.P (SDL.V2 (x0 + w0) y0)) `insideRectangle` r1
+  || (SDL.P (SDL.V2 x0 (y0 + h0))) `insideRectangle` r1
+  || (SDL.P (SDL.V2 (x0 + w0) (y0 + h0))) `insideRectangle` r1
+  || p1 `insideRectangle` r0
+  || (SDL.P (SDL.V2 (x1 + w1) y1)) `insideRectangle` r0
+  || (SDL.P (SDL.V2 x1 (y1 + h1))) `insideRectangle` r0
+  || (SDL.P (SDL.V2 (x1 + w1) (y1 + h1))) `insideRectangle` r0
 
 
 -- | Wrapper around SDL.copy, adding bounding box

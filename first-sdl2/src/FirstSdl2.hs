@@ -110,32 +110,53 @@ maxScreenPos = 2 * winWidth `div` 3
 minScreenPos = winWidth `div` 8
 
 
-updateAppTime :: GameTime -> AppState -> AppState
-updateAppTime now s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _words=wordList, _snakes=snakes })
-  | now > t0 = s0 { _lastTicks=now
-                  , _sceneLastMove=newSceneLastMove
-                  , _sceneOrigin=newSceneOrigin
-                  , _fpsEst=(pastWeight * fps0 + timeScaling / (fromIntegral $ now - t0))
-                              / (pastWeight + 1)
-                  , _heroState=case hero of
-                                 IdleHero _ _ -> hero
-                                 RunningHero mua
-                                   | muaSpeed mua now > speedZero -> hero
-                                   | otherwise -> IdleHero (muaTimeOfMaxDistance mua)
-                                                         $ muaX0 mua + muaMaxDistance mua
-                                 JumpingHero jump ->
-                                   let maxJumpTime = jumpEndTime jump in
-                                   if now > maxJumpTime
-                                   then IdleHero maxJumpTime
-                                               $ jumpX0 jump + jumpDistance jump maxJumpTime
-                                   else hero
-                  , _typing=typing'
-                  , _words=words'
-                  , _snakes=snakes'
-                  }
-  | otherwise = s0
+updateAppTime :: GameTime -- ^ time
+              -> AppContext -- ^ application context: drawing info needed for collision detection
+              -> AppState -- ^ current application state
+              -> Maybe (AppState -- ^ new state, Nothing means the game is over
+                       , HeroDrawingInfo -- ^ see `heroDrawInfo', needed for collision detection, reusable for drawing
+                       , [SnakeDrawingInfo]) -- ^ see `snakeDrawInfo', needed for collision detection, reusable for drawing
+updateAppTime now
+              context
+              s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _words=wordList, _snakes=snakes })
+  | killedByASnake snakeDrawingInfos = Nothing
+  | now > t0 = Just $ (s0 { _lastTicks=now
+                          , _sceneLastMove=newSceneLastMove
+                          , _sceneOrigin=newSceneOrigin
+                          , _fpsEst=(pastWeight * fps0 + timeScaling / (fromIntegral $ now - t0))
+                                      / (pastWeight + 1)
+                          , _heroState=hero'
+                          , _typing=typing'
+                          , _words=words'
+                          , _snakes=snakes'
+                          }
+                       , heroDrawingInfo
+                       , snakeDrawingInfos)
+  | otherwise = Just (s0 , heroDrawingInfo , snakeDrawingInfos)
   where pastWeight = 9 -- higher values mean more weight of the past FPS estimates in current estimate
-        heroPos = heroPosition now hero
+        hero' = case hero of
+                  IdleHero _ _ -> hero
+                  RunningHero mua
+                    | muaSpeed mua now > speedZero -> hero
+                    | otherwise -> IdleHero (muaTimeOfMaxDistance mua)
+                                          $ muaX0 mua + muaMaxDistance mua
+                  JumpingHero jump ->
+                    let maxJumpTime = jumpEndTime jump in
+                    if now > maxJumpTime
+                    then IdleHero maxJumpTime
+                                $ jumpX0 jump + jumpDistance jump maxJumpTime
+                    else hero
+        heroDrawingInfo@(_, _, heroPos, heroY) =
+          heroDrawInfo now hero' (_heroTextures context) $ winHeight `div` 2
+        snakeDrawingInfos =
+          snakeDrawInfo now newSceneOrigin snakes' $ _snakeTextures context
+        killedByASnake = foldr (\s t -> killedByThisSnake s || t) False
+        killedByThisSnake (DyingSnake _ _, _, _, _, _) = False
+        killedByThisSnake ((MovingSnake _ _ _), _, _, snakeX, snakeY) =
+          touchesHero snakeX snakeY
+        touchesHero snakeX snakeY = heroRectangle `intersectRectangle` snakeRectangle
+          where heroRectangle = SDL.Rectangle (SDL.P $ SDL.V2 heroPos heroY) $ SDL.V2 128 128
+                snakeRectangle = SDL.Rectangle (SDL.P $ SDL.V2 snakeX snakeY) $ SDL.V2 64 64
         (newSceneLastMove, newSceneOrigin) =
           case (sceneLastMove + (round $ timeScaling / 4) < now -- update regularly
                , heroPos > sceneOrigin + maxScreenPos -- don't let hero go too far to the right
@@ -287,19 +308,29 @@ appLoop oldState context = do
   events <- SDL.pollEvents
   case foldr (\e mbS -> mbS >>= updateAppForEvent e context) (Just oldState) events of
     Nothing -> return ()
-    Just s -> do
-                now <- SDL.ticks
-                let nextState = updateAppTime now s
-                drawApp now nextState context
-                when (_fpsEst nextState > 100) $
-                  liftIO $ threadDelay $ 10 * 1000 -- microseconds
-                appLoop nextState context
+    Just s1 -> do
+      now <- SDL.ticks
+      case updateAppTime now context s1 of
+        Nothing -> return ()
+        Just (nextState, heroInfo, snakeInfos) -> do
+          drawApp now heroInfo snakeInfos nextState context
+          when (_fpsEst nextState > 100) $
+            liftIO $ threadDelay $ 10 * 1000 -- microseconds
+          appLoop nextState context
 
 
-drawApp :: MonadIO m => GameTime -> AppState -> AppContext -> m ()
+drawApp :: MonadIO m
+        => GameTime -- ^ time for which to draw
+        -> HeroDrawingInfo -- ^ how to draw hero
+        -> [SnakeDrawingInfo] -- ^ how to draw snakes
+        -> AppState -- ^ current application state
+        -> AppContext -- ^ application graphic context
+        -> m ()
 drawApp now
-        (AppState isRed _ sceneOrigin heroState _ fpsEst typing _ snakes)
-        context@(AppContext { _renderer=renderer, _font=font, _catTexture=catTexture }) = do
+        (texture, frame, heroX, heroY)
+        snakeDrawingInfos
+        (AppState isRed _ sceneOrigin heroState _ fpsEst typing _ _)
+        (AppContext { _renderer=renderer, _font=font, _catTexture=catTexture }) = do
   SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
   SDL.clear renderer
   SDL.rendererDrawColor renderer SDL.$= black
@@ -341,9 +372,7 @@ drawApp now
              Nothing
            $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (catX - sceneOrigin) $ winHeight `div` 4)
                                 $ SDL.V2 catWidth 100
-  let (texture, frame, x, y) = heroDrawInfo now heroState (_heroTextures context) $ winHeight `div` 2
-  mapM_ (drawSnake renderer sceneOrigin font x)
-      $ snakeDrawInfo now sceneOrigin snakes $ _snakeTextures context
+  mapM_ (drawSnake renderer sceneOrigin font heroX) snakeDrawingInfos
   let drawRunText toRun = do
         withNonEmptyTexture renderer font black toRun $ \text -> do
           SDL.TextureInfo { SDL.textureWidth = textWidth
@@ -362,7 +391,8 @@ drawApp now
           SDL.copy renderer
                    text
                    Nothing -- use complete texture as source
-                 $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin + (128 - textWidth) `div` 2) $ y - 16)
+                 $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (heroX - sceneOrigin + (128 - textWidth) `div` 2)
+                                                      $ heroY - 16)
                                       $ SDL.V2 textWidth textHeight
   case typing of
     Waiting toRun toJump ->
@@ -392,7 +422,7 @@ drawApp now
   lSDLcopy renderer
            texture
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
-         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin) y) $ SDL.V2 128 128
+         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (heroX - sceneOrigin) heroY) $ SDL.V2 128 128
   SDL.present renderer
 
 
