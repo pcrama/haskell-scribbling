@@ -339,21 +339,7 @@ drawApp now
   SDL.drawLine renderer (SDL.P $ SDL.V2 maxScreenPos 0) (SDL.P $ SDL.V2 maxScreenPos winHeight)
   let y = winHeight `div` 2 + 128 in
     SDL.drawLine renderer (SDL.P $ SDL.V2 0 y) (SDL.P $ SDL.V2 winWidth y)
-  let fps = (take 7 $ show fpsEst)
-         ++ case heroState of
-              IdleHero _ _ -> ""
-              RunningHero mua -> " " ++ (take 7 . show $ muaSpeed mua now)
-              JumpingHero _ -> " jumping"
-  liftIO $ putStrLn $ show now ++ ": FPS = " ++ fps
-  case heroState of
-    IdleHero _ _ -> return ()
-    RunningHero mua ->
-      liftIO $ putStrLn $ "  mua = "
-                       ++ (show $ muaDistance mua now)
-                       ++ " " ++ (show $ muaMaxDistance mua)
-                       ++ " x = " ++ (show $ muaDistance mua now + muaX0 mua)
-                       ++ " o = " ++ (show $ sceneOrigin)
-    JumpingHero _ -> return ()
+  let fps = take 7 $ show fpsEst
   when (fpsEst > 25) $ do
     withStringTexture renderer font (if isRed then blue else black) fps $ \fpsTexture -> do
       SDL.TextureInfo { SDL.textureWidth = textWidth
@@ -362,7 +348,7 @@ drawApp now
       SDL.copy renderer
                fpsTexture
                Nothing -- use complete fpsTexture as source
-             $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) (winHeight - textHeight))
+             $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 0 $ winHeight - textHeight)
                                   $ SDL.V2 textWidth textHeight
   let catWidth = 100
   let catXs = take 2 $ filter (\x -> (x + catWidth > sceneOrigin))
