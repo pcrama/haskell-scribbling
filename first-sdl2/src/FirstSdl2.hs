@@ -104,7 +104,7 @@ data AppContext = AppContext {
 data TypingState =
   Waiting (NonEmpty Char) (NonEmpty Char) -- ^ type to run, type to jump
   | Transition GameTime (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) -- ^ when to switch, old run, old jump, new run, new jump
-  | Typing (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState) -- ^ already typed, still to type, type to run to fall back to Waiting, type to jump to fall back to Waiting, continuation once the word is typed in full
+  | Typing (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState) -- ^ already typed, still to type, type to run to fall back to Waiting, type to jump to fall back to Waiting, continuation once the word is typed in full
 
 maxScreenPos, minScreenPos :: Position
 maxScreenPos = 2 * winWidth `div` 3
@@ -220,7 +220,7 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                          oldJump
                          cont -> if matchChar x
                                  then case xs of
-                                        [] -> cont oldRun oldJump s0
+                                        [] -> cont now oldRun oldJump s0
                                         (y:ys) -> Just $ s0 { _typing=Typing (already <> (x:|[]))
                                                                              (y:|ys)
                                                                              oldRun
@@ -256,20 +256,26 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                             map (\ (x0, s:|ss) -> (matchChar s
                                                   , startToType s ss r j $ startToKill x0))
                               $ killableSnakes now sceneOrigin heroPos snakes
+        startToType :: Char -> [Char] -> NonEmpty Char -> NonEmpty Char -> (GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState) -> Maybe AppState
         startToType x (n:xs) r j f = Just $ s0 { _typing=Typing (x:|[]) (n:|xs) r j f }
         startToType  _ _ _ _ _ = Nothing -- aborts the game if a 1 letter word is used
-        killASnake _ [] = []
-        killASnake x0 (s@(MovingSnake y0 _ _):tl)
-          | x0 == y0 = (DyingSnake (snakePosition s now)
-                                 $ now + (round $ 2 * timeScaling)):tl
+        killASnake :: GameTime -> Position -> [Snake] -> [Snake]
+        killASnake _ _ [] = []
+        killASnake lastLetterTimeStamp x0 (s@(MovingSnake y0 _ _):tl)
+          | x0 == y0 = (DyingSnake (snakePosition s lastLetterTimeStamp)
+                                 $ lastLetterTimeStamp + (round $ 2 * timeScaling)
+                       ):tl
           | x0 < y0 = tl -- avoid looping through infinite list of snakes
-          | otherwise = s:killASnake x0 tl
-        killASnake x0 (s@(DyingSnake _ _):tl) = s:killASnake x0 tl
-        startToKill x0 run jump s@(AppState { _snakes=snakes0 }) = Just $ s {
+          | otherwise = s:killASnake lastLetterTimeStamp x0 tl
+        killASnake lastLetterTimeStamp x0 (s@(DyingSnake _ _):tl) =
+          s:killASnake lastLetterTimeStamp x0 tl
+        startToKill :: Position -> GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState
+        startToKill x0 lastLetterTimeStamp run jump s@(AppState { _snakes=snakes0 }) = Just $ s {
           _typing=Waiting run jump
-          , _snakes=killASnake x0 snakes0
+          , _snakes=killASnake lastLetterTimeStamp x0 snakes0
           }
-        startToRun run jump s = Just $ s {
+        startToRun :: GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState
+        startToRun _ run jump s = Just $ s {
           _typing=Waiting run jump
           , _heroState=case _heroState s of
               IdleHero _ x0 -> RunningHero $ MUA heroAccel now heroSpeed x0
@@ -281,7 +287,8 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                                                  $ muaX0 mua + muaDistance mua now
               JumpingHero _ -> _heroState s -- you can't run if you're already jumping
           }
-        startToJump runWord jumpWord s = Just $ s {
+        startToJump :: GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState
+        startToJump _ runWord jumpWord s = Just $ s {
           _typing=Waiting runWord jumpWord
           , _heroState=case _heroState s of
               IdleHero _ x0 -> JumpingHero $ Jump x0
@@ -314,23 +321,22 @@ appLoop oldState context = do
       case updateAppTime now context s1 of
         Nothing -> return ()
         Just (nextState, heroInfo, snakeInfos) -> do
-          drawApp now heroInfo snakeInfos nextState context
+          drawApp heroInfo snakeInfos nextState context
           when (_fpsEst nextState > 100) $
             liftIO $ threadDelay $ 10 * 1000 -- microseconds
           appLoop nextState context
 
 
+-- | Draw application state, current time is implicit in HeroDrawingInfo & SnakeDrawingInfo
 drawApp :: MonadIO m
-        => GameTime -- ^ time for which to draw
-        -> HeroDrawingInfo -- ^ how to draw hero
+        => HeroDrawingInfo -- ^ how to draw hero
         -> [SnakeDrawingInfo] -- ^ how to draw snakes
         -> AppState -- ^ current application state
         -> AppContext -- ^ application graphic context
         -> m ()
-drawApp now
-        (texture, frame, heroX, heroY)
+drawApp (texture, frame, heroX, heroY)
         snakeDrawingInfos
-        (AppState isRed _ sceneOrigin heroState _ fpsEst typing _ _)
+        (AppState isRed _ sceneOrigin _ _ fpsEst typing _ _)
         (AppContext { _renderer=renderer, _font=font, _catTexture=catTexture }) = do
   SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
   SDL.clear renderer
