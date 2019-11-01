@@ -68,21 +68,16 @@ snakeDrawInfo _ _ [] _ = []
 snakeDrawInfo now sceneOrigin (s:ss) context
   | snakePos < sceneOrigin - 64 = snakeDrawInfo now sceneOrigin ss context
   | snakePos > sceneOrigin + winWidth = []
-  | otherwise = oneSnakeDrawInfo s:snakeDrawInfo now sceneOrigin ss context
+  | otherwise = (completeTuple $ oneSnakeDrawInfo s):snakeDrawInfo now sceneOrigin ss context
   where snakePos = snakePosition s now
         snakeY = winHeight `div` 2 + 128 - 64
-        oneSnakeDrawInfo (DyingSnake _ timeout) = (s
-                                                  , _snakeDieTexture context
+        completeTuple (t, f) = (s, t, f, snakePos, snakeY)
+        oneSnakeDrawInfo (DyingSnake _ timeout) = (_snakeDieTexture context
                                                   , (round $ (fromIntegral $ timeout - now)
                                                              * 4 / timeScaling
-                                                     ) `mod` 2
-                                                  , snakePos
-                                                  , snakeY)
-        oneSnakeDrawInfo (MovingSnake _ _ _) = (s
-                                               , _snakeTexture context
-                                               , fromIntegral $ snakePos `mod` 6
-                                               , snakePos
-                                               , snakeY)
+                                                     ) `mod` 2)
+        oneSnakeDrawInfo (MovingSnake _ _ _) = (_snakeTexture context
+                                               , fromIntegral $ snakePos `mod` 6)
 
 
 drawSnake :: MonadIO m
