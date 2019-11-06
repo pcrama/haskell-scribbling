@@ -133,7 +133,7 @@ updateAppTime now
                           }
                        , heroDrawingInfo
                        , snakeDrawingInfos)
-  | otherwise = Just (s0 , heroDrawingInfo , snakeDrawingInfos)
+  | otherwise = Just (s0, heroDrawingInfo, snakeDrawingInfos)
   where pastWeight = 9 -- higher values mean more weight of the past FPS estimates in current estimate
         hero' = case hero of
                   IdleHero _ _ -> hero
@@ -366,7 +366,7 @@ drawApp (texture, frame, heroX, heroY)
            $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (catX - sceneOrigin) $ winHeight `div` 4)
                                 $ SDL.V2 catWidth 100
   mapM_ (drawSnake renderer sceneOrigin font heroX) snakeDrawingInfos
-  let drawRunText toRun = do
+  let drawHeroTexts toRun toJump = do
         withNonEmptyTexture renderer font black toRun $ \text -> do
           SDL.TextureInfo { SDL.textureWidth = textWidth
                           , SDL.textureHeight = textHeight
@@ -376,7 +376,6 @@ drawApp (texture, frame, heroX, heroY)
                    Nothing -- use complete texture as source
                  $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) 0)
                                       $ SDL.V2 textWidth textHeight
-  let drawJumpText toJump = do
         withNonEmptyTexture renderer font black toJump $ \text -> do
           SDL.TextureInfo { SDL.textureWidth = textWidth
                           , SDL.textureHeight = textHeight
@@ -388,10 +387,8 @@ drawApp (texture, frame, heroX, heroY)
                                                       $ heroY - 16)
                                       $ SDL.V2 textWidth textHeight
   case typing of
-    Waiting toRun toJump ->
-      drawRunText toRun >> drawJumpText toJump
-    Transition _ _ _ toRun toJump ->
-      drawRunText toRun >> drawJumpText toJump
+    Waiting toRun toJump -> drawHeroTexts toRun toJump
+    Transition _ _ _ toRun toJump -> drawHeroTexts toRun toJump
     Typing done toType _ _ _ ->
       withNonEmptyTexture renderer font (if isRed then blue else black) done $ \doneTexture -> do
         withNonEmptyTexture renderer font (if isRed then black else blue) toType $ \toTypeTexture -> do
