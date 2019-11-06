@@ -283,37 +283,37 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
           , _snakes=killASnake lastLetterTimeStamp x0 snakes0
           }
         startToRun :: GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState
-        startToRun _ run jump s = Just $ s {
+        startToRun lastLetterTimeStamp run jump s = Just $ s {
           _typing=Waiting run jump
           , _heroState=case _heroState s of
-              IdleHero _ x0 -> RunningHero $ MUA heroAccel now heroSpeed x0
-              RunningHero mua -> let (GS currentSpeed) = muaSpeed mua now
+              IdleHero _ x0 -> RunningHero $ MUA heroAccel lastLetterTimeStamp heroSpeed x0
+              RunningHero mua -> let (GS currentSpeed) = muaSpeed mua lastLetterTimeStamp
                                      (GS initSpeed) = heroSpeed in
                                  RunningHero $ MUA heroAccel
-                                                   now
+                                                   lastLetterTimeStamp
                                                    (GS $ initSpeed + (currentSpeed / 2))
-                                                 $ muaX0 mua + muaDistance mua now
+                                                 $ muaX0 mua + muaDistance mua lastLetterTimeStamp
               JumpingHero _ -> _heroState s -- you can't run if you're already jumping
           }
         startToJump :: GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState
-        startToJump _ runWord jumpWord s = Just $ s {
+        startToJump lastLetterTimeStamp runWord jumpWord s = Just $ s {
           _typing=Waiting runWord jumpWord
           , _heroState=case _heroState s of
               IdleHero _ x0 -> JumpingHero $ Jump x0
                                                   jumpHorizSpeed
-                                                $ MUA heroAccel now heroSpeed 0
-              RunningHero mua -> let (GS currentSpeed) = muaSpeed mua now
+                                                $ MUA heroAccel lastLetterTimeStamp heroSpeed 0
+              RunningHero mua -> let (GS currentSpeed) = muaSpeed mua lastLetterTimeStamp
                                      (GS initSpeed) = jumpHorizSpeed in
-                                 JumpingHero $ Jump (muaX0 mua + muaDistance mua now)
+                                 JumpingHero $ Jump (muaX0 mua + muaDistance mua lastLetterTimeStamp)
                                                     (GS $ currentSpeed + initSpeed / 2)
-                                                  $ MUA heroAccel now heroSpeed 0
-              JumpingHero jump -> let (GS currentSpeed) = muaSpeed (jumpYMvt jump) now
+                                                  $ MUA heroAccel lastLetterTimeStamp heroSpeed 0
+              JumpingHero jump -> let (GS currentSpeed) = muaSpeed (jumpYMvt jump) lastLetterTimeStamp
                                       (GS initSpeed) = heroSpeed
-                                      (x, y) = jumpPosition jump now in
+                                      (x, y) = jumpPosition jump lastLetterTimeStamp in
                                   JumpingHero $ Jump x
                                                      (jumpVx0 jump)
-                                                   $ MUA heroAccel
-                                                         now 
+                                                   $ MUA (muaA $ jumpYMvt jump)
+                                                         lastLetterTimeStamp 
                                                          (GS $ initSpeed + currentSpeed / 2)
                                                          y
           }
