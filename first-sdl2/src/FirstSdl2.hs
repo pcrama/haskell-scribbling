@@ -142,11 +142,19 @@ updateAppTime now
                     | otherwise -> IdleHero (muaTimeOfMaxDistance mua)
                                           $ muaX0 mua + muaMaxDistance mua
                   JumpingHero jump ->
-                    let maxJumpTime = jumpEndTime jump in
-                    if now > maxJumpTime
-                    then IdleHero maxJumpTime
-                                $ jumpX0 jump + jumpDistance jump maxJumpTime
-                    else hero
+                    let maxJumpTime = jumpEndTime jump
+                        (currentX, currentY) = jumpPosition jump now
+                        maxJumpHeight = winHeight `div` 2 in
+                    case (currentY > maxJumpHeight, now >= maxJumpTime) of
+                      -- fall back to ground when jumping too high, to
+                      -- penalize players trying to jump out of viewport
+                      (True, _) -> JumpingHero $ Jump currentX
+                                                      speedZero
+                                                    $ MUA (GA (0-10)) now (GS 0.01) $ currentY - 1
+                      -- Jump is finished:
+                      (_, True) -> IdleHero maxJumpTime
+                                          $ jumpX0 jump + jumpDistance jump maxJumpTime
+                      (_, _) -> hero
         heroDrawingInfo@(_, _, heroPos, heroY) =
           heroDrawInfo now hero' (_heroTextures context) $ winHeight `div` 2
         snakeDrawingInfos =
