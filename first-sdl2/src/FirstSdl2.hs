@@ -164,8 +164,8 @@ updateAppTime now
         killedByThisSnake ((MovingSnake _ _ _), _, _, snakeX, snakeY) =
           touchesHero snakeX snakeY
         touchesHero snakeX snakeY = heroRectangle `intersectRectangle` snakeRectangle
-          where heroRectangle = SDL.Rectangle (SDL.P $ SDL.V2 heroPos heroY) $ SDL.V2 128 128
-                snakeRectangle = SDL.Rectangle (SDL.P $ SDL.V2 snakeX snakeY) $ SDL.V2 64 64
+          where heroRectangle = SDL.Rectangle (SDL.P $ SDL.V2 heroPos heroY) $ SDL.V2 heroWidth heroHeight
+                snakeRectangle = SDL.Rectangle (SDL.P $ SDL.V2 snakeX snakeY) $ SDL.V2 snakeWidth snakeHeight
         (newSceneLastMove, newSceneOrigin) =
           case (sceneLastMove + (round $ timeScaling / 4) < now -- update regularly
                , heroPos > sceneOrigin + maxScreenPos -- don't let hero go too far to the right
@@ -351,7 +351,7 @@ drawApp (texture, frame, heroX, heroY)
   SDL.rendererDrawColor renderer SDL.$= black
   SDL.drawLine renderer (SDL.P $ SDL.V2 minScreenPos 0) (SDL.P $ SDL.V2 minScreenPos winHeight)
   SDL.drawLine renderer (SDL.P $ SDL.V2 maxScreenPos 0) (SDL.P $ SDL.V2 maxScreenPos winHeight)
-  let y = winHeight `div` 2 + 128 in
+  let y = winHeight `div` 2 + heroHeight in
     SDL.drawLine renderer (SDL.P $ SDL.V2 0 y) (SDL.P $ SDL.V2 winWidth y)
   let fps = take 7 $ show fpsEst
   when (fpsEst > 25) $ do
@@ -388,11 +388,11 @@ drawApp (texture, frame, heroX, heroY)
           SDL.TextureInfo { SDL.textureWidth = textWidth
                           , SDL.textureHeight = textHeight
                           } <- SDL.queryTexture text
-          SDL.copy renderer
+          lSDLcopy renderer
                    text
                    Nothing -- use complete texture as source
-                 $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (heroX - sceneOrigin + (128 - textWidth) `div` 2)
-                                                      $ heroY - 16)
+                 $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (heroX - sceneOrigin + (heroWidth - textWidth) `div` 2)
+                                                      $ heroY - textHeight + heroHeight `div` 2)
                                       $ SDL.V2 textWidth textHeight
   case typing of
     Waiting toRun toJump -> drawHeroTexts toRun toJump
@@ -419,8 +419,8 @@ drawApp (texture, frame, heroX, heroY)
   -- draw hero last, i.e. on top of all the rest:
   lSDLcopy renderer
            texture
-           (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
-         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (heroX - sceneOrigin) heroY) $ SDL.V2 128 128
+           (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * tileWidth) 0) $ SDL.V2 tileWidth tileHeight)
+         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (heroX - sceneOrigin) heroY) $ SDL.V2 heroWidth heroHeight
   SDL.present renderer
 
 

@@ -6,10 +6,16 @@ module AllSDL (
   , eventIsPress
   , getSoftwareRendererIndex
   , green
+  , heroHeight
+  , heroWidth
   , insideRectangle
   , intersectRectangle
   , lSDLcopy
   , red
+  , snakeHeight
+  , snakeWidth
+  , tileHeight
+  , tileWidth
   , winHeight
   , winWidth
   , withImageTextures
@@ -37,6 +43,24 @@ import Physics
 winHeight, winWidth :: Position
 winHeight = 480
 winWidth = 640
+
+
+-- | Tile dimensions as loaded from assets
+tileHeight, tileWidth :: Position
+tileHeight = 64
+tileWidth = 64
+
+
+-- | Hero dimensions as drawn on screen
+heroHeight, heroWidth :: Position
+heroHeight = 128
+heroWidth = 128
+
+
+-- | Snake dimensions as drawn on screen
+snakeHeight, snakeWidth :: Position
+snakeHeight = 64
+snakeWidth = 64
 
 
 type ColorPlusAlpha = SDL.V4 Word8

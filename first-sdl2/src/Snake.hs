@@ -27,10 +27,10 @@ data SnakeTextures = SnakeTextures {
    , _snakeDieTexture :: SDL.Texture
 }
 
-snakeInKillablePosition :: Position -- ^ snake's position
-                        -> Position -- ^ hero's position
+snakeInKillablePosition :: Position -- ^ snake's position along horizontal axis
+                        -> Position -- ^ hero's position along horizontal axis
                         -> Bool
-snakeInKillablePosition snakePos heroPos = snakePos - 64 - 32 < heroPos
+snakeInKillablePosition snakePos heroPos = snakePos < heroPos + heroWidth
 
 
 snakePosition :: Snake -> GameTime -> Position
@@ -66,11 +66,11 @@ snakeDrawInfo :: GameTime -- ^ current time
               -> [SnakeDrawingInfo] -- ^ list of (snake, texture, frame, x, y)
 snakeDrawInfo _ _ [] _ = []
 snakeDrawInfo now sceneOrigin (s:ss) context
-  | snakePos < sceneOrigin - 64 = snakeDrawInfo now sceneOrigin ss context
+  | snakePos < sceneOrigin - snakeWidth = snakeDrawInfo now sceneOrigin ss context
   | snakePos > sceneOrigin + winWidth = []
   | otherwise = (completeTuple $ oneSnakeDrawInfo s):snakeDrawInfo now sceneOrigin ss context
   where snakePos = snakePosition s now
-        snakeY = winHeight `div` 2 + 128 - 64
+        snakeY = winHeight `div` 2 + heroHeight - snakeHeight
         completeTuple (t, f) = (s, t, f, snakePos, snakeY)
         oneSnakeDrawInfo (DyingSnake _ timeout) = (_snakeDieTexture context
                                                   , (round $ (fromIntegral $ timeout - now)
@@ -99,11 +99,11 @@ drawSnake renderer sceneOrigin font heroPos (snake, texture, frame, x, y) = do
             lSDLcopy renderer
                      text
                      Nothing -- use complete texture as source
-                   $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin + (64 - textWidth) `div` 2)
-                                                        $ y + 64 + 16)
+                   $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin + (snakeWidth - textWidth) `div` 2)
+                                                        $ y + snakeHeight)
                                         $ SDL.V2 textWidth textHeight
     DyingSnake _ _ -> return ()
   lSDLcopy renderer
            texture
-           (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * 64) 0) $ SDL.V2 64 64)
-         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin) y) $ SDL.V2 64 64
+           (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * tileWidth) 0) $ SDL.V2 tileWidth tileHeight)
+         $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin) y) $ SDL.V2 snakeWidth snakeHeight
