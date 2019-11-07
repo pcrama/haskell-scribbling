@@ -7,7 +7,7 @@ let
   f = { mkDerivation, base, sdl2, sdl2-image, sdl2-ttf, stdenv, text }:
 mkDerivation {
   pname = "fist-sdl2";
-  version = "0.0.0.1";
+  version = "0.0.0.2";
   src = ./.;
   isLibrary = false;
   isExecutable = true;
