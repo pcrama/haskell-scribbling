@@ -155,17 +155,15 @@ updateAppTime now
                       (_, True) -> IdleHero maxJumpTime
                                           $ jumpX0 jump + jumpDistance jump maxJumpTime
                       (_, _) -> hero
-        heroDrawingInfo@(_, _, heroPos, heroY) =
+        heroDrawingInfo@(_, _, SDL.P (SDL.V2 heroPos _), heroBbox) =
           heroDrawInfo now hero' (_heroTextures context) $ winHeight `div` 2
         snakeDrawingInfos =
           snakeDrawInfo now newSceneOrigin snakes' $ _snakeTextures context
         killedByASnake = foldr (\s t -> killedByThisSnake s || t) False
         killedByThisSnake (DyingSnake _ _, _, _, _, _) = False
-        killedByThisSnake ((MovingSnake _ _ _), _, _, snakeX, snakeY) =
-          touchesHero snakeX snakeY
-        touchesHero snakeX snakeY = heroRectangle `intersectRectangle` snakeRectangle
-          where heroRectangle = SDL.Rectangle (SDL.P $ SDL.V2 heroPos heroY) $ SDL.V2 heroWidth heroHeight
-                snakeRectangle = SDL.Rectangle (SDL.P $ SDL.V2 snakeX snakeY) $ SDL.V2 snakeWidth snakeHeight
+        killedByThisSnake ((MovingSnake _ _ _), _, _, _, bbox) =
+          touchesHero bbox
+        touchesHero snakeBbox = heroBbox `intersectRectangle` snakeBbox
         (newSceneLastMove, newSceneOrigin) =
           case (sceneLastMove + (round $ timeScaling / 4) < now -- update regularly
                , heroPos > sceneOrigin + maxScreenPos -- don't let hero go too far to the right
@@ -342,7 +340,7 @@ drawApp :: MonadIO m
         -> AppState -- ^ current application state
         -> AppContext -- ^ application graphic context
         -> m ()
-drawApp (texture, frame, heroX, heroY)
+drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), bbox)
         snakeDrawingInfos
         (AppState isRed _ sceneOrigin _ _ fpsEst typing _ _)
         (AppContext { _renderer=renderer, _font=font, _catTexture=catTexture }) = do
@@ -417,10 +415,12 @@ drawApp (texture, frame, heroX, heroY)
                  $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth - doneWidth) 0)
                                       $ SDL.V2 doneWidth textHeight
   -- draw hero last, i.e. on top of all the rest:
-  lSDLcopy renderer
+  SDL.copy renderer
            texture
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * tileWidth) 0) $ SDL.V2 tileWidth tileHeight)
          $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (heroX - sceneOrigin) heroY) $ SDL.V2 heroWidth heroHeight
+  let (SDL.Rectangle (SDL.P (SDL.V2 bbX bbY)) dim) = bbox in
+    drawRectangle renderer (SDL.Rectangle (SDL.P (SDL.V2 (bbX - sceneOrigin) bbY)) dim)
   SDL.present renderer
 
 

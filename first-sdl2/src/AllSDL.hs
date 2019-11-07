@@ -2,6 +2,7 @@ module AllSDL (
   ColorPlusAlpha
   , black
   , blue
+  , drawRectangle
   , eventIsChar
   , eventIsPress
   , getSoftwareRendererIndex
@@ -11,6 +12,7 @@ module AllSDL (
   , insideRectangle
   , intersectRectangle
   , lSDLcopy
+  , moveRectangle
   , red
   , snakeHeight
   , snakeWidth
@@ -179,13 +181,7 @@ lSDLcopy :: MonadIO m
          -> m ()
 lSDLcopy renderer texture src dest = do
   case dest of
-    Just (SDL.Rectangle (SDL.P (SDL.V2 x0 y0)) (SDL.V2 w h)) -> do
-      let x1 = x0 + w
-      let y1 = y0 + h
-      SDL.drawLine renderer (SDL.P $ SDL.V2 x0 y0) (SDL.P $ SDL.V2 x1 y0)
-      SDL.drawLine renderer (SDL.P $ SDL.V2 x0 y0) (SDL.P $ SDL.V2 x0 y1)
-      SDL.drawLine renderer (SDL.P $ SDL.V2 x1 y1) (SDL.P $ SDL.V2 x1 y0)
-      SDL.drawLine renderer (SDL.P $ SDL.V2 x1 y1) (SDL.P $ SDL.V2 x0 y1)
+    Just bbox -> drawRectangle renderer bbox
     Nothing -> return ()
   SDL.copy renderer texture src dest
 
@@ -218,3 +214,18 @@ getSoftwareRendererIndex = do
                                         SDL.rendererType = SDL.SoftwareRenderer}}
                                   ) = First $ Just idx
         indexIfIsSoftwareRenderer _ = First $ Nothing
+
+
+moveRectangle :: Num a => SDL.Rectangle a -> SDL.V2 a -> SDL.Rectangle a
+moveRectangle (SDL.Rectangle (SDL.P (SDL.V2 x0 y0)) wh) (SDL.V2 tx ty) =
+  SDL.Rectangle (SDL.P (SDL.V2 (x0 + tx) (y0 + ty))) wh
+
+
+drawRectangle :: MonadIO m => SDL.Renderer -> SDL.Rectangle Position -> m ()
+drawRectangle renderer (SDL.Rectangle (SDL.P (SDL.V2 x0 y0)) (SDL.V2 w h)) =
+  let x1 = x0 + w
+      y1 = y0 + h in do
+    SDL.drawLine renderer (SDL.P $ SDL.V2 x0 y0) (SDL.P $ SDL.V2 x1 y0)
+    SDL.drawLine renderer (SDL.P $ SDL.V2 x0 y0) (SDL.P $ SDL.V2 x0 y1)
+    SDL.drawLine renderer (SDL.P $ SDL.V2 x1 y1) (SDL.P $ SDL.V2 x1 y0)
+    SDL.drawLine renderer (SDL.P $ SDL.V2 x1 y1) (SDL.P $ SDL.V2 x0 y1)
