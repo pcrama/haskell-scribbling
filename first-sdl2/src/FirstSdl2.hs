@@ -20,10 +20,15 @@ import Data.List.NonEmpty     (NonEmpty(..))
 import System.Environment     (getArgs)
 
 import AllSDL
+import AtLeast2
 import Hero
 import Physics
 import Keymaps
 import Snake
+
+
+-- | The words the user needs to type to run/jump etc are all at least 2 characters long.
+type Word2 = AtLeast2 Char
 
 
 win2 :: MonadIO m => SDL.Font.Font -> SDL.Window -> m ()
@@ -49,7 +54,19 @@ win2 font w = do
                        , snakeTexture
                        , snakeDieTexture] -> do
             startTicks <- SDL.ticks
-            appLoop (AppState False startTicks 0 (IdleHero startTicks minScreenPos) startTicks 0.0 (Waiting ('f':|"osse") ('j':|"o")) [(100, 's':|"osie", 'l':|"ollipops"), (200, 'g':|"out", 't':|"oi"), (300, 'b':|"oire", 'p':|"oisse")] (snakes startTicks))
+            appLoop (AppState False
+                              startTicks
+                              0
+                              (IdleHero startTicks minScreenPos)
+                              startTicks
+                              0.0
+                              (Waiting (AtLeast2 { firstAL2 = 'f', secondAL2 = 'o', restAL2 = "sse" })
+                                     $ AtLeast2 { firstAL2 = 'j', secondAL2 = 'o', restAL2 = "" })
+                              [(100, AtLeast2 { firstAL2 = 's', secondAL2 = 'o', restAL2 = "sie" }, AtLeast2 { firstAL2 = 'l', secondAL2 = 'o', restAL2 = "llipops" })
+                              , (200, AtLeast2 { firstAL2 = 'g', secondAL2 = 'o', restAL2 = "ut" }, AtLeast2 { firstAL2 = 't', secondAL2 = 'o', restAL2 = "i" })
+                              , (300, AtLeast2 { firstAL2 = 'b', secondAL2 = 'o', restAL2 = "ire" }, AtLeast2 { firstAL2 = 'p', secondAL2 = 'o', restAL2 = "isse" })
+                              ]
+                              (snakes startTicks))
                   $ AppContext renderer
                                font
                                (HeroTextures heroTexture heroIdleTexture heroJumpTexture)
@@ -59,7 +76,11 @@ win2 font w = do
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
         snakes t0 = zipWith (\idx word -> MovingSnake (idx * winWidth + (winWidth * 3 `div` 4)) t0 word)
                             [0..]
-                          $ cycle ['d':|"ur", 'd':|"oux", 'm':|"olle", 'r':|"ose"]
+                          $ cycle [AtLeast2 { firstAL2 = 'd', secondAL2 = 'u', restAL2 = "r" }
+                                  , AtLeast2 { firstAL2 = 'd', secondAL2 = 'o', restAL2 = "ux" }
+                                  , AtLeast2 { firstAL2 = 'm', secondAL2 = 'o', restAL2 = "lle" }
+                                  , AtLeast2 { firstAL2 = 'r', secondAL2 = 'o', restAL2 = "se" }
+                                  ]
 
 
 data AppState = AppState {
@@ -70,7 +91,7 @@ data AppState = AppState {
   , _lastTicks :: GameTime
   , _fpsEst :: Double
   , _typing :: TypingState
-  , _words :: [(Position, NonEmpty Char, NonEmpty Char)]
+  , _words :: [(Position, Word2, Word2)]
   , _snakes :: [Snake]
   }
 
@@ -82,6 +103,7 @@ data AppContext = AppContext {
   , _catTexture :: SDL.Texture
   , _snakeTextures :: SnakeTextures
   , _keymap :: SDL.Keycode -> Maybe Char
+  , _allWords :: NonEmpty Word2
   }
 
 -- | States for typing exercise
@@ -102,9 +124,9 @@ data AppContext = AppContext {
 --   is seen, go back to the Waiting state.  The state also carries the
 --   words to use when going back to the Waiting state.
 data TypingState =
-  Waiting (NonEmpty Char) (NonEmpty Char) -- ^ type to run, type to jump
-  | Transition GameTime (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) -- ^ when to switch, old run, old jump, new run, new jump
-  | Typing (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (NonEmpty Char) (GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState) -- ^ already typed, still to type, type to run to fall back to Waiting, type to jump to fall back to Waiting, continuation once the word is typed in full
+  Waiting Word2 Word2 -- ^ type to run, type to jump
+  | Transition GameTime Word2 Word2 Word2 Word2 -- ^ when to switch, old run, old jump, new run, new jump
+  | Typing (NonEmpty Char) (NonEmpty Char) Word2 Word2 (GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState) -- ^ already typed, still to type, type to run to fall back to Waiting, type to jump to fall back to Waiting, continuation once the word is typed in full
 
 maxScreenPos, minScreenPos :: Position
 maxScreenPos = 2 * winWidth `div` 3
@@ -211,12 +233,10 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                   Typing _ _ oldRun oldJump _ -> Just $ s0 { _typing=Waiting oldRun oldJump }
                   Transition _ _ _ _ _ -> noChange
   | otherwise = case _typing s0 of
-                  Waiting run@(x:|xs) jump@(j:|js) ->
+                  Waiting run@(AtLeast2 { firstAL2 = x }) jump@(AtLeast2 { firstAL2 = j }) ->
                     case lookup True
-                              $ (matchChar x
-                                 , startToType x xs run jump startToRun
-                              ):(matchChar j
-                                 , startToType j js run jump startToJump
+                              $ (matchChar x, startToType run run jump startToRun
+                              ):(matchChar j, startToType jump run jump startToJump
                               ):snakeKiller run jump of
                       Just r -> r
                       Nothing -> noChange
@@ -235,20 +255,20 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                                                             }
                                  else noChange
                   Transition _
-                             (x:|xs)
-                             (j:|js)
-                             newRun@(y:|ys)
-                             newJump@(z:|zs) ->
+                             oldRun@(AtLeast2 { firstAL2 = x })
+                             oldJump@(AtLeast2 { firstAL2 = j })
+                             newRun@(AtLeast2 { firstAL2 = y })
+                             newJump@(AtLeast2 { firstAL2 = z }) ->
                                case lookup True
                                          $ (matchChar y
-                                            , startToType y ys newRun newJump startToRun
+                                            , startToType newRun newRun newJump startToRun
                                          ):(matchChar z
-                                            , startToType z zs newRun newJump startToJump
+                                            , startToType newJump newRun newJump startToJump
                                          ):(snakeKiller newRun newJump
                                             ++ [(matchChar x
-                                                , startToType x xs newRun newJump startToRun)
+                                                , startToType oldRun newRun newJump startToRun)
                                                , (matchChar j
-                                                 , startToType j js newRun newJump startToJump)]) of
+                                                 , startToType oldJump newRun newJump startToJump)]) of
                                  Just r -> r
                                  Nothing -> noChange
   where heroAccel = GA (-3.0)
@@ -259,12 +279,12 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
         snakeKiller r j = let heroPos = heroPosition now $ _heroState s0
                               snakes = _snakes s0
                               sceneOrigin = _sceneOrigin s0 in
-                            map (\ (x0, s:|ss) -> (matchChar s
-                                                  , startToType s ss r j $ startToKill x0))
+                            map (\ (x0, w@(AtLeast2 { firstAL2 = s })) ->
+                                     (matchChar s, startToType w r j $ startToKill x0))
                               $ killableSnakes now sceneOrigin heroPos snakes
-        startToType :: Char -> [Char] -> NonEmpty Char -> NonEmpty Char -> (GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState) -> Maybe AppState
-        startToType x (n:xs) r j f = Just $ s0 { _typing=Typing (x:|[]) (n:|xs) r j f }
-        startToType  _ _ _ _ _ = Nothing -- aborts the game if a 1 letter word is used
+        startToType :: Word2 -> Word2 -> Word2 -> (GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState) -> Maybe AppState
+        startToType (AtLeast2 { firstAL2 = x, secondAL2 = n, restAL2 = xs }) r j f = 
+          Just $ s0 { _typing=Typing (x:|[]) (n:|xs) r j f }
         killASnake :: GameTime -> Position -> [Snake] -> [Snake]
         killASnake _ _ [] = []
         killASnake lastLetterTimeStamp x0 (s@(MovingSnake y0 _ _):tl)
@@ -275,12 +295,12 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
           | otherwise = s:killASnake lastLetterTimeStamp x0 tl
         killASnake lastLetterTimeStamp x0 (s@(DyingSnake _ _):tl) =
           s:killASnake lastLetterTimeStamp x0 tl
-        startToKill :: Position -> GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState
+        startToKill :: Position -> GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState
         startToKill x0 lastLetterTimeStamp run jump s@(AppState { _snakes=snakes0 }) = Just $ s {
           _typing=Waiting run jump
           , _snakes=killASnake lastLetterTimeStamp x0 snakes0
           }
-        startToRun :: GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState
+        startToRun :: GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState
         startToRun lastLetterTimeStamp run jump s = Just $ s {
           _typing=Waiting run jump
           , _heroState=case _heroState s of
@@ -293,7 +313,7 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                                                  $ muaX0 mua + muaDistance mua lastLetterTimeStamp
               JumpingHero _ -> _heroState s -- you can't run if you're already jumping
           }
-        startToJump :: GameTime -> NonEmpty Char -> NonEmpty Char -> AppState -> Maybe AppState
+        startToJump :: GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState
         startToJump lastLetterTimeStamp runWord jumpWord s = Just $ s {
           _typing=Waiting runWord jumpWord
           , _heroState=case _heroState s of
@@ -373,7 +393,7 @@ drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), bbox)
                                 $ SDL.V2 catWidth 100
   mapM_ (drawSnake renderer sceneOrigin font heroX) snakeDrawingInfos
   let drawHeroTexts toRun toJump = do
-        withNonEmptyTexture renderer font black toRun $ \text -> do
+        withAtLeast2Texture renderer font black toRun $ \text -> do
           SDL.TextureInfo { SDL.textureWidth = textWidth
                           , SDL.textureHeight = textHeight
                           } <- SDL.queryTexture text
@@ -382,7 +402,7 @@ drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), bbox)
                    Nothing -- use complete texture as source
                  $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth) 0)
                                       $ SDL.V2 textWidth textHeight
-        withNonEmptyTexture renderer font black toJump $ \text -> do
+        withAtLeast2Texture renderer font black toJump $ \text -> do
           SDL.TextureInfo { SDL.textureWidth = textWidth
                           , SDL.textureHeight = textHeight
                           } <- SDL.queryTexture text

@@ -20,6 +20,7 @@ module AllSDL (
   , tileWidth
   , winHeight
   , winWidth
+  , withAtLeast2Texture
   , withImageTextures
   , withNonEmptyTexture
   , withSDL
@@ -39,6 +40,7 @@ import Data.Monoid            (First(..))
 import Data.Text              (Text, pack)
 import Data.Word              (Word8)
 
+import AtLeast2
 import Physics
 
 
@@ -134,6 +136,17 @@ withNonEmptyTexture :: MonadIO m
                     -> m a
 withNonEmptyTexture renderer font color (x:|xs) f =
   withStringTexture renderer font color (x:xs) f
+
+
+withAtLeast2Texture :: MonadIO m
+                    => SDL.Renderer
+                    -> SDL.Font.Font
+                    -> ColorPlusAlpha
+                    -> AtLeast2 Char
+                    -> (SDL.Texture -> m a)
+                    -> m a
+withAtLeast2Texture renderer font color (AtLeast2 { firstAL2 = x, secondAL2 = y, restAL2 = xs }) f =
+  withStringTexture renderer font color (x:y:xs) f
 
 
 -- | Execute action with images loaded from files & clean up

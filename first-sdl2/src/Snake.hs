@@ -13,13 +13,13 @@ import qualified SDL
 import qualified SDL.Font
 
 import Control.Monad.IO.Class (MonadIO)
-import Data.List.NonEmpty     (NonEmpty)
 
 import AllSDL
+import AtLeast2 (AtLeast2)
 import Physics
 
 data Snake =
-  MovingSnake Position GameTime (NonEmpty Char) -- initial position, `kill' word
+  MovingSnake Position GameTime (AtLeast2 Char) -- initial position, `kill' word (ideally, it should be Word2 type synonym from FirstSdl2.hs)
   | DyingSnake Position GameTime -- static position, time at which snake should disappear
 
 data SnakeTextures = SnakeTextures {
@@ -44,7 +44,7 @@ killableSnakes :: GameTime -- ^ current time
                -> Position -- ^ scene origin (to filter out snakes based on visibility)
                -> Position -- ^ hero's position
                -> [Snake] -- ^ snakes
-               -> [(Position, NonEmpty Char)] -- ^ snakes that can be killed, identified by their init position
+               -> [(Position, AtLeast2 Char)] -- ^ snakes that can be killed, identified by their init position
 killableSnakes _ _ _ [] = []
 killableSnakes now sceneOrigin heroPos (s:ss)
   | snakePos `snakeInKillablePosition` heroPos = processTail
@@ -125,7 +125,7 @@ drawSnake renderer sceneOrigin font heroPos (snake, texture, frame, SDL.P (SDL.V
     MovingSnake _ _ toKill -- draw `kill' word
       | x `snakeInKillablePosition` heroPos -> return () -- can't shoot backwards or if snake is too close
       | otherwise ->
-          withNonEmptyTexture renderer font black toKill $ \text -> do
+          withAtLeast2Texture renderer font black toKill $ \text -> do
             SDL.TextureInfo { SDL.textureWidth = textWidth
                             , SDL.textureHeight = textHeight
                             } <- SDL.queryTexture text

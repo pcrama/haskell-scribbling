@@ -10,6 +10,7 @@ executable first-sdl2
   hs-source-dirs:      src
   main-is:             FirstSdl2.hs
   other-modules:       AllSDL
+                     , AtLeast2
                      , Hero
                      , Keymaps
                      , Physics
