@@ -1,5 +1,5 @@
 name:                first-sdl2
-version:             0.0.0.2
+version:             0.0.0.3
 author:              Philippe Crama
 maintainer:          pcfeb0009@gmx.com
 cabal-version:       >=1.10
