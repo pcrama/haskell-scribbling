@@ -11,7 +11,7 @@ mkDerivation {
   src = ./.;
   isLibrary = false;
   isExecutable = true;
-  executableHaskellDepends = [ base sdl2 sdl2-image sdl2-ttf text ];
+  executableHaskellDepends = [ base random sdl2 sdl2-image sdl2-ttf text ];
   license = "unknown";
   hydraPlatforms = stdenv.lib.platforms.none;
 };

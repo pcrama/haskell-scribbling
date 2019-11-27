@@ -16,8 +16,10 @@ import Control.Exception      (handle, throw)
 import Control.Monad          (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.List              (foldl')
-import Data.List.NonEmpty     (NonEmpty(..))
+import Data.List.NonEmpty     (NonEmpty(..), nonEmpty)
+import Data.Maybe             (mapMaybe)
 import System.Environment     (getArgs)
+import System.Random          (getStdRandom, randomR)
 
 import AllSDL
 import AtLeast2
@@ -40,47 +42,50 @@ win2 font w = do
                                       Nothing -> putStrLn "Can't find backup driver" >> throw e
                                  ) :: SDL.SDLException -> IO SDL.Renderer)
                               $ mkRenderer (-1)
-    withImageTextures renderer
-                      ["./assets/sheet_hero_walk.png"
-                      , "./assets/sheet_hero_idle.png"
-                      , "./assets/sheet_hero_jump.png"
-                      , "./assets/cat100x100.png"
-                      , "./assets/sheet_snake_walk.png"
-                      , "./assets/sheet_snake_hurt.png"]
-                    $ \[heroTexture
-                       , heroIdleTexture
-                       , heroJumpTexture
-                       , catTexture
-                       , snakeTexture
-                       , snakeDieTexture] -> do
-            startTicks <- SDL.ticks
-            appLoop (AppState False
-                              startTicks
-                              0
-                              (IdleHero startTicks minScreenPos)
-                              startTicks
-                              0.0
-                              (Waiting (AtLeast2 { firstAL2 = 'f', secondAL2 = 'o', restAL2 = "sse" })
-                                     $ AtLeast2 { firstAL2 = 'j', secondAL2 = 'o', restAL2 = "" })
-                              [(100, AtLeast2 { firstAL2 = 's', secondAL2 = 'o', restAL2 = "sie" }, AtLeast2 { firstAL2 = 'l', secondAL2 = 'o', restAL2 = "llipops" })
-                              , (200, AtLeast2 { firstAL2 = 'g', secondAL2 = 'o', restAL2 = "ut" }, AtLeast2 { firstAL2 = 't', secondAL2 = 'o', restAL2 = "i" })
-                              , (300, AtLeast2 { firstAL2 = 'b', secondAL2 = 'o', restAL2 = "ire" }, AtLeast2 { firstAL2 = 'p', secondAL2 = 'o', restAL2 = "isse" })
-                              ]
-                              (snakes startTicks))
-                  $ AppContext renderer
-                               font
-                               (HeroTextures heroTexture heroIdleTexture heroJumpTexture)
-                               catTexture
-                               (SnakeTextures snakeTexture snakeDieTexture)
-                               azerty_on_qwerty
-  where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
-        snakes t0 = zipWith (\idx word -> MovingSnake (idx * winWidth + (winWidth * 3 `div` 4)) t0 word)
-                            [0..]
-                          $ cycle [AtLeast2 { firstAL2 = 'd', secondAL2 = 'u', restAL2 = "r" }
-                                  , AtLeast2 { firstAL2 = 'd', secondAL2 = 'o', restAL2 = "ux" }
-                                  , AtLeast2 { firstAL2 = 'm', secondAL2 = 'o', restAL2 = "lle" }
-                                  , AtLeast2 { firstAL2 = 'r', secondAL2 = 'o', restAL2 = "se" }
+    mbAllWords <- loadAllWords
+    case mbAllWords of
+      Nothing -> liftIO $ putStrLn "At least one word is shorter than 2 or not enough words"
+      Just allWords -> do
+        withImageTextures renderer
+                          ["./assets/sheet_hero_walk.png"
+                          , "./assets/sheet_hero_idle.png"
+                          , "./assets/sheet_hero_jump.png"
+                          , "./assets/cat100x100.png"
+                          , "./assets/sheet_snake_walk.png"
+                          , "./assets/sheet_snake_hurt.png"]
+                        $ \[heroTexture
+                           , heroIdleTexture
+                           , heroJumpTexture
+                           , catTexture
+                           , snakeTexture
+                           , snakeDieTexture] -> do
+                startTicks <- SDL.ticks
+                runWord <- fmap (either id id) $ pickWord allWords []
+                jumpWord <- fmap (either id id) $ pickWord allWords [runWord]
+                appLoop (AppState False
+                                  startTicks
+                                  0
+                                  (IdleHero startTicks minScreenPos)
+                                  startTicks
+                                  0.0
+                                  (Waiting runWord jumpWord) -- (AtLeast2 { firstAL2 = 'f', secondAL2 = 'o', restAL2 = "sse" })
+                                         -- $ AtLeast2 { firstAL2 = 'j', secondAL2 = 'o', restAL2 = "" })
+                                  [(100, AtLeast2 { firstAL2 = 's', secondAL2 = 'o', restAL2 = "sie" }, AtLeast2 { firstAL2 = 'l', secondAL2 = 'o', restAL2 = "llipops" })
+                                  , (200, AtLeast2 { firstAL2 = 'g', secondAL2 = 'o', restAL2 = "ut" }, AtLeast2 { firstAL2 = 't', secondAL2 = 'o', restAL2 = "i" })
+                                  , (300, AtLeast2 { firstAL2 = 'b', secondAL2 = 'o', restAL2 = "ire" }, AtLeast2 { firstAL2 = 'p', secondAL2 = 'o', restAL2 = "isse" })
                                   ]
+                                  -- start without snakes, they will be spawned as needed to maintain a
+                                  -- `stable' population
+                                  []
+                                  [])
+                      $ AppContext renderer
+                                   font
+                                   (HeroTextures heroTexture heroIdleTexture heroJumpTexture)
+                                   catTexture
+                                   (SnakeTextures snakeTexture snakeDieTexture)
+                                   azerty_on_qwerty
+                                   allWords
+  where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
 
 
 data AppState = AppState {
@@ -93,6 +98,7 @@ data AppState = AppState {
   , _typing :: TypingState
   , _words :: [(Position, Word2, Word2)]
   , _snakes :: [Snake]
+  , _previousSnakeDrawingInfo :: [SnakeDrawingInfo] -- ^ see `snakeDrawInfo', needed for collision detection, drawing, making lists of currently killable snakes
   }
 
 
@@ -133,12 +139,45 @@ maxScreenPos = 2 * winWidth `div` 3
 minScreenPos = winWidth `div` 8
 
 
+wordsInUse :: TypingState -- ^ words for interacting with hero
+           -> [Snake] -- ^ conservative: pass all snakes (even if they're not visible yet) to exclude duplicate first letter in the future
+           -> [Word2] -- ^ list of words to exclude from choice of new words not yet in the game
+wordsInUse typing snakes = heroWords ++ snakeWords
+  where heroWords = case typing of
+          Waiting r j -> [r, j]
+          Transition _ r1 j1 r2 j2 -> [r1, j1, r2, j2]
+          Typing _ _ r j _ -> [r, j]
+        snakeWords = mapMaybe wordOfSnake snakes
+        wordOfSnake (MovingSnake _ _ w) = Just w
+        wordOfSnake (DyingSnake _ _) = Nothing
+
+
+-- | Grow population of snakes if needed to always have a minimum number
+--   of snakes in the game (even if they are outside the viewport for some
+--   time)
+spawnSnake :: MonadIO m
+           => GameTime -- ^ time
+           -> AppContext -- ^ application context
+           -> AppState -- ^ current application state
+           -> m [Snake] -- ^ updated snake list
+spawnSnake _ _ (AppState { _snakes=s@(_:_:_:_) }) = return s -- there are already enough snakes
+spawnSnake now (AppContext { _allWords=w }) (AppState { _typing=t, _snakes=s, _sceneOrigin=sceneOrigin }) =
+  let exclude = wordsInUse t s
+      minSnakePos = sceneOrigin + winWidth + snakeWidth -- place new snake outside viewport
+      startPos = case s of
+                   [] -> minSnakePos
+                   _ -> max minSnakePos
+                          $ maximum (map (flip snakePosition now) s) + (winWidth `div` 4) in do
+    killSnakeWord <- fmap (either id id) $ pickWord w exclude
+    return $ s ++ [MovingSnake startPos now killSnakeWord]
+
+
 updateAppTime :: GameTime -- ^ time
               -> AppContext -- ^ application context: drawing info needed for collision detection
               -> AppState -- ^ current application state
               -> Maybe (AppState -- ^ new state, Nothing means the game is over
                        , HeroDrawingInfo -- ^ see `heroDrawInfo', needed for collision detection, reusable for drawing
-                       , [SnakeDrawingInfo]) -- ^ see `snakeDrawInfo', needed for collision detection, reusable for drawing
+                       )
 updateAppTime now
               context
               s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _words=wordList, _snakes=snakes })
@@ -152,10 +191,10 @@ updateAppTime now
                           , _typing=typing'
                           , _words=words'
                           , _snakes=snakes'
+                          , _previousSnakeDrawingInfo=snakeDrawingInfos
                           }
-                       , heroDrawingInfo
-                       , snakeDrawingInfos)
-  | otherwise = Just (s0, heroDrawingInfo, snakeDrawingInfos)
+                       , heroDrawingInfo)
+  | otherwise = Just (s0, heroDrawingInfo)
   where pastWeight = 9 -- higher values mean more weight of the past FPS estimates in current estimate
         hero' = case hero of
                   IdleHero _ _ -> hero
@@ -210,16 +249,9 @@ updateAppTime now
               | now > t -> (Waiting newRun newJump, wordList)
               | otherwise -> noChange
             (Typing _ _ _ _ _, _) -> noChange
-        snakes' = removeSnakes snakes
-        removeSnakes [] = []
-        removeSnakes (s@(MovingSnake _ _ _):rest)
-            | snakePos > heroPos + winWidth = s:rest -- no more filtering: snakes are outside of hero's view
-            | snakePos < heroPos - winWidth = removeSnakes rest
-            | otherwise = s:removeSnakes rest
-          where snakePos = snakePosition s now
-        removeSnakes (s@(DyingSnake _ timeout):rest)
-            | now > timeout = removeSnakes rest
-            | otherwise = s:removeSnakes rest
+        snakes' = filter stillVisible snakes
+        stillVisible snake@(MovingSnake _ _ _) = snakePosition snake now >= sceneOrigin - snakeWidth
+        stillVisible (DyingSnake _ timeout) = now <= timeout
 
 
 updateAppForEvent :: SDL.Event -> AppContext -> AppState -> Maybe AppState
@@ -276,29 +308,26 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
         jumpHorizSpeed = GS (5.0)
         noChange = Just s0
         matchChar = eventIsChar keymap e
-        snakeKiller r j = let heroPos = heroPosition now $ _heroState s0
-                              snakes = _snakes s0
-                              sceneOrigin = _sceneOrigin s0 in
-                            map (\ (x0, w@(AtLeast2 { firstAL2 = s })) ->
-                                     (matchChar s, startToType w r j $ startToKill x0))
-                              $ killableSnakes now sceneOrigin heroPos snakes
+        snakeKiller r j = let heroPos = heroPosition now $ _heroState s0 in
+                            map (\ (t0, w@(AtLeast2 { firstAL2 = s })) ->
+                                     (matchChar s, startToType w r j $ startToKill t0))
+                              $ killableSnakes heroPos $ _previousSnakeDrawingInfo s0
         startToType :: Word2 -> Word2 -> Word2 -> (GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState) -> Maybe AppState
         startToType (AtLeast2 { firstAL2 = x, secondAL2 = n, restAL2 = xs }) r j f = 
           Just $ s0 { _typing=Typing (x:|[]) (n:|xs) r j f }
-        killASnake :: GameTime -> Position -> [Snake] -> [Snake]
+        killASnake :: GameTime -> GameTime -> [Snake] -> [Snake]
         killASnake _ _ [] = []
-        killASnake lastLetterTimeStamp x0 (s@(MovingSnake y0 _ _):tl)
-          | x0 == y0 = (DyingSnake (snakePosition s lastLetterTimeStamp)
+        killASnake lastLetterTimeStamp t0 (s@(MovingSnake _ u0 _):tl)
+          | t0 == u0 = (DyingSnake (snakePosition s lastLetterTimeStamp)
                                  $ lastLetterTimeStamp + (round $ 2 * timeScaling)
                        ):tl
-          | x0 < y0 = tl -- avoid looping through infinite list of snakes
-          | otherwise = s:killASnake lastLetterTimeStamp x0 tl
-        killASnake lastLetterTimeStamp x0 (s@(DyingSnake _ _):tl) =
-          s:killASnake lastLetterTimeStamp x0 tl
-        startToKill :: Position -> GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState
-        startToKill x0 lastLetterTimeStamp run jump s@(AppState { _snakes=snakes0 }) = Just $ s {
+          | otherwise = s:killASnake lastLetterTimeStamp t0 tl
+        killASnake lastLetterTimeStamp t0 (s@(DyingSnake _ _):tl) =
+          s:killASnake lastLetterTimeStamp t0 tl
+        startToKill :: GameTime -> GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState
+        startToKill snakeBirth lastLetterTimeStamp run jump s@(AppState { _snakes=snakes0 }) = Just $ s {
           _typing=Waiting run jump
-          , _snakes=killASnake lastLetterTimeStamp x0 snakes0
+          , _snakes=killASnake lastLetterTimeStamp snakeBirth snakes0
           }
         startToRun :: GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState
         startToRun lastLetterTimeStamp run jump s = Just $ s {
@@ -346,23 +375,23 @@ appLoop oldState context = do
       now <- SDL.ticks
       case updateAppTime now context s1 of
         Nothing -> return ()
-        Just (nextState, heroInfo, snakeInfos) -> do
-          drawApp heroInfo snakeInfos nextState context
+        Just (nextState, heroInfo) -> do
+          drawApp heroInfo nextState context
           when (_fpsEst nextState > 100) $
             liftIO $ threadDelay $ 10 * 1000 -- microseconds
-          appLoop nextState context
+          wordUpdateTime <- SDL.ticks
+          newSnakes <- spawnSnake wordUpdateTime context nextState
+          appLoop (nextState { _snakes=newSnakes }) context
 
 
 -- | Draw application state, current time is implicit in HeroDrawingInfo & SnakeDrawingInfo
 drawApp :: MonadIO m
         => HeroDrawingInfo -- ^ how to draw hero
-        -> [SnakeDrawingInfo] -- ^ how to draw snakes
         -> AppState -- ^ current application state
         -> AppContext -- ^ application graphic context
         -> m ()
 drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), bbox)
-        snakeDrawingInfos
-        (AppState isRed _ sceneOrigin _ _ fpsEst typing _ _)
+        (AppState isRed _ sceneOrigin _ _ fpsEst typing _ _ snakeDrawingInfos)
         (AppContext { _renderer=renderer, _font=font, _catTexture=catTexture }) = do
   SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
   SDL.clear renderer
@@ -442,6 +471,116 @@ drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), bbox)
   let (SDL.Rectangle (SDL.P (SDL.V2 bbX bbY)) dim) = bbox in
     drawRectangle renderer (SDL.Rectangle (SDL.P (SDL.V2 (bbX - sceneOrigin) bbY)) dim)
   SDL.present renderer
+
+
+-- | Return list of words that do not start with the same letter as any other word in the 2nd list
+wordCandidates :: NonEmpty Word2 -> [Word2] -> [Word2]
+wordCandidates dict exclude = foldr dropIfCommon1stLetter [] dict
+  where firstLetters = map (fst . unCons) exclude
+        dropIfCommon1stLetter w@(AtLeast2 { firstAL2 = c }) tl
+          | c `elem` firstLetters = tl
+          | otherwise = w:tl
+
+
+pickWord :: MonadIO m => NonEmpty Word2 -> [Word2] -> m (Either Word2 Word2)
+pickWord dict@(firstWord:|_) exclude
+  | null candidates = return $ Left firstWord
+  | otherwise = fmap Right $ selectRandom candidates
+  where candidates = wordCandidates dict exclude
+        selectRandom xs = do
+          idx <- liftIO $ getStdRandom $ randomR (0, length xs - 1)
+          return $ xs !! idx
+
+
+loadAllWords :: MonadIO m => m (Maybe (NonEmpty Word2))
+loadAllWords = pure $ traverse atLeast2 [
+  "belle"
+  , "beurre"
+  , "bible"
+  , "boris"
+  , "cercle"
+  , "cil"
+  , "coca"
+  , "coudre"
+  , "dense"
+  , "docile"
+  , "dorloter"
+  , "ectoplasme"
+  , "flou"
+  , "folle"
+  , "fou"
+  , "four"
+  , "froid"
+  , "gentil"
+  , "gourde"
+  , "gout"
+  , "gouverne"
+  , "gulliver"
+  , "histoire"
+  , "hiver"
+  , "hurler"
+  , "ici"
+  , "joie"
+  , "jolie"
+  , "jouer"
+  , "jules"
+  , "lecteur"
+  , "lent"
+  , "leurre"
+  , "libre"
+  , "liseuse"
+  , "loi"
+  , "lollipops"
+  , "lustre"
+  , "moche"
+  , "moi"
+  , "moine"
+  , "molle"
+  , "moteur"
+  , "mou"
+  , "noisette"
+  , "nord"
+  , "nouvelle"
+  , "nuit"
+  , "ordre"
+  , "origine"
+  , "ouistiti"
+  , "pile"
+  , "piller"
+  , "pilule"
+  , "pope"
+  , "poulpe"
+  , "rigolo"
+  , "rigueur"
+  , "rire"
+  , "roue"
+  , "rouge"
+  , "roule"
+  , "ruse"
+  , "sortir"
+  , "souffler"
+  , "soupir"
+  , "sourire"
+  , "sous"
+  , "sur"
+  , "surf"
+  , "tente"
+  , "titre"
+  , "tout"
+  , "trop"
+  , "trouver"
+  , "tuile"
+  , "ursule"
+  , "user"
+  , "utile"
+  , "vigile"
+  , "vigueur"
+  , "virgule"
+  , "viser"
+  , "vue"
+  , "yoyo"
+  , "zoologie"
+  ] >>= nonEmpty
 
 
 main :: IO ()

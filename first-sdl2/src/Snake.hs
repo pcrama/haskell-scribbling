@@ -5,7 +5,6 @@ module Snake (
   , drawSnake
   , killableSnakes
   , snakeDrawInfo
-  , snakeInKillablePosition
   , snakePosition
 ) where
 
@@ -27,33 +26,27 @@ data SnakeTextures = SnakeTextures {
    , _snakeDieTexture :: SDL.Texture
 }
 
-snakeInKillablePosition :: Position -- ^ snake's position along horizontal axis
-                        -> Position -- ^ hero's position along horizontal axis
-                        -> Bool
-snakeInKillablePosition snakePos heroPos = snakePos < heroPos + heroWidth `div` 2
+snakeInUnkillablePosition :: Position -- ^ snake's position along horizontal axis
+                          -> Position -- ^ hero's position along horizontal axis
+                          -> Bool -- ^ snake can't be killed anymore: too close or to the left of hero
+snakeInUnkillablePosition snakePos heroPos = snakePos < heroPos + heroWidth `div` 2
 
 
 snakePosition :: Snake -> GameTime -> Position
 snakePosition (MovingSnake x0 t0 _) now
-  | now > t0 = x0 - (round $ 5 * (now `timeDiff` t0))
+  | now > t0 = x0 - (round $ 8 * (now `timeDiff` t0))
   | otherwise = x0
 snakePosition (DyingSnake x _) _ = x
 
 
-killableSnakes :: GameTime -- ^ current time
-               -> Position -- ^ scene origin (to filter out snakes based on visibility)
-               -> Position -- ^ hero's position
-               -> [Snake] -- ^ snakes
-               -> [(Position, AtLeast2 Char)] -- ^ snakes that can be killed, identified by their init position
-killableSnakes _ _ _ [] = []
-killableSnakes now sceneOrigin heroPos (s:ss)
-  | snakePos `snakeInKillablePosition` heroPos = processTail
-  | snakePos > sceneOrigin + winWidth = []
-  | otherwise = case s of
-                  MovingSnake x0 _ w -> (x0, w):processTail
-                  DyingSnake _ _ -> processTail
-  where snakePos = snakePosition s now
-        processTail = killableSnakes now sceneOrigin heroPos ss
+killableSnakes :: Position -- ^ hero's position
+               -> [SnakeDrawingInfo] -- ^ only snakes that are drawn can be killed, so not [Snake]
+               -> [(GameTime, AtLeast2 Char)] -- ^ snakes that can be killed, identified by their init birth time
+killableSnakes heroPos = foldr keepIfKillable []
+  where keepIfKillable ((MovingSnake _ birth killWord), _, _, SDL.P (SDL.V2 snakePos _), _) tl
+          | snakePos `snakeInUnkillablePosition` heroPos = tl
+          | otherwise = (birth, killWord):tl
+        keepIfKillable ((DyingSnake _ _), _, _, _, _) tl = tl
 
 
 type SnakeDrawingInfo = (Snake, SDL.Texture, Int, SDL.Point SDL.V2 Position, SDL.Rectangle Position) -- (snake, texture, frame, x & y where to draw, bounding box on screen)
@@ -123,7 +116,7 @@ drawSnake :: MonadIO m
 drawSnake renderer sceneOrigin font heroPos (snake, texture, frame, SDL.P (SDL.V2 x y), bbox) = do
   case snake of
     MovingSnake _ _ toKill -- draw `kill' word
-      | x `snakeInKillablePosition` heroPos -> return () -- can't shoot backwards or if snake is too close
+      | x `snakeInUnkillablePosition` heroPos -> return () -- can't shoot backwards or if snake is too close
       | otherwise ->
           withAtLeast2Texture renderer font black toKill $ \text -> do
             SDL.TextureInfo { SDL.textureWidth = textWidth

@@ -17,6 +17,7 @@ executable first-sdl2
                      , Snake
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:       base
+                     , random
                      , sdl2
                      , sdl2-image
                      , sdl2-ttf
