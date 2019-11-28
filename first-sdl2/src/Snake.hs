@@ -6,6 +6,7 @@ module Snake (
   , killableSnakes
   , snakeDrawInfo
   , snakePosition
+  , snakeSpeed
 ) where
 
 import qualified SDL
@@ -32,9 +33,13 @@ snakeInUnkillablePosition :: Position -- ^ snake's position along horizontal axi
 snakeInUnkillablePosition snakePos heroPos = snakePos < heroPos + heroWidth `div` 2
 
 
+-- | Snake's speed in pixels per second
+snakeSpeed :: Double
+snakeSpeed = 8
+
 snakePosition :: Snake -> GameTime -> Position
 snakePosition (MovingSnake x0 t0 _) now
-  | now > t0 = x0 - (round $ 8 * (now `timeDiff` t0))
+  | now > t0 = x0 - (round $ snakeSpeed * (now `timeDiff` t0))
   | otherwise = x0
 snakePosition (DyingSnake x _) _ = x
 
