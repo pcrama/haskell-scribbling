@@ -68,12 +68,10 @@ win2 font w = do
                                   (IdleHero startTicks minScreenPos)
                                   startTicks
                                   0.0
-                                  (Waiting runWord jumpWord) -- (AtLeast2 { firstAL2 = 'f', secondAL2 = 'o', restAL2 = "sse" })
-                                         -- $ AtLeast2 { firstAL2 = 'j', secondAL2 = 'o', restAL2 = "" })
-                                  [(100, AtLeast2 { firstAL2 = 's', secondAL2 = 'o', restAL2 = "sie" }, AtLeast2 { firstAL2 = 'l', secondAL2 = 'o', restAL2 = "llipops" })
-                                  , (200, AtLeast2 { firstAL2 = 'g', secondAL2 = 'o', restAL2 = "ut" }, AtLeast2 { firstAL2 = 't', secondAL2 = 'o', restAL2 = "i" })
-                                  , (300, AtLeast2 { firstAL2 = 'b', secondAL2 = 'o', restAL2 = "ire" }, AtLeast2 { firstAL2 = 'p', secondAL2 = 'o', restAL2 = "isse" })
-                                  ]
+                                  (Waiting runWord jumpWord)
+                                  (startTicks + (round $ 10 * timeScaling))
+                                  0
+                                  0
                                   -- start without snakes, they will be spawned as needed to maintain a
                                   -- `stable' population
                                   []
@@ -96,7 +94,9 @@ data AppState = AppState {
   , _lastTicks :: GameTime
   , _fpsEst :: Double
   , _typing :: TypingState
-  , _words :: [(Position, Word2, Word2)]
+  , _nextWordChange :: GameTime
+  , _runWordUsage :: Int
+  , _jumpWordUsage :: Int
   , _snakes :: [Snake]
   , _previousSnakeDrawingInfo :: [SnakeDrawingInfo] -- ^ see `snakeDrawInfo', needed for collision detection, drawing, making lists of currently killable snakes
   }
@@ -172,29 +172,36 @@ spawnSnake now (AppContext { _allWords=w }) (AppState { _typing=t, _snakes=s, _s
     return $ s ++ [MovingSnake startPos now killSnakeWord]
 
 
-updateAppTime :: GameTime -- ^ time
+updateAppTime :: Monad m
+              => ([Word2] -> m (Either Word2 Word2)) -- ^ action to pick new random words for hero movement
+              -> GameTime -- ^ time
               -> AppContext -- ^ application context: drawing info needed for collision detection
               -> AppState -- ^ current application state
-              -> Maybe (AppState -- ^ new state, Nothing means the game is over
-                       , HeroDrawingInfo -- ^ see `heroDrawInfo', needed for collision detection, reusable for drawing
-                       )
-updateAppTime now
+              -> m (Maybe (AppState -- ^ new state, Nothing means the game is over
+                          , HeroDrawingInfo -- ^ see `heroDrawInfo', needed for collision detection, reusable for drawing
+                          ))
+updateAppTime chooseNewWord
+              now
               context
-              s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _words=wordList, _snakes=snakes })
-  | killedByASnake snakeDrawingInfos = Nothing
-  | now > t0 = Just $ (s0 { _lastTicks=now
+              s0@(AppState { _lastTicks=t0, _sceneLastMove=sceneLastMove, _sceneOrigin=sceneOrigin, _fpsEst=fps0, _heroState=hero, _typing=typing, _nextWordChange=nextWordChange, _runWordUsage=runWordUsage, _jumpWordUsage=jumpWordUsage, _snakes=snakes })
+  | killedByASnake snakeDrawingInfos = return Nothing
+  | now > t0 = do
+      (typing', nextWordChange', runWordUsage', jumpWordUsage') <- updateHeroMovementWords
+      return $ Just $ (s0 { _lastTicks=now
                           , _sceneLastMove=newSceneLastMove
                           , _sceneOrigin=newSceneOrigin
                           , _fpsEst=(pastWeight * fps0 + timeScaling / (fromIntegral $ now - t0))
                                       / (pastWeight + 1)
                           , _heroState=hero'
                           , _typing=typing'
-                          , _words=words'
+                          , _nextWordChange=nextWordChange'
+                          , _runWordUsage=runWordUsage'
+                          , _jumpWordUsage=jumpWordUsage'
                           , _snakes=snakes'
                           , _previousSnakeDrawingInfo=snakeDrawingInfos
                           }
                        , heroDrawingInfo)
-  | otherwise = Just (s0, heroDrawingInfo)
+  | otherwise = return $ Just (s0, heroDrawingInfo)
   where pastWeight = 9 -- higher values mean more weight of the past FPS estimates in current estimate
         hero' = case hero of
                   IdleHero _ _ -> hero
@@ -233,22 +240,25 @@ updateAppTime now
             (_, True, _) -> (now, heroPos - maxScreenPos)
             (True, False, True) -> (now, sceneOrigin + 1)
             _ -> (sceneLastMove, sceneOrigin)
-        (typing', words') =
-          let noChange = (typing, wordList)
-              mbNewWords = case wordList of
-                             (x, newRun, newJump):nextWords -> Just (x, newRun, newJump, nextWords)
-                             [] -> Nothing in
-          case (typing, mbNewWords) of
-            (Waiting _ _, Nothing) -> noChange
-            (Waiting oldRun oldJump, Just (x, newRun, newJump, nextWords))
-              | heroPos > x -> (Transition (now + (round $ timeScaling / 2))
-                                           oldRun oldJump newRun newJump
-                               , nextWords)
-              | otherwise -> noChange
-            (Transition t _ _ newRun newJump, _)
-              | now > t -> (Waiting newRun newJump, wordList)
-              | otherwise -> noChange
-            (Typing _ _ _ _ _, _) -> noChange
+        updateHeroMovementWords =
+          let noChange = (typing, nextWordChange, runWordUsage, jumpWordUsage) in
+          case typing of
+            Waiting oldRun oldJump
+              | now > nextWordChange || (runWordUsage >= 3) || (jumpWordUsage >= 3) -> do
+                  let exclude = wordsInUse typing snakes'
+                  newRun <- fmap (either id id) $ chooseNewWord exclude
+                  newJump <- fmap (either id id) $ chooseNewWord $ newRun:exclude
+                  return (Transition (now + (round $ timeScaling / 2))
+                                     oldRun oldJump newRun newJump
+                         , now + (round $ 10 * timeScaling)
+                         , 0
+                         , 0)
+              | otherwise -> return noChange
+            Transition t _ _ newRun newJump
+              | now > t ->
+                  return (Waiting newRun newJump, nextWordChange, runWordUsage, jumpWordUsage)
+              | otherwise -> return noChange
+            Typing _ _ _ _ _ -> return noChange
         snakes' = filter stillVisible snakes
         stillVisible snake@(MovingSnake _ _ _) = snakePosition snake now >= sceneOrigin - snakeWidth
         stillVisible (DyingSnake _ timeout) = now <= timeout
@@ -332,6 +342,7 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
         startToRun :: GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState
         startToRun lastLetterTimeStamp run jump s = Just $ s {
           _typing=Waiting run jump
+          , _runWordUsage=1 + _runWordUsage s
           , _heroState=case _heroState s of
               IdleHero _ x0 -> RunningHero $ MUA heroAccel lastLetterTimeStamp heroSpeed x0
               RunningHero mua -> let (GS currentSpeed) = muaSpeed mua lastLetterTimeStamp
@@ -345,6 +356,7 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
         startToJump :: GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState
         startToJump lastLetterTimeStamp runWord jumpWord s = Just $ s {
           _typing=Waiting runWord jumpWord
+          , _jumpWordUsage=1 + _jumpWordUsage s
           , _heroState=case _heroState s of
               IdleHero _ x0 -> JumpingHero $ Jump x0
                                                   jumpHorizSpeed
@@ -373,7 +385,8 @@ appLoop oldState context = do
     Nothing -> return ()
     Just s1 -> do
       now <- SDL.ticks
-      case updateAppTime now context s1 of
+      mbNewState <- updateAppTime (pickWord $ _allWords context) now context s1
+      case mbNewState of
         Nothing -> return ()
         Just (nextState, heroInfo) -> do
           drawApp heroInfo nextState context
@@ -391,7 +404,7 @@ drawApp :: MonadIO m
         -> AppContext -- ^ application graphic context
         -> m ()
 drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), bbox)
-        (AppState isRed _ sceneOrigin _ _ fpsEst typing _ _ snakeDrawingInfos)
+        (AppState isRed _ sceneOrigin _ _ fpsEst typing _ _ _ _ snakeDrawingInfos)
         (AppContext { _renderer=renderer, _font=font, _catTexture=catTexture }) = do
   SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
   SDL.clear renderer
