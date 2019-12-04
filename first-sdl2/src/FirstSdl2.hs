@@ -72,6 +72,7 @@ win2 font w = do
                                   (startTicks + (round $ 10 * timeScaling))
                                   0
                                   0
+                                  0 -- starting score
                                   -- start without snakes, they will be spawned as needed to maintain a
                                   -- `stable' population
                                   []
@@ -96,6 +97,7 @@ data AppState = AppState {
   , _nextWordChange :: GameTime
   , _runWordUsage :: Int
   , _jumpWordUsage :: Int
+  , _score :: Int
   , _snakes :: [Snake]
   , _previousSnakeDrawingInfo :: [SnakeDrawingInfo] -- ^ see `snakeDrawInfo', needed for collision detection, drawing, making lists of currently killable snakes
   }
@@ -286,12 +288,13 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                          oldJump
                          cont -> if matchChar x
                                  then case xs of
-                                        [] -> cont now oldRun oldJump s0
+                                        [] -> cont now oldRun oldJump $ s0 { _score=newScore s0 }
                                         (y:ys) -> Just $ s0 { _typing=Typing (already <> (x:|[]))
                                                                              (y:|ys)
                                                                              oldRun
                                                                              oldJump
                                                                              cont
+                                                            , _score=newScore s0
                                                             }
                                  else noChange
                   Transition _
@@ -314,6 +317,7 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
   where heroAccel = GA (-3.0)
         heroSpeed = GS (15.0)
         jumpHorizSpeed = GS (5.0)
+        newScore s = _score s + (max 1 $ max (_runWordUsage s) (_jumpWordUsage s) `div` 2)
         noChange = Just s0
         matchChar = eventIsChar keymap e
         snakeKiller r j = let heroPos = heroPosition now $ _heroState s0 in
@@ -322,7 +326,9 @@ updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
                               $ killableSnakes heroPos $ _previousSnakeDrawingInfo s0
         startToType :: Word2 -> Word2 -> Word2 -> (GameTime -> Word2 -> Word2 -> AppState -> Maybe AppState) -> Maybe AppState
         startToType (AtLeast2 { firstAL2 = x, secondAL2 = n, restAL2 = xs }) r j f = 
-          Just $ s0 { _typing=Typing (x:|[]) (n:|xs) r j f }
+          Just $ s0 { _typing=Typing (x:|[]) (n:|xs) r j f
+                    , _score=newScore s0
+                    }
         killASnake :: GameTime -> GameTime -> [Snake] -> [Snake]
         killASnake _ _ [] = []
         killASnake lastLetterTimeStamp t0 (s@(MovingSnake _ u0 _):tl)
@@ -402,7 +408,7 @@ drawApp :: MonadIO m
         -> AppContext -- ^ application graphic context
         -> m ()
 drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), _)
-        (AppState _ sceneOrigin _ _ fpsEst typing _ _ _ _ snakeDrawingInfos)
+        (AppState _ sceneOrigin _ _ fpsEst typing _ _ _ score _ snakeDrawingInfos)
         (AppContext { _renderer=renderer, _font=font, _catTexture=catTexture }) = do
   SDL.rendererDrawColor renderer SDL.$= skyBlue
   SDL.clear renderer
@@ -474,6 +480,12 @@ drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), _)
                    Nothing -- use complete texture as source
                  $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (winWidth - textWidth - doneWidth) 0)
                                       $ SDL.V2 doneWidth textHeight
+  withStringTexture renderer font black (show score) $ \scoreTexture -> do
+    SDL.TextureInfo { SDL.textureWidth = scoreWidth
+                    , SDL.textureHeight = scoreHeight
+                    } <- SDL.queryTexture scoreTexture
+    SDL.copy renderer scoreTexture Nothing $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 0 0)
+                                                                $ SDL.V2 scoreWidth scoreHeight
   -- draw hero last, i.e. on top of all the rest:
   SDL.copy renderer
            texture
