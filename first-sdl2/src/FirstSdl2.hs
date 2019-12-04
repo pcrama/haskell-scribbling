@@ -10,6 +10,7 @@ module Main (main) where
 
 import qualified SDL
 import qualified SDL.Font
+import qualified SDL.Video.Renderer
 
 import Control.Concurrent     (threadDelay)
 import Control.Exception      (handle, throw)
@@ -62,8 +63,7 @@ win2 font w = do
                 startTicks <- SDL.ticks
                 runWord <- fmap (either id id) $ pickWord allWords []
                 jumpWord <- fmap (either id id) $ pickWord allWords [runWord]
-                appLoop (AppState False
-                                  startTicks
+                appLoop (AppState startTicks
                                   0
                                   (IdleHero startTicks minScreenPos)
                                   startTicks
@@ -87,8 +87,7 @@ win2 font w = do
 
 
 data AppState = AppState {
-  _isRed :: Bool
-  , _sceneLastMove :: GameTime
+  _sceneLastMove :: GameTime
   , _sceneOrigin :: Position
   , _heroState :: Hero
   , _lastTicks :: GameTime
@@ -212,7 +211,7 @@ updateAppTime chooseNewWord
                   JumpingHero jump ->
                     let maxJumpTime = jumpEndTime jump
                         (currentX, currentY) = jumpPosition jump now
-                        maxJumpHeight = winHeight `div` 2 in
+                        maxJumpHeight = horizont - heroHeight in
                     case (currentY > maxJumpHeight, now >= maxJumpTime) of
                       -- fall back to ground when jumping too high, to
                       -- penalize players trying to jump out of viewport
@@ -224,7 +223,7 @@ updateAppTime chooseNewWord
                                           $ jumpX0 jump + jumpDistance jump maxJumpTime
                       (_, _) -> hero
         heroDrawingInfo@(_, _, SDL.P (SDL.V2 heroPos _), heroBbox) =
-          heroDrawInfo now hero' (_heroTextures context) $ winHeight `div` 2
+          heroDrawInfo now hero' (_heroTextures context) horizont
         snakeDrawingInfos =
           snakeDrawInfo now newSceneOrigin snakes' $ _snakeTextures context
         killedByASnake = foldr (\s t -> killedByThisSnake s || t) False
@@ -268,7 +267,6 @@ updateAppForEvent :: SDL.Event -> AppContext -> AppState -> Maybe AppState
 updateAppForEvent (SDL.Event _t SDL.QuitEvent) _ _ = Nothing
 updateAppForEvent e@(SDL.Event now _) (AppContext { _keymap=keymap }) s0
   | eventIsPress SDL.KeycodeEscape e = Nothing
-  | eventIsPress SDL.KeycodeSpace e = Just $ s0 { _isRed = not $ _isRed s0 }
   | eventIsPress SDL.KeycodeBackspace e =
                 case _typing s0 of
                   Waiting _ _ -> noChange
@@ -403,19 +401,19 @@ drawApp :: MonadIO m
         -> AppState -- ^ current application state
         -> AppContext -- ^ application graphic context
         -> m ()
-drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), bbox)
-        (AppState isRed _ sceneOrigin _ _ fpsEst typing _ _ _ _ snakeDrawingInfos)
+drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), _)
+        (AppState _ sceneOrigin _ _ fpsEst typing _ _ _ _ snakeDrawingInfos)
         (AppContext { _renderer=renderer, _font=font, _catTexture=catTexture }) = do
-  SDL.rendererDrawColor renderer SDL.$= (if isRed then red else green)
+  SDL.rendererDrawColor renderer SDL.$= skyBlue
   SDL.clear renderer
+  SDL.rendererDrawColor renderer SDL.$= green
+  SDL.Video.Renderer.fillRect renderer
+                            $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 0 horizont)
+                                                 $ SDL.V2 winWidth $ winHeight - horizont
   SDL.rendererDrawColor renderer SDL.$= black
-  SDL.drawLine renderer (SDL.P $ SDL.V2 minScreenPos 0) (SDL.P $ SDL.V2 minScreenPos winHeight)
-  SDL.drawLine renderer (SDL.P $ SDL.V2 maxScreenPos 0) (SDL.P $ SDL.V2 maxScreenPos winHeight)
-  let y = winHeight `div` 2 + heroHeight in
-    SDL.drawLine renderer (SDL.P $ SDL.V2 0 y) (SDL.P $ SDL.V2 winWidth y)
   let fps = take 7 $ show fpsEst
   when (fpsEst > 25) $ do
-    withStringTexture renderer font (if isRed then blue else black) fps $ \fpsTexture -> do
+    withStringTexture renderer font black fps $ \fpsTexture -> do
       SDL.TextureInfo { SDL.textureWidth = textWidth
                       , SDL.textureHeight = textHeight
                       } <- SDL.queryTexture fpsTexture
@@ -448,7 +446,7 @@ drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), bbox)
           SDL.TextureInfo { SDL.textureWidth = textWidth
                           , SDL.textureHeight = textHeight
                           } <- SDL.queryTexture text
-          lSDLcopy renderer
+          SDL.copy renderer
                    text
                    Nothing -- use complete texture as source
                  $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (heroX - sceneOrigin + (heroWidth - textWidth) `div` 2)
@@ -458,8 +456,8 @@ drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), bbox)
     Waiting toRun toJump -> drawHeroTexts toRun toJump
     Transition _ _ _ toRun toJump -> drawHeroTexts toRun toJump
     Typing done toType _ _ _ ->
-      withNonEmptyTexture renderer font (if isRed then blue else black) done $ \doneTexture -> do
-        withNonEmptyTexture renderer font (if isRed then black else blue) toType $ \toTypeTexture -> do
+      withNonEmptyTexture renderer font black done $ \doneTexture -> do
+        withNonEmptyTexture renderer font blue toType $ \toTypeTexture -> do
           SDL.TextureInfo { SDL.textureWidth = textWidth
                           , SDL.textureHeight = textHeight
                           } <- SDL.queryTexture toTypeTexture
@@ -481,8 +479,6 @@ drawApp (texture, frame, SDL.P (SDL.V2 heroX heroY), bbox)
            texture
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * tileWidth) 0) $ SDL.V2 tileWidth tileHeight)
          $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (heroX - sceneOrigin) heroY) $ SDL.V2 heroWidth heroHeight
-  let (SDL.Rectangle (SDL.P (SDL.V2 bbX bbY)) dim) = bbox in
-    drawRectangle renderer (SDL.Rectangle (SDL.P (SDL.V2 (bbX - sceneOrigin) bbY)) dim)
   SDL.present renderer
 
 

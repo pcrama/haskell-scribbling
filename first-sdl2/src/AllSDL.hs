@@ -9,11 +9,13 @@ module AllSDL (
   , green
   , heroHeight
   , heroWidth
+  , horizont
   , insideRectangle
   , intersectRectangle
   , lSDLcopy
   , moveRectangle
   , red
+  , skyBlue
   , snakeHeight
   , snakeWidth
   , tileHeight
@@ -44,9 +46,10 @@ import AtLeast2
 import Physics
 
 
-winHeight, winWidth :: Position
+winHeight, winWidth, horizont :: Position
 winHeight = 480
 winWidth = 640
+horizont = winHeight - 100 -- line on which hero & snakes move
 
 
 -- | Tile dimensions as loaded from assets
@@ -70,11 +73,12 @@ snakeWidth = 64
 type ColorPlusAlpha = SDL.V4 Word8
 
 
-black, blue, green, red :: ColorPlusAlpha
+black, blue, green, red, skyBlue :: ColorPlusAlpha
 black = SDL.V4 0 0 0 0
 blue = SDL.V4 0 0 255 0
 green = SDL.V4 0 255 0 0
 red = SDL.V4 255 0 0 0
+skyBlue = SDL.V4 135 206 235 0
 
 
 withSDL :: (MonadIO m) => m a -> m ()

@@ -68,7 +68,7 @@ snakeDrawInfo now sceneOrigin (s:ss) context
   | snakePos > sceneOrigin + winWidth = []
   | otherwise = (completeTuple $ oneSnakeDrawInfo s):snakeDrawInfo now sceneOrigin ss context
   where snakePos = snakePosition s now
-        snakeXY = SDL.V2 snakePos $ winHeight `div` 2 + heroHeight - snakeHeight
+        snakeXY = SDL.V2 snakePos $ horizont - snakeHeight
         completeTuple (t, f, bbox) = (s, t, f, SDL.P snakeXY, bbox)
         oneSnakeDrawInfo (DyingSnake _ timeout) =
           let frameIdx = (round $ (fromIntegral $ timeout - now)
@@ -118,7 +118,7 @@ drawSnake :: MonadIO m
           -> Position -- ^ hero position
           -> SnakeDrawingInfo -- ^ see snakeDrawInfo
           -> m ()
-drawSnake renderer sceneOrigin font heroPos (snake, texture, frame, SDL.P (SDL.V2 x y), bbox) = do
+drawSnake renderer sceneOrigin font heroPos (snake, texture, frame, SDL.P (SDL.V2 x y), _) = do
   case snake of
     MovingSnake _ _ toKill -- draw `kill' word
       | x `snakeInUnkillablePosition` heroPos -> return () -- can't shoot backwards or if snake is too close
@@ -127,7 +127,7 @@ drawSnake renderer sceneOrigin font heroPos (snake, texture, frame, SDL.P (SDL.V
             SDL.TextureInfo { SDL.textureWidth = textWidth
                             , SDL.textureHeight = textHeight
                             } <- SDL.queryTexture text
-            lSDLcopy renderer
+            SDL.copy renderer
                      text
                      Nothing -- use complete texture as source
                    $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin + (snakeWidth - textWidth) `div` 2)
@@ -138,5 +138,3 @@ drawSnake renderer sceneOrigin font heroPos (snake, texture, frame, SDL.P (SDL.V
            texture
            (Just $ SDL.Rectangle (SDL.P $ SDL.V2 (fromIntegral frame * tileWidth) 0) $ SDL.V2 tileWidth tileHeight)
          $ Just $ SDL.Rectangle (SDL.P $ SDL.V2 (x - sceneOrigin) y) $ SDL.V2 snakeWidth snakeHeight
-  let (SDL.Rectangle (SDL.P (SDL.V2 bbX bbY)) dim) = bbox in
-    drawRectangle renderer (SDL.Rectangle (SDL.P (SDL.V2 (bbX - sceneOrigin) bbY)) dim)

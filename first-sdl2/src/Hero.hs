@@ -36,11 +36,15 @@ heroPosition now (JumpingHero jump) = fst $ jumpPosition jump now
 type HeroDrawingInfo = (SDL.Texture, Int, SDL.Point SDL.V2 Position, SDL.Rectangle Position)
 
 
-heroDrawInfo :: GameTime -> Hero -> HeroTextures -> Position -> HeroDrawingInfo
+heroDrawInfo :: GameTime -- ^ time for which to draw
+             -> Hero -- ^ hero state
+             -> HeroTextures -- ^ bitmaps
+             -> Position -- ^ base line (i.e. line on which the hero rests when idle: bottom of bitmap)
+             -> HeroDrawingInfo
 heroDrawInfo now (IdleHero t0 x0) context baseLine =
     (_heroIdleTexture context, frameIdx, SDL.P drawXY, bbox)
   where frameIdx = (round $ 4 * (now `timeDiff` t0)) `mod` 8
-        drawXY = SDL.V2 (x0 - heroWidth `div` 4) baseLine
+        drawXY = SDL.V2 (x0 - heroWidth `div` 4) $ baseLine - heroHeight
         bbox = mkBbox drawXY $ case frameIdx of
           0 -> (17, 34, 27, 30)
           1 -> (81 - 1 * tileWidth, 36, 26, 28)
@@ -59,7 +63,7 @@ heroDrawInfo now (RunningHero mua) context baseLine =
                   then fromIntegral distance
                   else (round $ 5 * (now `timeDiff` muaT0 mua))
                  ) `mod` 3 -- frames
-      drawXY = SDL.V2 (muaX0 mua + distance - heroWidth `div` 4) baseLine
+      drawXY = SDL.V2 (muaX0 mua + distance - heroWidth `div` 4) $ baseLine - heroHeight
       GS speed = muaSpeed mua now in
     (_heroTexture context
      -- switch from speed based animation to time based to maintain illusion
@@ -78,7 +82,7 @@ heroDrawInfo now (JumpingHero jump) context baseLine =
       frameCount = 5
       (x, y) = jumpPosition jump now
       frameIdx = abs $ (step `mod` (frameCount * 2 - 2)) - (frameCount - 1)
-      drawXY = SDL.V2 (x - heroWidth `div` 4) (baseLine - y)
+      drawXY = SDL.V2 (x - heroWidth `div` 4) (baseLine - heroHeight - y)
       bbox = mkBbox drawXY $ case frameIdx of
         0 -> (17, 36, 27, 28)
         1 -> (81 - 1 * tileWidth, 29, 26, 33)
