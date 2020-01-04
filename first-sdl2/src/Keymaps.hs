@@ -1,5 +1,6 @@
 module Keymaps (
-  azerty_on_qwerty
+  KeymapLookup
+  , azerty_on_qwerty
   , qwerty_on_qwerty
 )
 where
@@ -9,8 +10,9 @@ import qualified SDL
 
 type Keymap = [(SDL.Keycode, Char)]
 
+type KeymapLookup = SDL.Keycode -> Maybe Char
 
-azerty_on_qwerty :: SDL.Keycode -> Maybe Char
+azerty_on_qwerty :: KeymapLookup
 azerty_on_qwerty = flip lookup azerty_on_qwerty_data
 
 

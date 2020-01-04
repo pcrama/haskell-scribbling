@@ -34,8 +34,8 @@ import Snake
 type Word2 = AtLeast2 Char
 
 
-win2 :: MonadIO m => SDL.Font.Font -> SDL.Window -> m ()
-win2 font w = do
+win2 :: MonadIO m => SDL.Font.Font -> KeymapLookup -> SDL.Window -> m ()
+win2 font keymapLookup w = do
     renderer <- liftIO $ handle ((\e -> do
                                     backupRendererIndex <- getSoftwareRendererIndex
                                     case backupRendererIndex of
@@ -82,7 +82,7 @@ win2 font w = do
                                    (HeroTextures heroTexture heroIdleTexture heroJumpTexture)
                                    catTexture
                                    (SnakeTextures snakeTexture snakeDieTexture)
-                                   azerty_on_qwerty
+                                   keymapLookup
                                    allWords
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
 
@@ -109,7 +109,7 @@ data AppContext = AppContext {
   , _heroTextures :: HeroTextures
   , _catTexture :: SDL.Texture
   , _snakeTextures :: SnakeTextures
-  , _keymap :: SDL.Keycode -> Maybe Char
+  , _keymap :: KeymapLookup
   , _allWords :: NonEmpty Word2
   }
 
@@ -612,15 +612,27 @@ loadAllWords = pure $ traverse atLeast2 [
   ] >>= nonEmpty
 
 
+cmdLineArgsFail :: String -> IO ()
+cmdLineArgsFail = putStrLn
+
+
 main :: IO ()
 main = do
   withSDL $ do
     getArgs >>= \case
       [] -> putStrLn "Second demo only with a font...\n\
                      \cabal new-run first-sdl2 \"$(fc-match --format \"%{file}\")\""
-      [fontPath] ->
-        withSDLFont fontPath 72 $ \font ->
-          withWindow "Typing hero"
-                     (fromIntegral winWidth, fromIntegral winHeight)
-                   $ win2 font
-      _ -> putStrLn "Only one font allowed"
+      (fontPath:args) ->
+        maybe (cmdLineArgsFail "azerty (default) or qwerty")
+              (\keymapLookup ->
+                 withSDLFont fontPath 72 $ \font ->
+                   withWindow "Typing hero"
+                              (fromIntegral winWidth, fromIntegral winHeight)
+                            $ win2 font keymapLookup)
+            $ case args of
+                [] -> Just azerty_on_qwerty
+                ["a"] -> Just azerty_on_qwerty
+                ["azerty"] -> Just azerty_on_qwerty
+                ["q"] -> Just qwerty_on_qwerty
+                ["qwerty"] -> Just qwerty_on_qwerty
+                _ -> Nothing
