@@ -1,144 +1,101 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- Was example from https://github.com/chpatrick/haskell-hidapi/
 --
--- Open and dump the first HID device. Should print deltas (?) for a USB mouse.
+-- Should print deltas (?) for a USB mouse.
 -- You need root or a udev rule for your device.
 -- https://github.com/signal11/hidapi/blob/master/udev/99-hid.rules
 -- This seems to claim the device until it is unplugged.
 --
--- I adapted it to look for a specific device (optical mouse)
+-- I adapted it to look for a specific device (optical mouse or OnlyKey)
 
-import Control.Concurrent (mkWeakMVar, newEmptyMVar, takeMVar, tryPutMVar)
-import Control.Exception (mask_)
+import Control.Concurrent (threadDelay)
 import Control.Monad
-import Data.Functor (($>))
-import Data.List (find, intercalate)
-import Text.Printf (printf)
+import Data.Char (chr)
+import Data.Int
+import Data.List (intercalate)
 import qualified Data.ByteString as BS
-import Data.Vector as V ((!), toList)
-import qualified System.HIDAPI as HID
-import System.Environment (getArgs)
-import System.Exit (exitFailure)
-import System.IO
-import System.USB
+import System.HIDAPI as HID
+
+showHex :: Integral a => a -> String
+showHex = go ""
+  where go s x | x < 16 = s ++ (hexChar x:"")
+               | otherwise = let hd = x `div` 16
+                                 tl = x `mod` 16
+                             in go s hd ++ (hexChar tl:"")
+        hexChar = ("0123456789abcdef" !!) . fromIntegral
+
+ascii :: Integral a => a -> String
+ascii x | 32 <= x && x < 127 = (chr $ fromIntegral x):""
+        | otherwise = "<" ++ showHex x ++ ">"
+
+asciiString :: BS.ByteString -> String
+asciiString = intercalate " " . map ascii . BS.unpack
+
+pp :: DeviceInfo -> String
+pp di = "di:path=" ++ show (path di)
+     ++ "\n   vendorId=" ++ showHex (vendorId di)
+     ++ "\n   productId=" ++ showHex (productId di)
+     ++ "\n   serialNumber=" ++ show (serialNumber di)
+     ++ "\n   releaseNumber=" ++ show (releaseNumber di)
+     ++ "\n   manufacturerString=" ++ show (manufacturerString di)
+     ++ "\n   productString=" ++ show (productString di)
+     ++ "\n   usagePage=" ++ showHex (usagePage di)
+     ++ "\n   usage=" ++ show (usage di)
+     ++ "\n   interfaceNumber=" ++ show (interfaceNumber di)
+
+
+useOnlyKey :: DeviceInfo -> IO ()
+useOnlyKey di = do -- OnlyKey
+    d <- openDeviceInfo di
+    r <- HID.write d $ BS.pack $ take 32 $ [255, 255, 255, 255, 229] ++ repeat 0
+    putStrLn $ "Write returned 0x" ++ showHex r
+    threadDelay 500000
+    putStrLn "Reading..."
+    _ <- sequence $ replicate 12 $ do
+      bs <- HID.read d 16
+      putStrLn $ asciiString bs
+    putStrLn " ... Done"
+    putStrLn "..."
+    close d
+
+-- | Detect correct DeviceInfo for OnlyKey
+-- The OnlyKey yields several DeviceInfo matching the desired vendor &
+-- product ID, yet only one of them can be used for
+-- communicating.  Selecting it is based on the following Python code:
+--
+--              # https://github.com/trustcrypto/python-onlykey/blob/946f9ab657a14dad5dfb09f2d00d2d67ac38a78d/onlykey/client.py
+--              # lines 181-189
+--              if (vendor_id, product_id) in DEVICE_IDS:
+--                  if serial_number == '1000000000':
+--                      if usage_page == 0xffab or interface_number == 2:
+--                          self._hid.open_path(path)
+--                          self._hid.set_nonblocking(True)
+--                  else:
+--                      if usage_page == 0xf1d0 or interface_number == 1:
+--                          self._hid.open_path(path)
+--                          self._hid.set_nonblocking(True)
+checkUsagePageAndInterfaceNumber :: DeviceInfo -> Bool
+checkUsagePageAndInterfaceNumber di
+  | serialNumber di == Just "1000000000" = usagePage di == 0xffab || interfaceNumber di == 2
+  | otherwise                            = usagePage di == 0xf1d0 || interfaceNumber di == 1
 
 main :: IO ()
-main = do
-  args <- getArgs
-  let mbIds =
-        case args of
-          [] -> Just (0x1d50, 0x60fc) -- default vendorId & productId of onlykey
-          [vendorIdStr, productIdStr] -> Just (read vendorIdStr, read productIdStr)
-          _ -> Nothing
-  case mbIds of
-    Nothing -> fail "two arguments or nothing"
-    Just (vendorId, productId) -> doMain vendorId productId
-
-doMain :: HID.VendorID -> HID.ProductID -> IO ()
-doMain vendorId productId = do
-  -- Initialization:
-  ctx <- newCtx
-  setDebug ctx PrintDebug
-
-  -- Device retrieval:
-  dev <- if ctx `hasCapability` HasHotplug
-         then waitForMyDevice ctx vendorId productId
-         else findMyDevice ctx vendorId productId
-
-  -- Device usage:
-  doSomethingWithDevice dev
-
-waitForMyDevice :: Ctx -> HID.VendorID -> HID.ProductID -> IO Device
-waitForMyDevice ctx vendorId productId = do
-  putStrLn "Waiting for device attachment..."
-  mv <- newEmptyMVar
-  mask_ $ do
-    h <- registerHotplugCallback ctx
-                                 deviceArrived
-                                 enumerate
-                                 (Just vendorId)
-                                 (Just productId)
-                                 Nothing
-                                 (\dev event ->
-                                    tryPutMVar mv (dev, event) $>
-                                      DeregisterThisCallback)
-    void $ mkWeakMVar mv $ deregisterHotplugCallback h
-  (dev, _event) <- takeMVar mv
-  return dev
-
--- Enumerate all devices and find the right one.
-findMyDevice :: Ctx -> HID.VendorID -> HID.ProductID -> IO Device
-findMyDevice ctx vendorId productId = do
-    devs <- toList <$> getDevices ctx
-    deviceDescs <- mapM getDeviceDesc devs
-    case fmap fst $ find (match . snd) $ zip devs deviceDescs of
-      Nothing  -> hPutStrLn stderr "Mouse not found" >> exitFailure
-      Just dev -> return dev
-  where
-    match :: DeviceDesc -> Bool
-    match devDesc =  deviceVendorId  devDesc == vendorId
-                  && deviceProductId devDesc == productId
-
-doSomethingWithDevice :: Device -> IO ()
-doSomethingWithDevice dev = do
-  putStrLn $ unlines $ deviceInfo dev
-
-  putStrLn "Opening device..."
-  withDeviceHandle dev $ \devHndl -> do
-
-    putStrLn "Detaching kernel driver..."
-    withDetachedKernelDriver devHndl 0 $ do
-
-      putStrLn "Claiming interface..."
-      withClaimedInterface devHndl 0 $ do
-
-        -- Inspecting descriptors:
-        config0 <- getConfigDesc dev 0
-        let interface0 = configInterfaces config0 ! 0
-            alternate0 = interface0 ! 0
-            endpoint1  = interfaceEndpoints alternate0 ! 0
-            mps        = maxPacketSize $ endpointMaxPacketSize endpoint1
-            timeout    = 5000
-
-        printf "maxPacketSize = %i\n" mps
-
-        putStrLn "Creating transfer..."
-        readTrans <- newReadTransfer
-                       InterruptTransfer
-                       devHndl
-                       (endpointAddress endpoint1)
-                       0
-                       timeout
-
-        -- Performing I/O:
-        let n = 3 :: Int
-        forM_ [0..n-1] $ \i -> do
-          let size = (2^i) * mps
-
-          _ <- printf "(%i/%i) reading %i bytes during a maximum of %i ms...\n"
-                      (i+1) n size timeout
-
-          setReadTransferSize readTrans size
-
-          (bs, status) <- performReadTransfer readTrans
-
-          when (status == TimedOut) $ putStrLn "Reading timed out!"
-          _ <- printf "Read %i bytes:\n" $ BS.length bs
-          printBytes bs
-
-deviceInfo :: Device -> [String]
-deviceInfo dev =
-  [ printf "deviceSpeed:   %s" (maybe "-" show $ deviceSpeed dev)
-  , printf "busNumber:     %s" (show $ busNumber dev)
-  , printf "portNumber:    %s" (show $ portNumber dev)
-  , printf "portNumbers:   %s" (maybe "-" (show . toList) $
-                                  portNumbers dev 7)
-  , printf "deviceAddress: %s" (show $ deviceAddress dev)
-  ]
-
-printBytes :: BS.ByteString -> IO ()
-printBytes = putStrLn . intercalate " " . map (printf "0x%02x") . BS.unpack
-
--- requestLabels :: WriteExactAction
--- requestLabels bs timeoutMs = do
+main = withHIDAPI $ do
+  dis <- enumerateAll
+  forM_ dis $ \di -> do
+    putStrLn $ "\n----\n" ++ pp di
+    case (vendorId di, productId di) of
+      (0x15ca, _) -> do -- Optical mouse
+        d <- openDeviceInfo di
+        forM_ (replicate 10 ()) $ \_ -> do
+          bs <- HID.read d 6
+          putStr (show (fromIntegral (BS.index bs 1) :: Int8))
+          putChar ' '
+          print (fromIntegral (BS.index bs 2) :: Int8)
+        close d
+      (0x1d50, 0x60fc)
+        | checkUsagePageAndInterfaceNumber di -> useOnlyKey di
+        | otherwise -> putStrLn "Ignoring (0x1d50, 0x60fc)"
+      (0x16c0, 0x0486)
+        | checkUsagePageAndInterfaceNumber di -> useOnlyKey di
+        | otherwise -> putStrLn "Ignoring (0x16c0, 0x0486)"
+      _ -> putStrLn "NOP"
