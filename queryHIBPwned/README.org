@@ -1,0 +1,28 @@
+#+TITLE: Query Have I Been Pwned?
+#+AUTHOR: Philippe Crama
+
+* Introduction
+HaveIBeenPwned.com allows to query if a user ID or a password has been exposed
+during a data breach.  This tool parses ~.netrc~ files for a list of
+credentials to check.
+
+This project is also an exercise in Haskell to produce source code that is
+easily audited: the goal is to demonstrate easily that the program does not
+steal your credentials.
+
+* Structure
+** Guaranteeing the tool cannot leak passwords
+Wrap the password in a ~newtype~ with a custom ~Show~ instance that only
+prints ~*~ and only allows to compare against a given SHA1 and to extract
+the first 3 bytes of the SHA1.
+
+This leaves the parsing code that must wrap the secrets as soon as possible.
+#+begin_src haskell :exports code
+  data Entry = Entry {
+      scheme :: Maybe Text
+    , machine :: Text
+    , login :: Text
+    , account :: Maybe Password
+    , password :: Password
+  } deriving (Show, Eq)
+#+end_src
