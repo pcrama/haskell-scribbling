@@ -67,6 +67,9 @@ library
 
   -- LANGUAGE extensions used by modules in this package.
   default-extensions:  OverloadedStrings
+                     , DeriveFoldable
+                     , DeriveFunctor
+                     , DeriveTraversable
 
   -- Directories containing source files.
   hs-source-dirs:      src

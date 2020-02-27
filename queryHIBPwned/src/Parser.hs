@@ -1,11 +1,15 @@
 module Parser
 ( Entry(..)
+, Netrc(..)
 , ParsedEntry(..)
+, foldrNetrc
 , netrcNamedEntry
+, netrcParser
 , validateParsedEntry
 )
 where
 
+import           Control.Monad (void)
 import qualified Data.Text as T
 import           Data.Maybe (catMaybes)
 import           Data.Void (Void)
@@ -18,7 +22,6 @@ import Password (Password, isPasswordChar, mkPassword)
 
 data Entry = Entry {
     scheme :: Maybe T.Text
-  , machine :: T.Text
   , login :: T.Text
   , account :: Maybe Password
   , password :: Password
@@ -26,12 +29,29 @@ data Entry = Entry {
 
 
 data ParsedEntry = ParsedEntry {
-    parsedMachine :: T.Text
-  , parsedSchemes :: [T.Text]
+    parsedSchemes :: [T.Text]
   , parsedLogins :: [T.Text]
   , parsedPasswords :: [Password]
   , parsedAccounts :: [Password]
 } deriving (Show)
+
+
+-- | A .netrc file's content
+--
+-- Parameterize with ParsedEntry & Entry
+data Netrc a = Netrc [(T.Text, a)] -- ^ named entry
+                     (Maybe (a -- ^ default entry
+                            , [(T.Text, a)] -- ^ named entries after default entry
+                            ))
+  deriving (Show, Functor, Foldable, Traversable)
+
+
+foldrNetrc :: ((Maybe T.Text, a) -> b -> b) -> b -> Netrc a -> b
+foldrNetrc f b0 (Netrc before mbRest) = foldr f' b1 before
+  where b1 = case mbRest of
+                  Just (def, after) -> f (Nothing, def) $ foldr f' b0 after
+                  Nothing -> b0
+        f' (machineName, pe) b = f (Just machineName, pe) b
 
 
 type Parser = P.Parsec Void T.Text
@@ -88,46 +108,68 @@ netrcAccount :: Parser Password
 netrcAccount = mkPasswordParser "account" "secondary secret"
 
 
-netrcNamedEntry :: Parser ParsedEntry
+netrcParser :: Parser (Netrc ParsedEntry)
+netrcParser = do
+  void $ netrcSpace
+  beforeDefault <- P.many netrcNamedEntry
+  mbDefaultEntry <- P.optional netrcDefaultEntry
+  case mbDefaultEntry of
+    Just defaultEntry -> do
+      afterDefault <- P.many netrcNamedEntry
+      void $ P.eof
+      return $ Netrc beforeDefault $ Just (defaultEntry, afterDefault)
+    Nothing -> do
+      void $ P.eof
+      return $ Netrc beforeDefault Nothing
+
+
+netrcNamedEntry :: Parser (T.Text, ParsedEntry)
 netrcNamedEntry = do
-  machn <- netrcSpace *> netrcMachine
-  acc machn [] [] [] []
-  where acc m schemes logins passwords accounts = do
+  machn <- netrcMachine
+  details <- gatherEntryDetails 
+  return (machn, details)
+
+
+netrcDefaultEntry :: Parser ParsedEntry
+netrcDefaultEntry = L.symbol netrcSpace "default" *> gatherEntryDetails
+
+
+gatherEntryDetails :: Parser ParsedEntry
+gatherEntryDetails = acc [] [] [] []
+  where acc :: [T.Text] -> [T.Text] -> [Password] -> [Password] -> Parser ParsedEntry
+        acc schemes logins passwords accounts = do
           mbS <- P.optional netrcScheme
           case mbS of
-            Just s -> acc m (schemes ++ [s]) logins passwords accounts
+            Just s -> acc (schemes ++ [s]) logins passwords accounts
             Nothing -> do
               mbL <- P.optional netrcLogin
               case mbL of
-                Just l -> acc m schemes (logins ++ [l]) passwords accounts
+                Just l -> acc schemes (logins ++ [l]) passwords accounts
                 Nothing -> do
                   mbP <- P.optional netrcPassword
                   case mbP of
-                    Just p -> acc m schemes logins (passwords ++ [p]) accounts
+                    Just p -> acc schemes logins (passwords ++ [p]) accounts
                     Nothing -> do
                       mbA <- P.optional netrcAccount
                       case mbA of
-                        Just a -> acc m schemes logins passwords (accounts ++ [a])
+                        Just a -> acc schemes logins passwords (accounts ++ [a])
                         Nothing -> return ParsedEntry {
-                            parsedMachine = m
-                          , parsedSchemes = schemes
-                          , parsedLogins = logins
-                          , parsedPasswords = passwords
-                          , parsedAccounts = accounts
-                          }
+                                              parsedSchemes = schemes
+                                            , parsedLogins = logins
+                                            , parsedPasswords = passwords
+                                            , parsedAccounts = accounts
+                                            }
 
 
 validateParsedEntry :: ParsedEntry -> Either [String] Entry
 validateParsedEntry (ParsedEntry {
-    parsedMachine = ma
-  , parsedSchemes = sc
+    parsedSchemes = sc
   , parsedLogins = lo
   , parsedPasswords = pa
   , parsedAccounts = ac
   }) = case (validateSchemes, validateLogins, validatePasswords, validateAccounts) of
          (Right schm, Right lgn, Right psswrd, Right accnt) ->
-           Right Entry { machine = ma
-                       , scheme = schm
+           Right Entry { scheme = schm
                        , login = lgn
                        , password = psswrd
                        , account = accnt
