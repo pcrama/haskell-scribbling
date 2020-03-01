@@ -7,6 +7,8 @@ import           Text.Megaparsec (runParser, errorBundlePretty)
 
 import Parser
 import Password
+import AppMonadSpec
+
 
 testValidPassword :: (String, String, String, SHA1Prefix) -> SpecWith ()
 testValidPassword (pw, sh, sha1, prefix) = describe (pw ++ " " ++ sha1) $ do
@@ -179,6 +181,14 @@ main = hspec $ do
                                             , parsedPasswords = [pw, ac]
                                             , parsedAccounts = [ac, ac, ac]
                                             }
+      describe "Example 4" $
+        testValidateParsedEntry (Left ["Exactly one of login"
+                                      , "password is mandatory"])
+                                ParsedEntry { parsedSchemes = ["validation"]
+                                            , parsedLogins = ["a", "error"]
+                                            , parsedPasswords = []
+                                            , parsedAccounts = []
+                                            }
     describe "foldrNetrc" $ do
       it "transforms Netrc into a list" $
         (foldrNetrc (:) [] $ Netrc [("M1", ()), ("M2", ())] $ Just ((), [("M3", ())]))
@@ -245,3 +255,4 @@ main = hspec $ do
                                              , parsedPasswords = []
                                              , parsedAccounts = [fromJust $ mkPassword "A5"]})]))
             ]
+  testAppMonad
