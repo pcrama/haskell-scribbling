@@ -21,7 +21,7 @@ testValidPassword (pw, sh, sha1, prefix) = describe (pw ++ " " ++ sha1) $ do
        $ compareWithSha1 p sha1
       it "does not match wrong sha1"
        $ not $ compareWithSha1 p wrongSha1
-      it "returns first 3 bytes of SHA1"
+      it "returns first 5 nibbles of SHA1"
        $ sha1Prefix p `shouldBe` prefix
       it "masks password in output"
        $ (show p) `shouldBe` sh
@@ -110,12 +110,19 @@ main = hspec $ do
             "********",
             -- echo -n "Test1234" | sha1sum
             "dddd5d7b474d2c78ebbb833789c4bfd721edf4bf",
-            SHA1Prefix 0xdd 0xdd 0x5d),
+            -- only 5 nibbles ------v this one is always 0
+            SHA1Prefix 0xdd 0xdd 0x50),
+           -- Example from https://www.troyhunt.com/ive-just-launched-pwned-passwords-version-2/
+           ("P@ssw0rd",
+            "********",
+            "21BD12DC183F740EE76F27B78EB39C8AD972A757",
+            SHA1Prefix 0x21 0xbd 0x10),
            ("ThisIsMyPassword",
             "****************",
             -- echo -n "ThisIsMyPassword" | sha1sum
             "30b8bd5829888900d15d2bbe6270d9bc65b0702f",
-            SHA1Prefix 0x30 0xb8 0xbd)]
+            -- only 5 nibbles ------v this one is always 0
+            SHA1Prefix 0x30 0xb8 0xb0)]
     flip mapM_ [(" ", "Space"),
                 ("\x80", "Codepoint >= 128")] $ \(pw, title) ->
            it ("only accepts ASCII chars (reject " ++ title ++ ")") $

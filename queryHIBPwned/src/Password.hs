@@ -43,11 +43,11 @@ mkPassword t = do
   let s = map C.toLower . SHA.showDigest . SHA.sha1 $ lb
   guard $ all C.isHexDigit s
   case s of
-    (a:b:c:d:e:f:_) ->
+    (a:b:c:d:e:_) ->
       Just $ Password s
                       (SHA1Prefix (toWord8 a b)
                                   (toWord8 c d)
-                                  (toWord8 e f))
+                                  (toWord8 e '0'))
                     $ T.length t
     _ -> Nothing
   where ordWord8 = fromIntegral . C.ord
