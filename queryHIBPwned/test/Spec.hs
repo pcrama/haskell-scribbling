@@ -1,5 +1,6 @@
 module Main where
 
+import qualified Data.ByteString.Lazy.Char8 as L8
 import           Data.Maybe (fromJust, maybe)
 import qualified Data.Text as T
 import           Test.Hspec
@@ -10,8 +11,8 @@ import Password
 import AppMonadSpec
 
 
-testValidPassword :: (String, String, String, SHA1Prefix) -> SpecWith ()
-testValidPassword (pw, sh, sha1, prefix) = describe (pw ++ " " ++ sha1) $ do
+testValidPassword :: (String, String, L8.ByteString, SHA1Prefix) -> SpecWith ()
+testValidPassword (pw, sh, sha1, prefix) = describe (pw ++ " " ++ L8.unpack sha1) $ do
   let wrongSha1 = "ffffffffffffffffffffffffffffffffffffffff"
   let mbP = mkPassword $ T.pack pw
   it "can be wrapped" $ maybe False (const True) mbP

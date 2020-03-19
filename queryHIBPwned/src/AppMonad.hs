@@ -6,6 +6,7 @@ module AppMonad (
 )
 where
 
+import qualified Data.ByteString.Lazy.Char8 as L
 import           Data.Either (either)
 import           Data.List (intercalate, nub)
 import           Data.Maybe (maybe)
@@ -32,7 +33,7 @@ class Monad m => AppMonad m where
   -- | Send a password's SHA1 prefix to HIBPwned to query if the password
   --   is known in any clear text leak.
   queryPassword :: SHA1Prefix -- ^ SHA1 prefix
-                -> m (Either String [(String, Int)]) -- ^ list of SHA1 values and counts
+                -> m (Either String [(L.ByteString, Int)]) -- ^ list of SHA1 values and counts
   -- | Send a user name to HIBPwned to check if the user name was in a
   --   leaked database.
   queryUsername :: T.Text -- ^ user name
@@ -41,7 +42,7 @@ class Monad m => AppMonad m where
   putLog :: String -> m ()
 
 
-passwordPopularity :: Password -> [(String, Int)] -> Int
+passwordPopularity :: Password -> [(L.ByteString, Int)] -> Int
 passwordPopularity p = sum . map snd . filter isMatchingPassword
   where isMatchingPassword (sha1, _) = compareWithSha1 p sha1
 

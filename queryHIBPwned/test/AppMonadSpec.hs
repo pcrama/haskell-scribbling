@@ -4,6 +4,7 @@ module AppMonadSpec (
 where
 
 import           Control.Monad.RWS (MonadWriter, RWS, ask, evalRWS, tell)
+import qualified Data.ByteString.Lazy.Char8 as L8
 import           Data.Char (intToDigit)
 import           Data.Maybe (fromJust, maybe)
 import qualified Data.Text as T
@@ -13,7 +14,7 @@ import AppMonad
 import Password
 
 
-data AppMonadTestEnv = AMTE T.Text [(SHA1Prefix, Either String [(String, Int)])] [(T.Text, Either String [String])]
+data AppMonadTestEnv = AMTE T.Text [(SHA1Prefix, Either String [(L8.ByteString, Int)])] [(T.Text, Either String [String])]
 
 
 data TestAction = QPassword SHA1Prefix | QUser T.Text | Log String
@@ -44,7 +45,7 @@ instance AppMonad (RW AppMonadTestEnv [TestAction]) where
   putLog = tell1 . Log
 
 
-mkTestEnv :: T.Text -> [(SHA1Prefix, Either String [(String, Int)])] -> [(T.Text, Either String [String])] -> AppMonadTestEnv
+mkTestEnv :: T.Text -> [(SHA1Prefix, Either String [(L8.ByteString, Int)])] -> [(T.Text, Either String [String])] -> AppMonadTestEnv
 mkTestEnv input passwords users =
   AMTE input
        (map prependSHA1prefix passwords)
@@ -52,42 +53,42 @@ mkTestEnv input passwords users =
   where prependSHA1prefix (p, errorMsg@(Left _)) = (p, errorMsg)
         prependSHA1prefix (p@(SHA1Prefix a b c), Right result) =
           let toS x tl = (intToDigit $ fromIntegral x `div` 16):(intToDigit $ fromIntegral x `mod` 16):tl
-              prefix = toS a . toS b . toS c
+              prefix s = (L8.pack $ toS a $ toS b $ toS c []) <> s
               modifyFirst f (x, y) = (f x, y) in
           (p, Right $ map (modifyFirst prefix) result)
 
 
--- for x in Test1234 password PassWord P@ssw0rd LetMeIn W34kP@55w0rd ApiFailure ; do echo -n "$x" | sha1sum | sed -e 's/\(..\)\(..\)\(..\)\([^ ]*\).*/-- (SHA1Prefix 0x\1 0x\2 0x\3, Right [("\4", 1)])/'; done
--- (SHA1Prefix 0xdd 0xdd 0x5d, Right [("7b474d2c78ebbb833789c4bfd721edf4bf", 1)])
--- (SHA1Prefix 0x5b 0xaa 0x61, Right [("e4c9b93f3f0682250b6cf8331b7ee68fd8", 1)])
--- (SHA1Prefix 0xf5 0xd8 0xcf, Right [("270e82cff012babb306319ffa13983a45d", 1)])
--- (SHA1Prefix 0x21 0xbd 0x12, Right [("dc183f740ee76f27b78eb39c8ad972a757", 1)])
--- (SHA1Prefix 0x1a 0x3c 0xfa, Right [("b60ad0b26227f0fbc349049c1a045ba486", 1)])
--- (SHA1Prefix 0xfd 0xf4 0xef, Right [("89f02ae8c051f74eb2ee2547616ac0139b", 1)])
--- (SHA1Prefix 0xb0 0x96 0x51, Right [("9f26d388d060453cf6f9bcbfe2f3244e1f", 1)])
-passwordDatabase :: [(SHA1Prefix, Either String [(String, Int)])]
+-- for x in Test1234 password PassWord P@ssw0rd LetMeIn W34kP@55w0rd ApiFailure ; do echo -n "$x" | sha1sum | sed -e 's/\(..\)\(..\)\(.\)\([^ ]*\).*/-- (SHA1Prefix 0x\1 0x\2 0x\30, Right [("\4", 1)])/'; done
+-- (SHA1Prefix 0xdd 0xdd 0x50, Right [("d7b474d2c78ebbb833789c4bfd721edf4bf", 1)])
+-- (SHA1Prefix 0x5b 0xaa 0x60, Right [("1e4c9b93f3f0682250b6cf8331b7ee68fd8", 1)])
+-- (SHA1Prefix 0xf5 0xd8 0xc0, Right [("f270e82cff012babb306319ffa13983a45d", 1)])
+-- (SHA1Prefix 0x21 0xbd 0x10, Right [("2dc183f740ee76f27b78eb39c8ad972a757", 1)])
+-- (SHA1Prefix 0x1a 0x3c 0xf0, Right [("ab60ad0b26227f0fbc349049c1a045ba486", 1)])
+-- (SHA1Prefix 0xfd 0xf4 0xe0, Right [("f89f02ae8c051f74eb2ee2547616ac0139b", 1)])
+-- (SHA1Prefix 0xb0 0x96 0x50, Right [("19f26d388d060453cf6f9bcbfe2f3244e1f", 1)])
+passwordDatabase :: [(SHA1Prefix, Either String [(L8.ByteString, Int)])]
 passwordDatabase = [
-    (SHA1Prefix 0xdd 0xdd 0x5d, Right [("7b474d2c78ebbb833789c4bfd721edf4bf", 1)
-                                      ,("ffffffffffffffffffffffffffffffffff", 2)
-                                      ,("0000000000000000000000000000000000", 3)])
-  , (SHA1Prefix 0x5b 0xaa 0x61, Right [("e4c9b93f3f0682250b6cf8331b7ee68fd8", 1)
-                                      ,("ffffffffffffffffffffffffffffffffff", 2)
-                                      ,("0000000000000000000000000000000000", 3)])
-  , (SHA1Prefix 0xf5 0xd8 0xcf, Right [("270e82cff012babb306319ffa13983a45d", 1)
-                                      ,("ffffffffffffffffffffffffffffffffff", 2)
-                                      ,("0000000000000000000000000000000000", 3)])
-  , (SHA1Prefix 0x21 0xbd 0x12, Right [("dc183f740ee76f27b78eb39c8ad972a757", 1)
-                                      ,("ffffffffffffffffffffffffffffffffff", 2)
-                                      ,("0000000000000000000000000000000000", 3)])
-  , (SHA1Prefix 0x1a 0x3c 0xfa, Right [("b60ad0b26227f0fbc349049c1a045ba486", 1)
-                                      ,("ffffffffffffffffffffffffffffffffff", 2)
-                                      ,("0000000000000000000000000000000000", 3)])
-  , (SHA1Prefix 0xfd 0xf4 0xef, Right [("89f02ae8c051f74eb2ee2547616ac0139b", 1)
-                                      ,("ffffffffffffffffffffffffffffffffff", 2)
-                                      ,("0000000000000000000000000000000000", 3)])
-  , (SHA1Prefix 0xb0 0x96 0x51, Left "400 HTTP error code")
+    (SHA1Prefix 0xdd 0xdd 0x50, Right [("d7b474d2c78ebbb833789c4bfd721edf4bf", 1)
+                                      ,("fffffffffffffffffffffffffffffffffff", 2)
+                                      ,("f0000000000000000000000000000000000", 3)])
+  , (SHA1Prefix 0x5b 0xaa 0x60, Right [("1e4c9b93f3f0682250b6cf8331b7ee68fd8", 1)
+                                      ,("fffffffffffffffffffffffffffffffffff", 2)
+                                      ,("00000000000000000000000000000000000", 3)])
+  , (SHA1Prefix 0xf5 0xd8 0xc0, Right [("f270e82cff012babb306319ffa13983a45d", 1)
+                                      ,("fffffffffffffffffffffffffffffffffff", 2)
+                                      ,("00000000000000000000000000000000000", 3)])
+  , (SHA1Prefix 0x21 0xbd 0x10, Right [("2dc183f740ee76f27b78eb39c8ad972a757", 1)
+                                      ,("fffffffffffffffffffffffffffffffffff", 2)
+                                      ,("00000000000000000000000000000000000", 3)])
+  , (SHA1Prefix 0x1a 0x3c 0xf0, Right [("ab60ad0b26227f0fbc349049c1a045ba486", 1)
+                                      ,("fffffffffffffffffffffffffffffffffff", 2)
+                                      ,("00000000000000000000000000000000000", 3)])
+  , (SHA1Prefix 0xfd 0xf4 0xe0, Right [("f89f02ae8c051f74eb2ee2547616ac0139b", 1)
+                                      ,("fffffffffffffffffffffffffffffffffff", 2)
+                                      ,("00000000000000000000000000000000000", 3)])
+  , (SHA1Prefix 0xb0 0x96 0x50, Left "400 HTTP error code")
   -- echo -n "ImagineThisPasswordHasNeverBeenHacked" | sha1sum
-  , (SHA1Prefix 0xc9 0x4f 0x63, Right [-- ("d599fdf54038eea16cd266f8337c510b88", 0),
+  , (SHA1Prefix 0xc9 0x4f 0x60, Right [-- ("3d599fdf54038eea16cd266f8337c510b88", 0),
                                        ("ffffffffffffffffffffffffffffffffff", 2)
                                       ,("0000000000000000000000000000000000", 3)])
   ]
@@ -105,7 +106,7 @@ userDatabase = [
 
 runTest :: Maybe String
         -> T.Text
-        -> [(SHA1Prefix, Either String [(String, Int)])]
+        -> [(SHA1Prefix, Either String [(L8.ByteString, Int)])]
         -> [(T.Text, Either String [String])]
         -> [TestAction]
         -> SpecWith ()
