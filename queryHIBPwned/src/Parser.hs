@@ -2,6 +2,7 @@ module Parser
 ( Entry(..)
 , Netrc(..)
 , ParsedEntry(..)
+, ParseError(..)
 , foldrNetrc
 , netrcNamedEntry
 , netrcParser
@@ -18,6 +19,9 @@ import qualified Text.Megaparsec.Char as C
 import qualified Text.Megaparsec.Char.Lexer as L
 
 import Password (Password, isPasswordChar, mkPassword)
+
+
+data ParseError = ParseError { errorRow :: Int, errorCol :: Int }
 
 
 data Entry = Entry {
@@ -40,16 +44,14 @@ data ParsedEntry = ParsedEntry {
 --
 -- Parameterize with ParsedEntry & Entry
 data Netrc a = Netrc [(T.Text, a)] -- ^ named entry
-                     (Maybe (a -- ^ default entry
-                            , [(T.Text, a)] -- ^ named entries after default entry
-                            ))
+                     (Maybe a) -- ^ default entry
   deriving (Show, Functor, Foldable, Traversable)
 
 
 foldrNetrc :: ((Maybe T.Text, a) -> b -> b) -> b -> Netrc a -> b
 foldrNetrc f b0 (Netrc before mbRest) = foldr f' b1 before
   where b1 = case mbRest of
-                  Just (def, after) -> f (Nothing, def) $ foldr f' b0 after
+                  Just def -> f (Nothing, def) b0
                   Nothing -> b0
         f' (machineName, pe) b = f (Just machineName, pe) b
 
@@ -113,14 +115,8 @@ netrcParser = do
   void $ netrcSpace
   beforeDefault <- P.many netrcNamedEntry
   mbDefaultEntry <- P.optional netrcDefaultEntry
-  case mbDefaultEntry of
-    Just defaultEntry -> do
-      afterDefault <- P.many netrcNamedEntry
-      void $ P.eof
-      return $ Netrc beforeDefault $ Just (defaultEntry, afterDefault)
-    Nothing -> do
-      void $ P.eof
-      return $ Netrc beforeDefault Nothing
+  void $ P.eof
+  return $ Netrc beforeDefault mbDefaultEntry
 
 
 netrcNamedEntry :: Parser (T.Text, ParsedEntry)

@@ -103,6 +103,18 @@ testParseNetrc (mbTitle, input, expected) =
                  compareParsedEntries obs xpc
 
 
+testParseInvalidNetrc :: Maybe String -> T.Text -> SpecWith ()
+testParseInvalidNetrc mbTitle input =
+  let eitherObserved = runParser netrcParser "test case" input in
+  describe (maybe (T.unpack input) id mbTitle) $
+    case eitherObserved of
+      Left observed ->
+        it "rejects input" $ show observed `shouldNotBe` ""
+      Right (Netrc machines defaultEntry) -> do
+        it "rejects input: no machines" $ map fst machines `shouldBe` []
+        it "rejects input: no default" $ fmap parsedLogins defaultEntry `shouldBe` Nothing
+
+
 main :: IO ()
 main = hspec $ do
   describe "Password" $ do
@@ -198,13 +210,17 @@ main = hspec $ do
                                             , parsedAccounts = []
                                             }
     describe "foldrNetrc" $ do
-      it "transforms Netrc into a list" $
-        (foldrNetrc (:) [] $ Netrc [("M1", ()), ("M2", ())] $ Just ((), [("M3", ())]))
+      it "transforms Netrc with default entry into a list" $
+        (foldrNetrc (:) [] $ Netrc [("M1", ()), ("M2", ())] $ Just ())
         `shouldBe`
-        [(Just "M1", ()), (Just "M2", ()), (Nothing, ()), (Just "M3", ())]
+        [(Just "M1", ()), (Just "M2", ()), (Nothing, ())]
+      it "transforms Netrc without default entry into a list" $
+        (foldrNetrc (:) [] $ Netrc [("M1", ()), ("M2", ())] $ Nothing)
+        `shouldBe`
+        [(Just "M1", ()), (Just "M2", ())]
     describe "parseNetrc" $ do
-      -- it "works for an example" $
-      --  (show $ runParser netrcParser "test case" 
+      testParseInvalidNetrc Nothing
+                            "machine M1 login L1 password P1 default login L2 machine M3"
       mapM_ testParseNetrc
             [ (Nothing
               , "machine M1 login L1 password P1 machine M2 login L2 password P2"
@@ -229,38 +245,22 @@ main = hspec $ do
                                      , parsedLogins = ["L1"]
                                      , parsedPasswords = [fromJust $ mkPassword "P1"]
                                      , parsedAccounts = []})]
-                    $ Just (ParsedEntry { parsedSchemes = []
-                                        , parsedLogins = ["L2"]
-                                        , parsedPasswords = [fromJust $ mkPassword "P2"]
-                                        , parsedAccounts = []
-                                        }
-                           , []))
+                    $ Just $ ParsedEntry { parsedSchemes = []
+                                         , parsedLogins = ["L2"]
+                                         , parsedPasswords = [fromJust $ mkPassword "P2"]
+                                         , parsedAccounts = []
+                                         })
             , (Just "Example with leading & trailing comment"
-              , "# leading comment\nmachine M1\n  login L1\n   password P1\n# this is the default\ndefault # and probably hides\n  login L2 #other entries\n  password P2\nmachine M3\nmachine M4 # trailing comment\nmachine M5 account A5 # trailing comment"
+              , "# leading comment\nmachine M1\n  login L1\n   password P1\n# this is the default\ndefault # and probably hides\n#other entries\n login L2 ####\npassword\n#\nP2 # trailing comment"
               , Netrc [("M1"
                        , ParsedEntry { parsedSchemes = []
                                      , parsedLogins = ["L1"]
                                      , parsedPasswords = [fromJust $ mkPassword "P1"]
                                      , parsedAccounts = []})]
-                    $ Just (ParsedEntry { parsedSchemes = []
-                                        , parsedLogins = ["L2"]
-                                        , parsedPasswords = [fromJust $ mkPassword "P2"]
-                                        , parsedAccounts = []
-                                        }
-                           , [ ("M3"
-                               , ParsedEntry { parsedSchemes = []
-                                             , parsedLogins = []
-                                             , parsedPasswords = []
-                                             , parsedAccounts = []})
-                             , ("M4"
-                               , ParsedEntry { parsedSchemes = []
-                                             , parsedLogins = []
-                                             , parsedPasswords = []
-                                             , parsedAccounts = []})
-                             , ("M5"
-                               , ParsedEntry { parsedSchemes = []
-                                             , parsedLogins = []
-                                             , parsedPasswords = []
-                                             , parsedAccounts = [fromJust $ mkPassword "A5"]})]))
+                    $ Just $ ParsedEntry { parsedSchemes = []
+                                         , parsedLogins = ["L2"]
+                                         , parsedPasswords = [fromJust $ mkPassword "P2"]
+                                         , parsedAccounts = []
+                                         })
             ]
   testAppMonad
