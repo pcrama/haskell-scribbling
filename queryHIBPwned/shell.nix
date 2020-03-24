@@ -8,7 +8,7 @@ let
 
   inherit (nixpkgs) pkgs;
 
-  f = { mkDerivation, base, bytestring, hspec, http-client-tls
+  f = { mkDerivation, base, bytestring, cabal-install, hspec, http-client-tls
       , megaparsec, mtl, SHA, stdenv, text
       }:
       mkDerivation {
@@ -25,6 +25,7 @@ let
         homepage = "https://github.com/pcrama/haskell-scribbling/queryHIBPwned";
         description = "Query HaveIBeenPwned with information parsed from .netrc";
         license = stdenv.lib.licenses.bsd3;
+        buildDepends = [ cabal-install ];
       };
 
   haskellPackages = if compiler == "default"
