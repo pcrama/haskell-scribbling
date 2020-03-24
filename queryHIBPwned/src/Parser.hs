@@ -5,6 +5,7 @@ module Parser
 , ParseError(..)
 , foldrNetrc
 , netrcNamedEntry
+, netrcMachine -- for test purposes, not really useful on its own
 , netrcParser
 , validateParsedEntry
 )
@@ -74,11 +75,18 @@ netrcSpace = L.space C.space1
                      P.empty
 
 
+netrcValue :: Maybe String -> Parser T.Text
+netrcValue message = (C.char '"' *> P.takeWhile1P message allowedInsideDoubleQuotes <* C.char '"')
+               P.<|> (C.char '\'' *> P.takeWhile1P message allowedInsideSingleQuotes <* C.char '\'')
+               P.<|> P.takeWhile1P message isPasswordChar
+  where allowedInsideDoubleQuotes c = (c /= '"') && (isPasswordChar c || c == ' ')
+        allowedInsideSingleQuotes c = (c /= '\'') && (isPasswordChar c || c == ' ')
+
+
 mkParser :: T.Text -> String -> Parser T.Text
 mkParser symbol name =
      L.symbol netrcSpace symbol
-  *> P.takeWhile1P (Just $ name ++ " (non blank/control ASCII)")
-                   isPasswordChar
+  *> netrcValue (Just $ name ++ " (non blank/control ASCII)")
   <* netrcSpace
 
 

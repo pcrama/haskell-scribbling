@@ -142,6 +142,10 @@ main = hspec $ do
              maybe True (const False) $ mkPassword $ T.pack pw
   describe "Parser" $ do
     describe "netrcNamedEntry" $ do
+      -- let emptyParsedEntry = ParsedEntry { parsedSchemes = []
+      --                                    , parsedLogins = []
+      --                                    , parsedPasswords = []
+      --                                    , parsedAccounts = [] }
       mapM_ testNetrcNamedEntry
             [ (Nothing
               , "machine M scheme S login L password P"
@@ -165,7 +169,36 @@ main = hspec $ do
                               , parsedLogins = ["L"]
                               , parsedPasswords = [fromJust $ mkPassword "P"
                                                   , fromJust $ mkPassword "PP"]
-                              , parsedAccounts = []}))]
+                              , parsedAccounts = []}))
+            -- # (mapcar (lambda (pl) (funcall (plist-get pl :secret))) (auth-source-search :max 1234))
+            -- # ("asciipassword" "#my#password" "middle#hash" "righthash#" "my\"password" "ghijkl")
+            -- machine plainascii login asciilogin password asciipassword
+            -- machine withhash login hashlogin password "#my#password"
+            -- machine withmiddlehash login hashlogin password middle#hash
+            -- machine withhashright login hashlogin password righthash#
+            -- machine withquote login quotelogin password 'my"password'
+            -- default login abcdef password ghijkl
+            , (Nothing
+               , "machine 'quote 1' login \"quote 2\" scheme 'qu\"te 3'"
+               , ("quote 1"
+                 , ParsedEntry { parsedSchemes = ["qu\"te 3"]
+                               , parsedLogins = ["quote 2"]
+                               , parsedPasswords = []
+                               , parsedAccounts = []}))
+            , (Nothing
+               , "machine \"qu'te 4\" #lefthash\nlogin righthash# scheme middle#hash"
+               , ("qu'te 4"
+                 , ParsedEntry { parsedSchemes = ["middle#hash"]
+                               , parsedLogins = ["righthash#"]
+                               , parsedPasswords = []
+                               , parsedAccounts = []}))
+            , (Nothing
+               , "machine 'sp ac e1' login \"spa ce2\""
+               , ("sp ac e1"
+                 , ParsedEntry { parsedSchemes = []
+                               , parsedLogins = ["spa ce2"]
+                               , parsedPasswords = []
+                               , parsedAccounts = []}))]
     describe "validateParsedEntry" $ do
       let (Just pw) = mkPassword "Password"
       let (Just ac) = mkPassword "Account"
