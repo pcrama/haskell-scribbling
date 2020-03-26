@@ -9,7 +9,7 @@ let
   inherit (nixpkgs) pkgs;
 
   f = { mkDerivation, base, bytestring, cabal-install, hspec, http-client-tls
-      , megaparsec, mtl, SHA, stdenv, text
+      , http-types, megaparsec, mtl, SHA, stdenv, text
       }:
       mkDerivation {
         pname = "queryHIBPwned";
@@ -19,7 +19,7 @@ let
         isExecutable = true;
         libraryHaskellDepends = [ base bytestring megaparsec SHA text ];
         executableHaskellDepends = [
-          base bytestring http-client-tls megaparsec SHA text
+          base bytestring http-client-tls http-types megaparsec SHA text
         ];
         testHaskellDepends = [ base bytestring hspec megaparsec mtl text ];
         homepage = "https://github.com/pcrama/haskell-scribbling/queryHIBPwned";
