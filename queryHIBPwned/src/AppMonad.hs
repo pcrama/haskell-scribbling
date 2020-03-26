@@ -1,3 +1,6 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FunctionalDependencies #-}
+
 module AppMonad (
   AppMonad(..)
 , queryHIBPwned
@@ -17,8 +20,10 @@ import           Text.Megaparsec (runParser)
 import Parser
 import Password
 
-
-class Monad m => AppMonad m where
+-- | All operations necessary to query "Have I Been Pwned"
+--   k: Type of the API key
+--   m: base monad
+class Monad m => AppMonad k m | m -> k where
   -- | Pass .netrc content to a parsing function and return its parsed
   --   representation.
   --
@@ -34,9 +39,12 @@ class Monad m => AppMonad m where
   --   is known in any clear text leak.
   queryPassword :: SHA1Prefix -- ^ SHA1 prefix
                 -> m (Either String [(L.ByteString, Int)]) -- ^ list of SHA1 values and counts
+  -- | Get API key (needed for user name queries to HIBP)
+  apiKey :: m (Maybe k)
   -- | Send a user name to HIBPwned to check if the user name was in a
   --   leaked database.
-  queryUsername :: T.Text -- ^ user name
+  queryUsername :: k -- ^ API key
+                -> T.Text -- ^ user name
                 -> m (Either String [String]) -- ^ query result
   -- | Display log/error message
   putLog :: String -> m ()
@@ -47,7 +55,7 @@ passwordPopularity p = sum . map snd . filter isMatchingPassword
   where isMatchingPassword (sha1, _) = compareWithSha1 p sha1
 
 
-queryHIBPwned :: AppMonad m => m ()
+queryHIBPwned :: AppMonad k m => m ()
 queryHIBPwned = do
   mbParsedEntries <- readNetrc (either (const Nothing) Just . runParser netrcParser "input")
   case mbParsedEntries of
@@ -68,7 +76,7 @@ queryHIBPwned = do
 
 -- | Query HIBPwned for a password's SHA1 and verify the returned SHA1s
 --   against the password
-verifyPasswordPopularityIs0 :: AppMonad m
+verifyPasswordPopularityIs0 :: AppMonad k m
                             => (Entry -> Maybe Password) -- ^ extract password/account from Entry
                             -> String -- ^ name of accessor above for logging purposes
                             -> (Maybe T.Text, Entry) -- ^ machine name + Entry
@@ -86,12 +94,16 @@ verifyPasswordPopularityIs0 accessor accessorName z@(mbMachine, entry) =
             popularity -> putLog $ "The " <> accessorName <> " of " <> show z <> " has been used " <> show popularity <> " times."
 
 
-verifyUserAccountNotLeaked :: AppMonad m
+verifyUserAccountNotLeaked :: AppMonad k m
                            => T.Text -- ^ user name
                            -> m ()
 verifyUserAccountNotLeaked user = do
-  eiUserLeaked <- queryUsername user
-  case eiUserLeaked of
-    Left errorMsg -> putLog $ errorMsg <> " while querying HIBP about " <> (T.unpack user) <> "."
-    Right [] -> return ()
-    Right x -> let sep = "\n  " in putLog $ (T.unpack user) <> ":" <> sep <> (intercalate sep x)
+  mbApiKey <- apiKey
+  case mbApiKey of
+    Nothing -> putLog $ "No API key available to query HIBP about " <> T.unpack user <> "."
+    Just a -> do
+      eiUserLeaked <- queryUsername a user
+      case eiUserLeaked of
+        Left errorMsg -> putLog $ errorMsg <> " while querying HIBP about " <> (T.unpack user) <> "."
+        Right [] -> return ()
+        Right x -> let sep = "\n  " in putLog $ (T.unpack user) <> ":" <> sep <> (intercalate sep x)

@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+
 module AppMonadSpec (
   testAppMonad
 )
@@ -14,7 +16,7 @@ import AppMonad
 import Password
 
 
-data AppMonadTestEnv = AMTE T.Text [(SHA1Prefix, Either String [(L8.ByteString, Int)])] [(T.Text, Either String [String])]
+data AppMonadTestEnv = AMTE T.Text [(SHA1Prefix, Either String [(L8.ByteString, Int)])] (Maybe ()) [(T.Text, Either String [String])]
 
 
 data TestAction = QPassword SHA1Prefix | QUser T.Text | Log String
@@ -26,29 +28,33 @@ tell1 = tell . (:[])
 type RW r w = RWS r w ()
 
 
-instance AppMonad (RW AppMonadTestEnv [TestAction]) where
+instance AppMonad () (RW AppMonadTestEnv [TestAction]) where
   readNetrc f = do
-    AMTE input _ _ <- ask
+    AMTE input _ _ _ <- ask
     return $ f input
   queryPassword sha1p = do
     tell1 $ QPassword sha1p
-    AMTE _ ps _ <- ask
+    AMTE _ ps _ _ <- ask
     case lookup sha1p ps of
       Just r -> return r
       Nothing -> return $ Left $ (show sha1p) <> " not found."
-  queryUsername u = do
+  apiKey = do
+    AMTE _ _ a _ <- ask
+    return a
+  queryUsername _ u = do
     tell1 $ QUser u
-    AMTE _ _ us <- ask
+    AMTE _ _ _ us <- ask
     case lookup u us of
       Just r -> return r
       Nothing -> return $ Left $ (T.unpack u) <> " not found."
   putLog = tell1 . Log
 
 
-mkTestEnv :: T.Text -> [(SHA1Prefix, Either String [(L8.ByteString, Int)])] -> [(T.Text, Either String [String])] -> AppMonadTestEnv
-mkTestEnv input passwords users =
+mkTestEnv :: T.Text -> [(SHA1Prefix, Either String [(L8.ByteString, Int)])] -> Maybe () -> [(T.Text, Either String [String])] -> AppMonadTestEnv
+mkTestEnv input passwords mbApiKey users =
   AMTE input
        (map prependSHA1prefix passwords)
+       mbApiKey
        users
   where prependSHA1prefix (p, errorMsg@(Left _)) = (p, errorMsg)
         prependSHA1prefix (p@(SHA1Prefix a b c), Right result) =
@@ -107,11 +113,12 @@ userDatabase = [
 runTest :: Maybe String
         -> T.Text
         -> [(SHA1Prefix, Either String [(L8.ByteString, Int)])]
+        -> Maybe ()
         -> [(T.Text, Either String [String])]
         -> [TestAction]
         -> SpecWith ()
-runTest title netrcText passwords users expectedActions =
-  let amte = mkTestEnv netrcText passwords users
+runTest title netrcText passwords mbApiKey users expectedActions =
+  let amte = mkTestEnv netrcText passwords mbApiKey users
       (_, observedActions) = evalRWS queryHIBPwned amte () in
   describe (maybe (T.unpack netrcText) id title) $ do
     it "makes same password queries" $
@@ -129,6 +136,7 @@ testAppMonad = describe "AppMonad" $ do
   runTest Nothing
           "machine M1 login safe@fort.knox password password"
           passwordDatabase
+          (Just ())
           userDatabase
           [QPassword $ sha1Prefix $ fromJust $ mkPassword "password"
           , QUser "safe@fort.knox"
@@ -136,6 +144,7 @@ testAppMonad = describe "AppMonad" $ do
   runTest (Just "reuse user name, query only once")
           "machine M1 login safe@fort.knox password password machine M2 login safe@fort.knox password W34kP@55w0rd account Test1234"
           passwordDatabase
+          (Just ())
           userDatabase
           [QPassword $ sha1Prefix $ fromJust $ mkPassword "password"
           , QPassword $ sha1Prefix $ fromJust $ mkPassword "W34kP@55w0rd"
@@ -145,6 +154,7 @@ testAppMonad = describe "AppMonad" $ do
   runTest (Just "reuse password, queried each time")
           "machine M1 login safe@fort.knox password password account password machine M2 login safe@fort.knox password password account password"
           passwordDatabase
+          (Just ())
           userDatabase
           [QPassword $ sha1Prefix $ fromJust $ mkPassword "password"
           , QPassword $ sha1Prefix $ fromJust $ mkPassword "password"
@@ -155,6 +165,7 @@ testAppMonad = describe "AppMonad" $ do
   runTest Nothing
           "machine M1 login leaked-org@unsafe.example.org password ApiFailure machine M2 login leaked-com@unsafe.example.com password LetMeIn"
           passwordDatabase
+          (Just ())
           userDatabase
           [QPassword $ sha1Prefix $ fromJust $ mkPassword "ApiFailure"
           , QPassword $ sha1Prefix $ fromJust $ mkPassword "LetMeIn"
@@ -164,17 +175,26 @@ testAppMonad = describe "AppMonad" $ do
   runTest Nothing
           "machine M1 password ImagineThisPasswordHasNeverBeenHacked login api-error@404.com"
           passwordDatabase
+          (Just ())
           userDatabase
           [QPassword $ sha1Prefix $ fromJust $ mkPassword "ImagineThisPasswordHasNeverBeenHacked"
           , QUser "api-error@404.com"
           ]
   runTest Nothing
+          "machine M1 password Password login no-api-key@no-query"
+          passwordDatabase
+          Nothing
+          userDatabase
+          [QPassword $ sha1Prefix $ fromJust $ mkPassword "Password"]
+  runTest Nothing
           "machine provoke a parse error"
           passwordDatabase
+          (Just ())
           userDatabase
           []
   runTest Nothing
           "machine provoke login a scheme validation login error"
           passwordDatabase
+          (Just ())
           userDatabase
           []
