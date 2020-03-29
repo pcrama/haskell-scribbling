@@ -58,7 +58,7 @@ library
   -- other-modules:
 
   -- Other library packages from which modules are imported.
-  build-depends:       base >=4.11 && <4.12
+  build-depends:       base >=4.11 && <4.13
                      , bytestring >=0.10 && <0.11
                      , megaparsec >=8.0 && <8.1
                      , SHA >=1.6 && <1.7
@@ -87,7 +87,7 @@ executable queryHIBPwned
   -- other-modules:
 
   -- Other library packages from which modules are imported.
-  build-depends:       base >=4.11 && <4.12
+  build-depends:       base >=4.11 && <4.13
                      , bytestring >=0.10 && <0.11
                      , http-client >=0.6 && <0.7
                      , http-client-tls >=0.3 && <0.4
@@ -117,7 +117,7 @@ test-suite test
   other-modules:       AppMonadSpec
 
   -- Other library packages from which modules are imported.
-  build-depends:       base >=4.11 && <4.12
+  build-depends:       base >=4.11 && <4.13
                      , bytestring >=0.10 && <0.11
                      , hspec >=2.7 && <2.8
                      , megaparsec >=8.0 && <8.1
