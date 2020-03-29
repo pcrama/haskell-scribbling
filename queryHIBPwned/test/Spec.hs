@@ -296,4 +296,6 @@ main = hspec $ do
                                          , parsedAccounts = []
                                          })
             ]
-  testAppMonad
+  describe "AppMonad module" $ do
+    testAppMonad
+    testPasswordPopularity

@@ -2,6 +2,7 @@
 
 module AppMonadSpec (
   testAppMonad
+, testPasswordPopularity
 )
 where
 
@@ -198,3 +199,19 @@ testAppMonad = describe "AppMonad" $ do
           (Just ())
           userDatabase
           []
+
+
+testPasswordPopularity :: SpecWith ()
+testPasswordPopularity = describe "passwordPopularity" $
+  -- echo -n 'Test1234' | sha1sum -> dddd5d7b474d2c78ebbb833789c4bfd721edf4bf
+  --
+  -- Notice how the response returned by the website drops the 5 leading nibbles:
+  let response = [("d7b474d2c78ebbb833789c4bfd721edf4bf", 1)
+                 ,("fffffffffffffffffffffffffffffffffff", 2)
+                 ,("f0000000000000000000000000000000000", 3)] in do
+    it "works for passwords in database" $
+      let Just pw = mkPassword "Test1234" in
+      passwordPopularity pw response `shouldBe` 1
+    it "works for passwords not in database" $
+      let Just pw = mkPassword "NotInTheDatabase" in
+      passwordPopularity pw response `shouldBe` 0

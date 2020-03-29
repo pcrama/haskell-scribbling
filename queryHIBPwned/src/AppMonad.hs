@@ -3,18 +3,19 @@
 
 module AppMonad (
   AppMonad(..)
+, passwordPopularity
 , queryHIBPwned
-, verifyPasswordPopularityIs0
-, verifyUserAccountNotLeaked
 )
 where
 
 import qualified Data.ByteString.Lazy.Char8 as L
+import           Data.Char (intToDigit)
 import           Data.Either (either)
 import           Data.List (intercalate, nub)
 import           Data.Maybe (maybe)
 import qualified Data.Text as T
 import           Data.Traversable (traverse)
+import           Data.Word (Word8)
 import           Text.Megaparsec (runParser)
 
 import Parser
@@ -38,7 +39,7 @@ class Monad m => AppMonad k m | m -> k where
   -- | Send a password's SHA1 prefix to HIBPwned to query if the password
   --   is known in any clear text leak.
   queryPassword :: SHA1Prefix -- ^ SHA1 prefix
-                -> m (Either String [(L.ByteString, Int)]) -- ^ list of SHA1 values and counts
+                -> m (Either String [(L.ByteString, Int)]) -- ^ list of SHA1 value suffixes and counts
   -- | Get API key (needed for user name queries to HIBP)
   apiKey :: m (Maybe k)
   -- | Send a user name to HIBPwned to check if the user name was in a
@@ -52,7 +53,16 @@ class Monad m => AppMonad k m | m -> k where
 
 passwordPopularity :: Password -> [(L.ByteString, Int)] -> Int
 passwordPopularity p = sum . map snd . filter isMatchingPassword
-  where isMatchingPassword (sha1, _) = compareWithSha1 p sha1
+  where formatNibble :: Word8 -> Char
+        formatNibble x = intToDigit $ fromIntegral $ x `mod` 16
+        formatByte :: Word8 -> L.ByteString
+        formatByte x = L.pack [formatNibble $ x `div` 16, formatNibble $ x `mod` 16]
+        formatSHA1Prefix :: SHA1Prefix -> L.ByteString
+        formatSHA1Prefix (SHA1Prefix a b c) = formatByte a
+                                           <> formatByte b
+                                           <> (L.singleton $ formatNibble $ c `div` 16)
+        prefix = formatSHA1Prefix $ sha1Prefix p
+        isMatchingPassword (sha1, _) = compareWithSha1 p (prefix <> sha1)
 
 
 queryHIBPwned :: AppMonad k m => m ()
@@ -100,7 +110,7 @@ verifyUserAccountNotLeaked :: AppMonad k m
 verifyUserAccountNotLeaked user = do
   mbApiKey <- apiKey
   case mbApiKey of
-    Nothing -> putLog $ "No API key available to query HIBP about " <> T.unpack user <> "."
+    Nothing -> putLog $ "No API key available to query HIBP about user name '" <> T.unpack user <> "'."
     Just a -> do
       eiUserLeaked <- queryUsername a user
       case eiUserLeaked of
