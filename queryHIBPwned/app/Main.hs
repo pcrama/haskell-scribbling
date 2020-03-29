@@ -3,7 +3,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Main where
 
-import           Control.Monad           (forM_)
 import qualified Data.ByteString.Lazy.Char8 as L8
 import           Data.Char               (intToDigit)
 import qualified Data.Text as T
@@ -42,18 +41,7 @@ formatNibble :: Word8 -> Char
 formatNibble x = intToDigit $ fromIntegral $ x `mod` 16
 
 
-formatByte :: Word8 -> L8.ByteString
-formatByte x = L8.pack [formatNibble $ x `div` 16, formatNibble $ x `mod` 16]
-
-
-formatSHA1Prefix :: SHA1Prefix -> L8.ByteString
-formatSHA1Prefix (SHA1Prefix a b c) =
-       formatByte a
-    <> formatByte b
-    <> (L8.singleton $ formatNibble $ c `div` 16)
-
-
-newtype QueryHibpIO a = QueryHibpIO (IO a)
+newtype QueryHibpIO a = QueryHibpIO { runQueryHibpIO :: (IO a) }
   deriving (Functor, Applicative, Monad)
 
 
@@ -63,37 +51,16 @@ instance AppMonad [Char] QueryHibpIO where
       manager <- QueryHibpIO $ newManager tlsManagerSettings
       request <- QueryHibpIO $ parseRequest $ formatURL $ s
       response <- QueryHibpIO $ httpLbs request manager
-      putLog $ "The status code was: " <> (show $ responseStatus response)
-      let pwData = parseBody $ responseBody $ response
-      return $ Right pwData
+      let status = responseStatus response
+      let sci = statusCode status
+      if 200 <= sci && sci < 300
+      then return $ Right $ parseBody $ responseBody response
+      else return $ Left $ show status
   apiKey = return Nothing
+  -- TODO: get an API key and implement user name querying, too.
   queryUsername _ u = return $ Left $ "No API key available to query for " <> T.unpack u
   putLog = QueryHibpIO . putStrLn
 
 
 main :: IO ()
-main = do
-  let mbP = mkPassword . T.pack $ "Password"
-  putStrLn $ "mbP=" ++ show mbP
-  case mbP of
-    Just p -> do
-      putStrLn ("SHA1Prefix = " ++ show (sha1Prefix p))
-      putStrLn ("compareWithSha1 p \"8be3c943b1609fffbfc51aad666d0a04adf83c9d\" = "
-             ++ (show $ compareWithSha1 p "8be3c943b1609fffbfc51aad666d0a04adf83c9d"))
-      manager <- newManager tlsManagerSettings
-      request <- parseRequest $ formatURL $ sha1Prefix p
-      response <- httpLbs request manager
-      putStrLn $ "The status code was: " ++ (show $ responseStatus response)
-      case statusCode $ responseStatus response of
-        200 -> let pwData = parseBody $ responseBody $ response
-                   sha1prefix = formatSHA1Prefix $ sha1Prefix p in
-               forM_ pwData $ \(k, v) -> do
-                 let fullSHA1 = sha1prefix <> k
-                 case (compareWithSha1 p fullSHA1, v > 0) of
-                   (True, True) -> putStrLn $ "Your password has been used "
-                                           <> show v
-                                           <> " time" <> (if v == 1 then "" else "s")
-                   (True, False) -> putStrLn $ "Your password is in the list with a use count of 0.  Padding?"
-                   (False, _) -> return ()
-        c -> putStrLn $ "Error: " <> show c
-    Nothing -> putStrLn "Not a valid password"
+main = runQueryHibpIO queryHIBPwned
