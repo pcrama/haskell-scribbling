@@ -10,8 +10,15 @@ This project is also an exercise in Haskell to produce source code that is
 easily audited: the goal is to demonstrate easily that the program does not
 steal your credentials.
 
+* Usage
+#+begin_src shell :exports code
+  nix-shell --command 'cabal new-run queryHIBPwned' < "$HOME/.netrc"
+  gpg -d "$HOME/.authinfo.gpg" | nix-shell --command 'cabal new-run queryHIBPwned'
+#+end_src
+
 * Structure
 ** Guaranteeing the tool cannot leak passwords
+*** Parsing
 Wrap the password in a ~newtype~ with a custom ~Show~ instance that only
 prints ~*~ and only allows to compare against a given SHA1 and to extract
 the first 3 bytes of the SHA1.
@@ -20,9 +27,25 @@ This leaves the parsing code that must wrap the secrets as soon as possible.
 #+begin_src haskell :exports code
   data Entry = Entry {
       scheme :: Maybe Text
-    , machine :: Text
     , login :: Text
     , account :: Maybe Password
     , password :: Password
   } deriving (Show, Eq)
 #+end_src
+
+Then verify that the parsing code does no IO and does not store the secrets in
+the clear text values (machine names, connection schemes/ports and login
+names).
+
+The error reporting is kept to a minimum to avoid leaking password values
+through error messages.
+
+*** Interacting with HIBP
+All operations that do IO are inside the AppMonad class that is parametric in
+the monad type, so can't do IO directly.  This just leaves the QueryHibpIO
+instance of that class to be verified.  Note that the only functions touching
+the passwords are:
+- ~readNetrc~ where the parametricity of the types forces the implementation
+  to pass the text it would read directly to the parsing function without
+  being able to inspect the results.
+- ~queryPassword~ which only gets a ~SHA1Prefix~
