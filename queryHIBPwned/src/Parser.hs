@@ -95,7 +95,8 @@ netrcMachine = mkParser "machine" "host name"
 
 
 netrcScheme :: Parser T.Text
-netrcScheme = mkParser "scheme" "https/ssh/..."
+netrcScheme = let explanation = "https/ssh/..." in
+              mkParser "scheme" explanation P.<|> mkParser "port" explanation
 
 
 netrcLogin :: Parser T.Text

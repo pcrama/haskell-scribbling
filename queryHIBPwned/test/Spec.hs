@@ -151,9 +151,16 @@ main = hspec $ do
               , "machine M scheme S login L password P"
               , ("M"
                 , ParsedEntry { parsedSchemes = ["S"]
-                             , parsedLogins = ["L"]
-                             , parsedPasswords = [fromJust $ mkPassword "P"]
-                             , parsedAccounts = []}))
+                              , parsedLogins = ["L"]
+                              , parsedPasswords = [fromJust $ mkPassword "P"]
+                              , parsedAccounts = []}))
+            , (Just "authinfo format uses 'port' instead of 'scheme'"
+              , "machine M port B login L password P"
+              , ("M"
+                , ParsedEntry { parsedSchemes = ["B"]
+                              , parsedLogins = ["L"]
+                              , parsedPasswords = [fromJust $ mkPassword "P"]
+                              , parsedAccounts = []}))
             , (Just "Example with newlines"
               , "machine M\n\tscheme S\n\tlogin L\n\taccount A\n\tpassword P\n\taccount AA\n"
               , ("M"
