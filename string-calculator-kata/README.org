@@ -1,0 +1,64 @@
+#+TITLE: String calculator kata
+
+Reference: https://osherove.com/tdd-kata-1
+
+Purpose:
+- learn about Haskell project setup in Nix (mainly from [[https://maybevoid.com/posts/2019-01-27-getting-started-haskell-nix.html][maybevoid]])
+- learn about TDD in Haskell
+
+#+begin_src shell :exports code
+  nix-shell --pure -p ghc cabal-install --run "cabal init --interactive"
+#+end_src
+
+Edit the [[file:string-calculator-kata.cabal][cabal file]].
+
+#+begin_src shell :exports code
+  nix-shell --pure -p cabal2nix --run "cabal2nix ." > default.nix
+#+end_src
+
+The ~default.nix~ file lists the dependencies of the project.  Update it when
+you change the cabal file.  ~default.nix~ is parameterized, typically a
+~release.nix~ (or similar file) calls it with a specific set of packages (see
+pinning).
+
+#+begin_example
+  { withHoogle ? false }:
+  let
+    nixpkgs = import <nixpkgs> { }; # this is where we would normally pin the packages
+    bareHaskellPackages = nixpkgs.pkgs.haskellPackages; # or nixpkgs.pkgs.haskell.packages.ghc844
+    haskellPackages = if withHoogle
+                      then bareHaskellPackages.override {
+                             overrides = (self: super:
+                               {
+                                 ghc = super.ghc // { withPackages = super.ghc.withHoogle; };
+                                 ghcWithPackages = self.ghc.withPackages;
+                               }
+                             );
+                           }
+                      else bareHaskellPackages;
+  in
+     { project = haskellPackages.callPackage ./default.nix {};
+       pinnedPkgs = nixpkgs;
+     }
+#+end_example
+
+Then ~shell.nix~ can add development dependencies (like ~hoogle~, ~hlint~ or ~ghcid~):
+#+begin_example
+  { nixpkgs ? import <nixpkgs> {} }:
+  let
+    withHoogle = pkgs.lib.inNixShell;
+  
+    release = import ./release.nix { withHoogle = withHoogle; };
+    inherit (release.pinnedPkgs) pkgs;
+    inherit (pkgs) haskellPackages;
+  in
+  pkgs.stdenv.mkDerivation {
+    name = "shell";
+    buildInputs = release.project.env.nativeBuildInputs ++ [
+      haskellPackages.cabal-install
+      haskellPackages.hlint
+      haskellPackages.ghcid
+      pkgs.git
+    ];
+  }
+#+end_example
