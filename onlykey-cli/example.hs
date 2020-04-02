@@ -7,6 +7,8 @@
 --
 -- I adapted it to look for a specific device (optical mouse or OnlyKey)
 
+{-# LANGUAGE OverloadedStrings #-}
+
 import Control.Concurrent (threadDelay)
 import Control.Monad
 import Data.Char (chr)
@@ -50,12 +52,25 @@ useOnlyKey di = do -- OnlyKey
     putStrLn $ "Write returned 0x" ++ showHex r
     threadDelay 500000
     putStrLn "Reading..."
-    _ <- sequence $ replicate 12 $ do
-      bs <- HID.read d 16
-      putStrLn $ asciiString bs
+    -- _ <- sequence $ replicate 12 $ do
+    --   bs <- HID.read d 64
+    --   putStrLn $ asciiString bs
+    readLabels d 12
     putStrLn " ... Done"
     putStrLn "..."
     close d
+
+readLabels :: Device -> Int -> IO ()
+readLabels d 0 = return ()
+readLabels _ n = do
+  bs <- HID.read d 64
+  case "Error you must set a PIN first on OnlyKey" `BS.isPrefixOf` bs of
+    True -> do
+      putStrLn "OnlyKey is not initialized"
+      return ()
+    False -> do
+      putStrLn $ asciiString bs
+      readLabels d $ n - 1
 
 -- | Detect correct DeviceInfo for OnlyKey
 -- The OnlyKey yields several DeviceInfo matching the desired vendor &
