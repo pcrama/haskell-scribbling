@@ -1,0 +1,6 @@
+#+TITLE: A Play On Regular Expressions
+
+* Introduction
+
+Follow the functional pearl "A Play on Regular Expressions" by Sebastian Fischer
+Frank Huch and Thomas Wilke.
