@@ -17,6 +17,7 @@ data RegX a = Eps
 
 type Reg = RegX Char
 
+nocs, onec, evencs :: Reg
 nocs = Rep $ Alt (Sym 'a') (Sym 'b')
 onec = Seq nocs $ Sym 'c'
 evencs = Seq (Rep (Seq onec onec)) nocs
@@ -35,5 +36,5 @@ accept rr@(Rep r) s = or [ accept r s1 && accept rr s2
 
 splits :: [a] -> [([a], [a])]
 splits [] = [([], [])]
-splits [x] = [([x], []), ([], [x])]
+splits [x] = [([], [x]), ([x], [])]
 splits (x:xs) = ([], x:xs):map (\(y, z) -> (x:y, z)) (splits xs)
