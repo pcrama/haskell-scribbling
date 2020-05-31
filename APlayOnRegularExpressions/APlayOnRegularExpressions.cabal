@@ -78,3 +78,4 @@ test-suite spec
   build-depends:       hspec >= 2.7
                      , hspec-discover >= 2.7
                      , APlayOnRegularExpressions
+                     , QuickCheck >= 2.9.2 && < 3

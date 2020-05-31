@@ -17,6 +17,8 @@ spec = describe "A Play on Regular Expressions, Section 2" $ do
       splits "ab" `shouldBe` [([], "ab"), ("a", "b"), ("ab", "")]
     it "that works for a list with 3 elements" $
       splits "abc" `shouldBe` [([], "abc"), ("a", "bc"), ("ab", "c"), ("abc", "")]
+    it "loses no elements" $
+      property prop_splitPreservesInput
   context "has my own implementation of accept matching a regular expression" $ do
     it "that works for Eps" $ do
       accept Eps "" `shouldBe` True
@@ -88,3 +90,7 @@ spec = describe "A Play on Regular Expressions, Section 2" $ do
         accept re "xyzzy" `shouldBe` True
         accept re "b" `shouldBe` False
         accept re "xyzzyx" `shouldBe` False
+
+prop_splitPreservesInput :: [Int] -> Bool
+prop_splitPreservesInput list =
+  and $ map ((== list) . uncurry (++)) $ splits list
