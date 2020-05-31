@@ -1,4 +1,4 @@
-module Section2 (
+module Act1Scene1 (
   spec
 )
 where
@@ -7,7 +7,7 @@ import SpecHelper
 import Lib
 
 spec :: Spec
-spec = describe "A Play on Regular Expressions, Section 2" $ do
+spec = describe "A Play on Regular Expressions, Act 1 Scene 1" $ do
   context "has a function splits that produces all partitions of a list" $ do
     it "that works for an empty list" $
       splits ([] :: [Int]) `shouldBe` [([], [])]

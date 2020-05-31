@@ -2,8 +2,8 @@ module Main
 where
 
 import SpecHelper
-import qualified Section2
+import qualified Act1Scene1
 
 main :: IO ()
-main = hspec Section2.spec
+main = hspec Act1Scene1.spec
 
