@@ -2,9 +2,9 @@ module Lib (
   RegX(..)
   , Reg
   , accept
+  , evencs
   , nocs
   , onec
-  , evencs
   , splits
   )
 where
