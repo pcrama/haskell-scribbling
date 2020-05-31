@@ -5,6 +5,8 @@ module Lib (
   , evencs
   , nocs
   , onec
+  , plus
+  , sequ
   , splits
   )
 where
@@ -21,6 +23,15 @@ nocs, onec, evencs :: Reg
 nocs = Rep $ Alt (Sym 'a') (Sym 'b')
 onec = Seq nocs $ Sym 'c'
 evencs = Seq (Rep (Seq onec onec)) nocs
+
+plus :: RegX a -> RegX a
+plus Eps = Eps
+plus r = Seq r (Rep r)
+
+sequ :: [a] -> RegX a
+sequ [] = Eps
+sequ [x] = Sym x
+sequ (x:xs) = Seq (Sym x) $ sequ xs
 
 accept :: Eq a => RegX a -> [a] -> Bool
 accept Eps [] = True

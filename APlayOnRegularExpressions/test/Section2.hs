@@ -60,3 +60,31 @@ spec = describe "A Play on Regular Expressions, Section 2" $ do
       accept evencs "aaabababacc" `shouldBe` True
       accept evencs "cccc" `shouldBe` True
       accept evencs "ccac" `shouldBe` False
+  context "has a combinator plus" $ do
+    it "that works for examples" $
+      let re = plus $ Sym 'a' in do
+        accept re "" `shouldBe` False
+        accept re "b" `shouldBe` False
+        accept re "bb" `shouldBe` False
+        accept re "a" `shouldBe` True
+        accept re "aa" `shouldBe` True
+        accept re "aaaa" `shouldBe` True
+        accept re "aaaaaaaa" `shouldBe` True
+        accept re "aaaaaaaab" `shouldBe` False
+  context "has a combinator sequ" $ do
+    it "that works for empty sequences" $
+      let re = sequ "" in do
+        accept re "" `shouldBe` True
+        accept re "b" `shouldBe` False
+    it "that works for one element sequences" $
+      let re = sequ [1 :: Int] in do
+        accept re [] `shouldBe` False
+        accept re [2] `shouldBe` False
+        accept re [1, 2] `shouldBe` False
+        accept re [1] `shouldBe` True
+        accept re [1, 1] `shouldBe` False
+    it "that works for a sequence" $
+      let re = sequ "xyzzy" in do
+        accept re "xyzzy" `shouldBe` True
+        accept re "b" `shouldBe` False
+        accept re "xyzzyx" `shouldBe` False
