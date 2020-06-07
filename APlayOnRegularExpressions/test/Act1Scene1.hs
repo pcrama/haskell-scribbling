@@ -3,11 +3,38 @@ module Act1Scene1 (
 )
 where
 
+import Data.List (nub)
+
 import SpecHelper
 import Lib
 
+-- This must be somewhere in standard library but I don't have a connection
+-- right now to look for it.
+--
+-- 2 ** n puts a Float constraint on n.
+expt2 :: (Eq t, Num t, Num p) => t -> p
+expt2 0 = 1
+expt2 n = 2 * expt2 (n - 1)
+
 spec :: Spec
 spec = describe "A Play on Regular Expressions, Act 1 Scene 1" $ do
+  context "has a function parts that breaks text" $ do
+    it "that works for example in pearl" $ do
+      parts "acc" `shouldBe` [["acc"], ["a", "cc"], ["ac", "c"], ["a", "c", "c"]]
+    it "that splits empty list as a list containing no parts at all" $
+      parts "" `shouldBe` [[]]
+    it "of length n into parts in 2**(n - 1) different ways" $ do
+      flip mapM_ [1, 2, 3, 4, 5] $ \n -> do
+        let s = take n [(1 :: Int) ..]
+        let p = parts s
+        length p `shouldBe` expt2 (n - 1)
+        length (nub p) `shouldBe` length p
+    it "into parts that can be reassembled" $ do
+      flip mapM_ [1, 2, 3, 4, 5] $ \n -> do
+        let s = take n [(1 :: Int) ..]
+        let p = parts s
+        flip mapM_ p $ \x ->
+          concat x `shouldBe` s
   context "has a function splits that produces all partitions of a list" $ do
     it "that works for an empty list" $
       splits ([] :: [Int]) `shouldBe` [([], [])]

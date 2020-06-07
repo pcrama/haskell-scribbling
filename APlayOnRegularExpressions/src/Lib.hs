@@ -2,9 +2,11 @@ module Lib (
   RegX(..)
   , Reg
   , accept
+  , acceptA1S1
   , evencs
   , nocs
   , onec
+  , parts
   , plus
   , sequ
   , splits
@@ -49,3 +51,20 @@ splits :: [a] -> [([a], [a])]
 splits [] = [([], [])]
 splits [x] = [([], [x]), ([x], [])]
 splits (x:xs) = ([], x:xs):map (\(y, z) -> (x:y, z)) (splits xs)
+
+-- implementation from pearl, Act 1, Scene 1
+acceptA1S1 :: Eq a => RegX a -> [a] -> Bool
+acceptA1S1 Eps       u = null u
+acceptA1S1 (Sym x)   u = [x] == u
+acceptA1S1 (Alt x y) u = acceptA1S1 x u || acceptA1S1 y u
+acceptA1S1 (Seq x y) u = or [acceptA1S1 x v && acceptA1S1 y w
+                            | (v, w) <- splits u]
+acceptA1S1 (Rep r)   u = or [and [acceptA1S1 r v | v <- ps]
+                            | ps <- parts u]
+
+-- parts "cc" `shouldBe` [["cc"], ["c", "c"]]
+-- parts "acc" `shouldBe` [["acc"], ["a", "cc"], ["ac", "c"], ["a", "c", "c"]]
+parts :: [a] -> [[[a]]]
+parts [] = [[]]
+parts [c] = [[[c]]]
+parts (c:cs) = concatMap (\(p:ps) -> [(c:p):ps, [c]:p:ps]) $ parts cs
