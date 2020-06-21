@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeApplications #-}
+
 module SemiringSpec (
   spec
 )
@@ -44,6 +46,41 @@ semiringLaws p = context "obeys the semiring laws:" $ do
   it "splus is commutative" $ property $ prop_splusCommutative p
   it "distributivity" $ property $ prop_distributive p
 
+newtype SortedNubbed a = SN [a]
+  deriving (Show, Eq)
+
+snNil :: SortedNubbed a
+snNil = SN []
+
+snCons :: Ord a => a -> SortedNubbed a -> SortedNubbed a
+snCons a (SN []) = SN [a]
+snCons a (SN (b:bs))
+  | a < b = SN $ a:b:bs
+  | a == b = SN $ b:bs
+  | otherwise = let SN c = snCons a $ SN bs in SN $ b:c
+
+instance (Arbitrary a, Ord a) => Arbitrary (SortedNubbed a) where
+  arbitrary = do
+    -- force type checker to recognize `as' as [a],
+    -- otherwise, it is unclear which Foldable to pick.
+    as <- arbitrary @[_]
+    return $ foldr snCons snNil as
+
+-- SortedNubbed [a] should be Set a
+instance Ord a => HillClimber (SortedNubbed a) where
+  valley = snNil -- empty set
+  climb x (SN []) = x -- climb === union
+  climb (SN []) y = y
+  climb (SN (x:xs)) (SN (y:ys))
+    | x == y = let SN z = climb (SN xs) (SN ys) in SN $ x:z
+    | x < y = let SN z = climb (SN xs) (SN $ y:ys) in SN $ x:z
+    | otherwise = let SN z = climb (SN $ x:xs) (SN ys) in SN $ y:z
+  descend _ (SN []) = snNil -- descend == intersection
+  descend (SN []) _ = snNil
+  descend (SN (x:xs)) (SN y)
+    | x `elem` y = let SN z = descend (SN xs) (SN y) in SN $ x:z
+    | otherwise = descend (SN xs) (SN y)
+
 spec :: Spec
 spec = describe "Semiring defines" $ do
   context "a Semiring Int instance that" $
@@ -59,6 +96,8 @@ spec = describe "Semiring defines" $ do
     semiringLaws (Proxy :: Proxy (Either Bool Int))
   context "an Either Int Int instance that" $ do
     semiringLaws (Proxy :: Proxy (Either Int Int))
+  context "an Either (SortedNubbed Char) Int instance that" $ do
+    semiringLaws (Proxy :: Proxy (Either (SortedNubbed Char) Int))
   context "an Either Bool (Maybe Int) instance that" $ do
     semiringLaws (Proxy :: Proxy (Either Bool (Maybe Int)))
   context "tuple Semiring instances" $ do

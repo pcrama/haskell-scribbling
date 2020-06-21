@@ -72,21 +72,6 @@ instance HillClimber Bool where
   climb = (||)
   descend = (&&)
 
--- [a] should be Set a
--- instance Eq a => HillClimber [a] where
---   valley = []
---   climb x [] = x
---   climb [] y = y
---   climb (x:xs) (y:ys)
---     | x == y = x:climb xs ys
---     | x < y = x:climb xs (y:ys)
---     | otherwise = y:climb (x:xs) ys
---   descend _ [] = []
---   descend [] _ = []
---   descend (x:xs) y =
---     | x `elem` y = x:descend xs y
---     | otherwise = descend xs y
-
 instance (HillClimber l, Semiring r) => Semiring (Either l r) where
   zero = Left valley
   one = Right one
