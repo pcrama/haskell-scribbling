@@ -54,6 +54,7 @@ library
   import:              shared-properties
   -- Modules exported by the library.
   exposed-modules:     Lib
+                     , LibAct2
                      , Semiring
 
   -- Modules included in this library but not exported.
@@ -74,6 +75,7 @@ test-suite spec
   type:                exitcode-stdio-1.0
   other-modules:       Act1Scene1
                      , Act1Scene2
+                     , Act2Scene1
                      , SemiringSpec
                      , SpecHelper
   hs-source-dirs:      test
