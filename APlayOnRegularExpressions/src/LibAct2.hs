@@ -1,20 +1,31 @@
 module LibAct2 (
   RegMX(..)
+  , Reg
+  , altS
+  , epsS
   , evenCs
   , matchMX
+  , matchS
+  , mxToS
+  , repS
+  , seqS
   , sequ
+  , shiftS
   , split2
   , sym
+  , symS
 )
 where
 
 import Data.List (foldl')
+import Semiring (Semiring(..))
 
 data RegMX a = EpsMX
              | SymMX Bool a
              | AltMX (RegMX a) (RegMX a)
              | SeqMX (RegMX a) (RegMX a)
              | RepMX (RegMX a)
+ deriving Show
 
 sym :: a -> RegMX a
 sym = SymMX False
@@ -73,3 +84,57 @@ shift m (RepMX a) x = RepMX $ shift (m || final a) a x
 matchMX :: Eq a => RegMX a -> [a] -> Bool
 matchMX r [] = empty r
 matchMX r (a:as) = final $ foldl' (shift False) (shift True r a) as
+
+-- emptyS: True if regular expression matches the empty String
+-- finalS: True if final character of regular expression is matched, i.e.
+--         if regular expression accepts the empty string as the end of
+--         the match
+data Reg s a = Reg { emptyS :: s, finalS :: s, regS :: RegS s a }
+
+data RegS s a = EpsS
+              | SymS (a -> s)
+              | AltS (Reg s a) (Reg s a)
+              | SeqS (Reg s a) (Reg s a)
+              | RepS (Reg s a)
+
+epsS :: Semiring s => Reg s a
+epsS = Reg { emptyS=one, finalS=zero, regS=EpsS }
+
+symS :: Semiring s => (a -> s) -> Reg s a
+symS f  = Reg { emptyS=zero, finalS=zero, regS=SymS f }
+
+altS :: Semiring s => Reg s a -> Reg s a -> Reg s a
+altS r s = Reg { emptyS = emptyS r `splus` emptyS s
+               , finalS = finalS r `splus` finalS s
+               , regS = AltS r s
+               }
+
+seqS :: Semiring s => Reg s a -> Reg s a -> Reg s a
+seqS r s = Reg { emptyS = emptyS r `stimes` emptyS s
+               , finalS = (finalS r `stimes` emptyS s) `splus` finalS s
+               , regS = SeqS r s
+               }
+repS :: Semiring s => Reg s a -> Reg s a
+repS r@(Reg { finalS = f }) = Reg { emptyS = one, finalS = f, regS = RepS r }
+
+shiftS :: Semiring s => s -> RegS s a -> a -> Reg s a
+shiftS _ EpsS _ = epsS
+shiftS m (SymS f) x = (symS f) { finalS=m `stimes` f x }
+shiftS m (AltS p q) x = altS p' q'
+  where p' = shiftS m (regS p) x
+        q' = shiftS m (regS q) x
+shiftS m (SeqS p q) x = seqS p' q'
+  where p' = shiftS m (regS p) x
+        q' = shiftS ((m `stimes` emptyS p) `splus` finalS p) (regS q) x
+shiftS m (RepS r) x = repS $ shiftS (m `splus` finalS r) (regS r) x
+
+matchS :: Semiring s => Reg s a -> [a] -> s
+matchS r [] = emptyS r
+matchS r (a:as) = finalS $ foldl' (shiftS zero . regS) (shiftS one (regS r) a) as
+
+mxToS :: (Semiring s, Eq a) => RegMX a -> Reg s a
+mxToS EpsMX = epsS
+mxToS (SymMX _ a) = symS $ \x -> if x == a then one else zero
+mxToS (AltMX a b) = altS (mxToS a) (mxToS b)
+mxToS (SeqMX a b) = seqS (mxToS a) (mxToS b)
+mxToS (RepMX r) = repS $ mxToS r
