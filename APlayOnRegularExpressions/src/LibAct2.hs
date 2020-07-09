@@ -12,6 +12,7 @@ module LibAct2 (
   , sequ
   , shiftS
   , split2
+  , submatchW
   , sym
   , symS
 )
@@ -138,3 +139,8 @@ mxToS (SymMX _ a) = symS $ \x -> if x == a then one else zero
 mxToS (AltMX a b) = altS (mxToS a) (mxToS b)
 mxToS (SeqMX a b) = seqS (mxToS a) (mxToS b)
 mxToS (RepMX r) = repS $ mxToS r
+
+-- Scene II
+submatchW :: Semiring s => Reg s (Int, c) -> [c] -> s
+submatchW r = matchS (seqS arb $ seqS r arb) . zip [0..]
+  where arb = repS $ symS $ const one
