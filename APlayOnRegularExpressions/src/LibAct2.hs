@@ -1,6 +1,11 @@
 module LibAct2 (
-  RegMX(..)
+  LeftLong(..)
+  , LeftmostMatch(..)
+  , Range(..)
+  , RegMX(..)
   , Reg
+  , SemiringI(..)
+  , Start(..)
   , altS
   , epsS
   , evenCs
@@ -14,6 +19,7 @@ module LibAct2 (
   , split2
   , submatchW
   , sym
+  , symI
   , symS
 )
 where
@@ -144,3 +150,71 @@ mxToS (RepMX r) = repS $ mxToS r
 submatchW :: Semiring s => Reg s (Int, c) -> [c] -> s
 submatchW r = matchS (seqS arb $ seqS r arb) . zip [0..]
   where arb = repS $ symS $ const one
+
+class Semiring s => SemiringI s where
+  index :: Int -> s
+
+symI :: (SemiringI s, Eq c) => c -> Reg s (Int, c)
+symI c = symS weight
+  where weight (pos, x) | x == c = index pos
+                        | otherwise = zero
+
+data LeftmostMatch = NoLeft | Leftmost Start
+  deriving (Show, Eq)
+data Start = NoStart | Start Int
+  deriving (Show, Eq)
+
+instance Semiring LeftmostMatch where
+  zero = NoLeft
+  one = Leftmost NoStart
+  -- splus will be used to combine the results of AltS, take the leftmost.
+  NoLeft `splus` x = x
+  x `splus` NoLeft = x
+  Leftmost NoStart `splus` x@(Leftmost _) = x
+  x@(Leftmost _) `splus` Leftmost NoStart = x
+  Leftmost (Start x) `splus` Leftmost (Start y) = Leftmost $ Start $ min x y
+  -- stimes will be used to combine the results of SeqS, take the first only
+  NoLeft `stimes` _ = NoLeft
+  _ `stimes` NoLeft = NoLeft
+  Leftmost x `stimes` Leftmost y = Leftmost $ start x y
+    where start NoStart s = s
+          start s NoStart = s
+          -- this is not quite what the functional pearl says, but their
+          -- version does not respect the ditributive laws.
+          start (Start i) (Start j) = Start $ min i j
+
+instance SemiringI LeftmostMatch where
+  index = Leftmost . Start
+
+data LeftLong = NoLeftLong | LeftLong Range
+  deriving (Show, Eq)
+data Range = NoRange | Range Int Int
+  deriving (Show, Eq)
+
+-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+-- ! This instance is not quite lawful, see test/Act2Scene2.hs for the !
+-- ! restrictions and tests.                                           !
+-- ! Ideally, I should not export LeftLong, but only its user          !
+-- ! submatchW.  The relaxed laws suppose a usage similar to submatchW !
+-- ! where ranges combined with stimes are adjacent.                   !
+-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+instance Semiring LeftLong where
+  zero = NoLeftLong
+  one = LeftLong NoRange
+  NoLeftLong `splus` x = x
+  x `splus` NoLeftLong = x
+  LeftLong x `splus` LeftLong y = LeftLong $ range x y
+    where range NoRange r = r
+          range r NoRange = r
+          range r@(Range i l) s@(Range k n)
+            | (i < k) || ((i == k) && (l > n)) = r
+            | otherwise = s
+  NoLeftLong `stimes` _ = NoLeftLong
+  _ `stimes` NoLeftLong = NoLeftLong
+  LeftLong x `stimes` LeftLong y = LeftLong $ range x y
+    where range NoRange r = r
+          range r NoRange = r
+          range (Range i _) (Range _ q) = Range i q
+
+instance SemiringI LeftLong where
+  index x = LeftLong $ Range x x

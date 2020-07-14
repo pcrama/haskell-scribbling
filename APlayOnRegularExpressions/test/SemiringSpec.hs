@@ -1,8 +1,11 @@
 {-# LANGUAGE TypeApplications #-}
 
 module SemiringSpec (
-  spec
-)
+  Proxy(..)
+  , semiringLaws
+  , semiringLawsExceptDistributivity
+  , spec
+  )
 where
 
 import SpecHelper
@@ -35,15 +38,20 @@ prop_distributive _ x y z =
 prop_splusCommutative :: (Semiring s, Eq s) => Proxy s -> s -> s -> Bool
 prop_splusCommutative _ x y = (x `splus` y) == (y `splus` x)
 
-semiringLaws :: (Arbitrary s, Show s, Semiring s, Eq s)
-             => Proxy s -> SpecWith ()
-semiringLaws p = context "obeys the semiring laws:" $ do
+semiringLawsExceptDistributivity :: (Arbitrary s, Show s, Semiring s, Eq s)
+                                 => Proxy s -> SpecWith ()
+semiringLawsExceptDistributivity p = do
   it "has zero as neutral for splus" $ property $ prop_zeroNeutralForSplus p
   it "has one as neutral for stimes" $ property $ prop_oneNeutralForStimes p
   it "zero annihilates stimes" $ property $ prop_zeroCollapsesStimes p
   it "stimes is associative" $ property $ prop_stimesAssociative p
   it "splus is associative" $ property $ prop_splusAssociative p
   it "splus is commutative" $ property $ prop_splusCommutative p
+
+semiringLaws :: (Arbitrary s, Show s, Semiring s, Eq s)
+             => Proxy s -> SpecWith ()
+semiringLaws p = context "obeys the semiring laws:" $ do
+  semiringLawsExceptDistributivity p
   it "distributivity" $ property $ prop_distributive p
 
 newtype SortedNubbed a = SN [a]
