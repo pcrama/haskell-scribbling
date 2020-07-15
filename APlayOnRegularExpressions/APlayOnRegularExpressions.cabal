@@ -70,6 +70,13 @@ library
   hs-source-dirs:      src
 
 
+executable genrnd
+  import:              shared-properties
+  hs-source-dirs:      genrnd
+  main-is:             Main.hs
+  build-depends:       base
+                     , random
+
 test-suite spec
   import:              shared-properties
   type:                exitcode-stdio-1.0
