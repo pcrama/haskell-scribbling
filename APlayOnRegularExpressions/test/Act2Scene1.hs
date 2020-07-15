@@ -201,7 +201,9 @@ spec = describe "A Play on Regular Expressions, Act 2 Scene 1" $ do
           test "bbbbbbbbabbbbbbbbbbaabababbabaababbab" False
           test "aaabbbbbbbbabbbbbbbbbbaabababbabaababbab" False
           test "aaabbbbbbbbabbbbbbbbbbaabababbabaababbaba" True
-  it "matches the same with and without caching" $ property prop_cachingMatchIsEquivalentToNormalMatch
+  context "matches the same with and without caching" $ do
+    it "match" $ property prop_cachingMatchIsEquivalentToNormalMatch
+    it "non-match" $ property prop_cachingNonMatchIsEquivalentToNormalNonMatch
 
 prop_split2PreservesInput :: [Int] -> Bool
 prop_split2PreservesInput list =
@@ -276,5 +278,49 @@ instance Arbitrary ArbInput where
            map (simplify "c") s,
            map (simplify "b") s])
 
-prop_cachingMatchIsEquivalentToNormalMatch :: ArbRegMX -> ArbInput -> Bool
-prop_cachingMatchIsEquivalentToNormalMatch (ARX r) (AIn s) = matchMX r s == matchS (mxToS r) s
+newtype MatchingRegAndInput = MRAI (ArbRegMX, ArbInput)
+  deriving (Show)
+
+instance Arbitrary MatchingRegAndInput where
+  arbitrary = do
+      ARX rx <- arbitrary
+      s <- genInput rx
+      return $ MRAI (ARX rx, AIn s)
+    where genInput EpsMX = return []
+          genInput (SymMX _ c) = return [c]
+          genInput (AltMX x y) = do
+            r <- oneof [return x, return y]
+            genInput r
+          genInput (SeqMX x y) = do
+            xin <- genInput x
+            yin <- genInput y
+            return $ xin ++ yin
+          genInput (RepMX r) = do
+            NonNegative c <- arbitrary
+            fmap concat $ traverse genInput $ replicate (c `mod` 10) r
+
+prop_cachingNonMatchIsEquivalentToNormalNonMatch :: ArbRegMX -> ArbInput -> Property
+prop_cachingNonMatchIsEquivalentToNormalNonMatch (ARX r) (AIn s) =
+  let found = matchMX r s
+      nonTrivial EpsMX = False
+      nonTrivial (SymMX _ _) = True
+      nonTrivial (AltMX x y) = nonTrivial x || nonTrivial y
+      nonTrivial (SeqMX x y) = nonTrivial x || nonTrivial y
+      nonTrivial (RepMX x) = nonTrivial x in
+    checkCoverage $
+    cover 80 (not found) "no match" $
+    cover 80 (nonTrivial r) "non-trivial" $
+    property $
+    found == matchS (mxToS r) s
+
+prop_cachingMatchIsEquivalentToNormalMatch :: MatchingRegAndInput -> Property
+prop_cachingMatchIsEquivalentToNormalMatch (MRAI (ARX r, AIn s)) =
+  let nonTrivial EpsMX = False
+      nonTrivial (SymMX _ _) = True
+      nonTrivial (AltMX x y) = nonTrivial x || nonTrivial y
+      nonTrivial (SeqMX x y) = nonTrivial x || nonTrivial y
+      nonTrivial (RepMX x) = nonTrivial x in
+    checkCoverage $
+    cover 80 (nonTrivial r) "non-trivial" $
+    property $
+    matchMX r s && matchS (mxToS r) s
