@@ -23,7 +23,7 @@ newtype ArbLeftmostMatch = ALM LeftmostMatch
 
 instance Arbitrary ArbLeftmostMatch where
   arbitrary = do
-    Positive value <- arbitrary
+    NonNegative value <- arbitrary
     ALM <$> oneof [return NoLeft, return $ Leftmost NoStart, return $ Leftmost $ Start value]
   shrink (ALM NoLeft) = []
   shrink (ALM (Leftmost s)) = [ALM NoLeft] ++ case s of
@@ -42,8 +42,8 @@ newtype ArbLeftLongMatch = ALLM LeftLong
 
 instance Arbitrary ArbLeftLongMatch where
   arbitrary = do
-    Positive a <- arbitrary
-    Positive b <- arbitrary
+    NonNegative a <- arbitrary
+    NonNegative b <- arbitrary
     ALLM <$> oneof [return NoLeftLong, return $ LeftLong NoRange, return $ LeftLong $ Range a $ a + b]
   shrink (ALLM NoLeftLong) = []
   shrink (ALLM (LeftLong s)) = [ALLM NoLeftLong]
@@ -77,8 +77,8 @@ prop_adHocDistributiveNoLeftLongInSum x y =
     ((x `splus` y) `stimes` noLL == (x `stimes` noLL) `splus` (y `stimes` noLL)) && (
       (noLL `stimes` (x `splus` y)) == ((noLL `stimes` x) `splus` (noLL `stimes` y)))
 
-prop_adHocDistributiveWithRange :: Positive Int -> Positive Int -> Positive Int -> Positive Int -> Bool
-prop_adHocDistributiveWithRange (Positive i) (Positive b) (Positive c) (Positive d) =
+prop_adHocDistributiveWithRange :: NonNegative Int -> NonNegative Int -> NonNegative Int -> NonNegative Int -> Bool
+prop_adHocDistributiveWithRange (NonNegative i) (NonNegative b) (NonNegative c) (NonNegative d) =
   (let j = i + (max b c)
        k = i + (min b c)
        p = j + 1
