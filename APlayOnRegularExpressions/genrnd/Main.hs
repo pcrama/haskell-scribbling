@@ -8,10 +8,15 @@ import Text.Read          (readMaybe)
 usage :: IO ()
 usage = putStrLn "\
   \genrnd distance multiplier\n\
+  \\n\
   \Generate random string of a/b, (distance + 1) * (multiplier + 1)\n\
   \long, such that there is never a pair of 'a' with distance \n\
   \characters in between.\n\
-  \E.g. genrnd 0 5 could generate abbbab."
+  \E.g. genrnd 0 5 could generate abbbab.\n\
+  \\n\
+  \genrnd [-a|-aa] n\n\
+  \\n\
+  \Print n * 'a' or n * 'aa'"
 
 unfoldrM :: Monad m => (s -> m (Maybe (a, s))) -> s -> m [a]
 unfoldrM g s0 = do
@@ -49,10 +54,23 @@ genC = do
   x <- getStdRandom $ randomR (0, 1)
   return $ if x == (0 :: Int) then 'a' else 'b'
 
+genAs :: Int -> IO ()
+genAs n = putStrLn $ replicate n 'a'
+
 main :: IO ()
 main = do
   args <- getArgs
   case args of
+    ["-a", howManyAs] -> case readMaybe howManyAs of
+        Just count
+          | count > 0 -> genAs count
+          | otherwise -> usage
+        Nothing -> usage
+    ["-aa", howManyDoubleAs] -> case readMaybe howManyDoubleAs of
+        Just count
+          | count > 0 -> genAs $ 2 * count
+          | otherwise -> usage
+        Nothing -> usage
     [distS, multS] -> case (readMaybe distS, readMaybe multS) of
       (Just distance, Just multiplier) ->
         genrnd distance multiplier genC >>= mapM_ putChar

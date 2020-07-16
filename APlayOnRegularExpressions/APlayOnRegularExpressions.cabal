@@ -77,6 +77,14 @@ executable genrnd
   build-depends:       base
                      , random
 
+
+executable match
+  import:              shared-properties
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  build-depends:       base
+                     , APlayOnRegularExpressions
+
 test-suite spec
   import:              shared-properties
   type:                exitcode-stdio-1.0
