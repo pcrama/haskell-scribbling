@@ -7,66 +7,61 @@ Frank Huch and Thomas Wilke.
 
 * Runtime comparison of functional pearl vs grep
 On a tablet inside a chroot ~uname -a~ with ~ghc --version~:
-: Linux localhost 3.18.14-15260192 #1 SMP PREEMPT Tue Mar 31 19:26:30 KST 2020 armv8l GNU/Linux
+: Linux valerie 4.15.0-111-generic #112-Ubuntu SMP Thu Jul 9 20:32:34 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
 : The Glorious Glasgow Haskell Compilation System, version 8.4.4
 
-Unfortunately, I can't replicate the results of the functional pearl (unless
-their machine was way more powerful than mine): the Haskell program runs
-slower than grep even for large numbers (trying with 1400 crashes the Linux
-chroot).
+Initially, I couldn't replicate the results of the functional pearl
+(unless their machine was way more powerful than mine): the Haskell
+program ran slower than grep even for large numbers (trying with 1400
+crashed the Linux chroot on my tablet).  The same code
+(68887c0c5f83eed33a606d1a3a2b980e2604ca37) on x86_64 had similar
+problems.
+
+In the end, the combination of enabling optimisations, specialising
+the functions on (Char, Bool) and mainly, making the ~emptyS~ and
+~finalS~ fields strict made a difference.
 
 ** Haskell
 *** Command Line
 #+begin_src shell :exports code
-  GENRND=$HOME/haskell-scribbling/APlayOnRegularExpressions/dist-newstyle/build/arm-linux/ghc-8.4.4/APlayOnRegularExpressions-0.1.0.0/x/genrnd/build/genrnd/genrnd
-  MATCH=$HOME/haskell-scribbling/APlayOnRegularExpressions/dist-newstyle/build/arm-linux/ghc-8.4.4/APlayOnRegularExpressions-0.1.0.0/x/match/build/match/match
+  MATCH=$(cabal new-exec which match)
+  GENRND=$(cabal new-exec which genrnd)
   for x in 5 10 100 200 300 400 500 600 700 800 900 1000 ; do echo $x ; time $GENRND -aa $x | $MATCH a$x ; done
 #+end_src
 
 *** Results
 |    n | real [s] | user [s] | sys [s] |
-|    5 |    0.037 |    0.000 |   0.010 |
-|   10 |    0.041 |    0.000 |   0.000 |
-|  100 |    0.279 |    0.220 |   0.020 |
-|  200 |    1.187 |    1.140 |   0.030 |
-|  300 |    2.696 |    2.590 |   0.060 |
-|  400 |    5.160 |    4.990 |   0.100 |
-|  500 |    9.220 |    8.380 |   0.710 |
-|  600 |   12.443 |   12.020 |   0.290 |
-|  700 |   18.230 |   17.510 |   0.540 |
-|  800 |   23.142 |   22.300 |   0.610 |
-|  900 |   31.869 |   30.750 |   0.770 |
-| 1000 |   37.059 |   35.820 |   0.860 |
+|    5 |    0.003 |    0.000 |   0.005 |
+|   10 |    0.003 |    0.002 |   0.003 |
+|  100 |    0.009 |    0.011 |   0.000 |
+|  200 |    0.019 |    0.015 |   0.006 |
+|  300 |    0.027 |    0.028 |   0.000 |
+|  400 |    0.050 |    0.052 |   0.001 |
+|  500 |    0.079 |    0.070 |   0.011 |
+|  600 |    0.125 |    0.122 |   0.005 |
+|  700 |    0.170 |    0.164 |   0.007 |
+|  800 |    0.231 |    0.233 |   0.000 |
+|  900 |    0.298 |    0.299 |   0.000 |
+| 1000 |    0.397 |    0.399 |   0.000 |
 
 ** Grep
 *** Command Line
 #+begin_src shell :exports code
-  GENRND=$HOME/haskell-scribbling/APlayOnRegularExpressions/dist-newstyle/build/arm-linux/ghc-8.4.4/APlayOnRegularExpressions-0.1.0.0/x/genrnd/build/genrnd/genrnd
+  GENRND=$(cabal new-exec which genrnd)
   for x in 5 10 100 200 300 400 500 600 700 800 900 1000 ; do echo $x ; time $GENRND -aa $x | grep -cE "^(a?){$x}a{$x}\$" ; done
 #+end_src
 
 *** Results
 |    n | real [s] | user [s] | sys [s] |
-|    5 |    0.067 |    0.000 |   0.010 |
-|   10 |    0.039 |    0.000 |   0.000 |
-|  100 |    0.061 |    0.020 |   0.010 |
-|  200 |    0.224 |    0.190 |   0.000 |
-|  300 |    0.622 |    0.570 |   0.010 |
-|  400 |    1.394 |    1.290 |   0.070 |
-|  500 |    2.606 |    2.540 |   0.030 |
-|  600 |    4.467 |    4.330 |   0.080 |
-|  700 |    6.996 |    6.840 |   0.090 |
-|  700 |    7.016 |    6.840 |   0.100 |
-|  800 |   10.416 |   10.260 |   0.100 |
-|  800 |   10.399 |   10.240 |   0.080 |
-|  900 |   14.674 |   14.480 |   0.130 |
-|  900 |   14.701 |   14.490 |   0.140 |
-| 1000 |   20.128 |   19.900 |   0.150 |
-| 1000 |   20.064 |   19.930 |   0.080 |
-| 1100 |   26.816 |   26.470 |   0.220 |
-| 1200 |   34.541 |   34.290 |   0.160 |
-| 1300 |   43.996 |   43.570 |   0.240 |
-| 1400 |   54.843 |   54.360 |   0.290 |
-| 1500 |   67.553 |   67.060 |   0.390 |
-| 1700 |   97.993 |   97.500 |   0.390 |
-| 1800 |  115.993 |  115.380 |   0.500 |
+|    5 |    0.005 |    0.004 |   0.004 |
+|   10 |    0.004 |    0.006 |   0.000 |
+|  100 |    0.018 |    0.014 |   0.004 |
+|  200 |    0.068 |    0.063 |   0.008 |
+|  300 |    0.206 |    0.181 |   0.027 |
+|  400 |    0.451 |    0.434 |   0.020 |
+|  500 |    0.871 |    0.837 |   0.036 |
+|  600 |    1.482 |    1.446 |   0.036 |
+|  700 |    2.355 |    2.300 |   0.057 |
+|  800 |    3.564 |    3.494 |   0.068 |
+|  900 |    5.061 |    4.978 |   0.080 |
+| 1000 |    6.939 |    6.809 |   0.119 |

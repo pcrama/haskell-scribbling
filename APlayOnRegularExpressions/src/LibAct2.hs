@@ -96,7 +96,7 @@ matchMX r (a:as) = final $ foldl' (shift False) (shift True r a) as
 -- finalS: True if final character of regular expression is matched, i.e.
 --         if regular expression accepts the empty string as the end of
 --         the match
-data Reg s a = Reg { emptyS :: s, finalS :: s, regS :: RegS s a }
+data Reg s a = Reg { emptyS :: !s, finalS :: !s, regS :: RegS s a }
 
 data RegS s a = EpsS
               | SymS (a -> s)
@@ -136,6 +136,7 @@ shiftS m (SeqS p q) x = seqS p' q'
 shiftS m (RepS r) x = repS $ shiftS (m `splus` finalS r) (regS r) x
 
 matchS :: Semiring s => Reg s a -> [a] -> s
+{-# SPECIALISE INLINE matchS :: Reg Bool Char -> String -> Bool #-}
 matchS r [] = emptyS r
 matchS r (a:as) = finalS $ foldl' (shiftS zero . regS) (shiftS one (regS r) a) as
 

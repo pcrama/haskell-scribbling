@@ -25,6 +25,8 @@ class Semiring s where
 instance Semiring Bool where
   zero = False
   one = True
+  {-# SPECIALISE INLINE splus :: Bool -> Bool -> Bool #-}
+  {-# SPECIALISE INLINE stimes :: Bool -> Bool -> Bool #-}
   splus = (||)
   stimes = (&&)
 
