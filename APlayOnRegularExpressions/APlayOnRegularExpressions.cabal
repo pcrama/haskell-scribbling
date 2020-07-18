@@ -55,6 +55,7 @@ library
   -- Modules exported by the library.
   exposed-modules:     Lib
                      , LibAct2
+                     , LibAct3
                      , Semiring
 
   -- Modules included in this library but not exported.
@@ -92,6 +93,7 @@ test-suite spec
                      , Act1Scene2
                      , Act2Scene1
                      , Act2Scene2
+                     , Act3Scene1
                      , SemiringSpec
                      , SpecHelper
   hs-source-dirs:      test

@@ -3,6 +3,7 @@
 module Semiring (
   HillClimber(..)
   , Semiring(..)
+  , SemiringEq(..)
   , sprod
   , ssum
 )
@@ -22,6 +23,9 @@ class Semiring s where
   zero, one :: s
   splus, stimes :: s -> s -> s
 
+class Semiring s => SemiringEq s where
+  isSZero :: s -> Bool
+
 instance Semiring Bool where
   zero = False
   one = True
@@ -30,12 +34,20 @@ instance Semiring Bool where
   splus = (||)
   stimes = (&&)
 
+instance SemiringEq Bool where
+  {-# SPECIALISE INLINE isSZero :: Bool -> Bool #-}
+  isSZero = not
+
 -- Num s => Semiring s would require UndecidableInstances
 instance Semiring Int where
   zero = 0
   one = 1
   splus = (+)
   stimes = (*)
+
+instance SemiringEq Int where
+  {-# SPECIALISE INLINE isSZero :: Int -> Bool #-}
+  isSZero = (0==)
 
 ssum :: (Semiring s, Foldable f) => f s -> s
 ssum = foldr splus zero
