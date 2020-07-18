@@ -2,6 +2,7 @@ module Main
 where
 
 import System.Environment (getArgs)
+import Text.Read (readMaybe)
 
 import LibAct2
 
@@ -15,8 +16,9 @@ main = do
       putStrLn $ if match then "Found" else "NOT FOUND"
     Nothing ->
       putStrLn "\
-        \match [a5|a10|a100|a200|a300|a400|a500|a600|a675|a700|a800|a900|a1000|a1400|a1500|a1700|a1800]\n\
-        \Match stdin against (a?){n}a{n}"
+        \match [a5|a10|a100|a200|a300|a400|a500|a600|a675|a700|a800|a900|a1000|a1400|a1500|a1700|a1800|a <n> a|s <s>]\n\
+        \n\
+        \Match stdin against (a?){n}a{n}, .*a.{n}a.* or literal string"
 
 makeRE :: [String] -> Maybe (Reg Bool Char)
 makeRE = work
@@ -37,6 +39,14 @@ makeRE = work
         work ["a1500"] = Just $ buildAn 1500
         work ["a1700"] = Just $ buildAn 1700
         work ["a1800"] = Just $ buildAn 1800
+        work ["a", ns, "a"] = case readMaybe ns of
+                                Just n -> Just $ buildAnA n
+                                Nothing -> Nothing
+        work ["s", s@(_:_)] = Just $ seqS repAny $ seqS (mxToS $ sequ s) repAny
         work _ = Nothing
         seqn n = foldr1 seqS . replicate n
-        buildAn n = (seqn n $ altS (symS ('a' ==)) epsS) `seqS` (seqn n $ symS ('a' ==))
+        a = symS ('a' ==)
+        buildAn n = (seqn n $ altS a epsS) `seqS` (seqn n a)
+        anyS = symS $ const True
+        repAny = repS anyS
+        buildAnA n = seqS repAny $ seqS a $ seqS (seqn n anyS) $ seqS a repAny
