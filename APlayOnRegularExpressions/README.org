@@ -6,8 +6,11 @@ Follow the functional pearl "A Play on Regular Expressions" by Sebastian Fischer
 Frank Huch and Thomas Wilke.
 
 * Runtime comparison of functional pearl vs grep
-On a tablet inside a chroot ~uname -a~ with ~ghc --version~:
+On a laptop ~uname -a~:
 : Linux valerie 4.15.0-111-generic #112-Ubuntu SMP Thu Jul 9 20:32:34 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
+and on a tablet inside a chroot ~uname -a~:
+: Linux localhost 3.18.14-15260192 #1 SMP PREEMPT Tue Mar 31 19:26:30 KST 2020 armv8l GNU/Linux
+both with ~ghc --version~:
 : The Glorious Glasgow Haskell Compilation System, version 8.4.4
 
 Initially, I couldn't replicate the results of the functional pearl
