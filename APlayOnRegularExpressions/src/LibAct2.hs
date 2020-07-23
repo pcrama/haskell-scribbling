@@ -21,6 +21,7 @@ module LibAct2 (
   , sym
   , symI
   , symS
+  , unAnchor
 )
 where
 
@@ -219,3 +220,7 @@ instance Semiring LeftLong where
 
 instance SemiringI LeftLong where
   index x = LeftLong $ Range x x
+
+unAnchor :: Semiring s => Reg s a -> Reg s a
+unAnchor r = whatever `seqS` r `seqS` whatever
+  where whatever = repS $ symS $ const one

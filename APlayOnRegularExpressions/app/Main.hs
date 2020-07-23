@@ -4,49 +4,52 @@ where
 import System.Environment (getArgs)
 import Text.Read (readMaybe)
 
-import LibAct2
+import qualified LibAct2
+import LibAct2 (RegMX(..), sym)
+import qualified LibAct3
+
+data LibToUse = Two | Three
+
+data RegExpToUse = AqnAn Int
+                 | AnA Int
+                 | Lit String
 
 main :: IO ()
 main = do
   args <- getArgs
-  case makeRE args of
-    Just re -> do
+  let parsedArgs = (
+        case args of
+          ("2":_) -> Just Two
+          ("3":_) -> Just Three
+          _ -> Nothing
+        , case args of
+            [_, ('a':(ns@(_:_)))] -> fmap AqnAn $ readMaybe ns
+            [_, "a", ns, "a"] -> fmap AnA $ readMaybe ns
+            [_, "s", s] -> return $ Lit s
+            _ -> Nothing)
+  case parsedArgs of
+    (Just libToUse, Just re) -> do
+      let match = (buildMatcher libToUse re :: String -> Bool)
       input <- getLine
-      let match = matchS re input
-      putStrLn $ if match then "Found" else "NOT FOUND"
-    Nothing ->
+      putStrLn $ if match input then "Found" else "NOT FOUND"
+    _ ->
       putStrLn "\
-        \match [a5|a10|a100|a200|a300|a400|a500|a600|a675|a700|a800|a900|a1000|a1400|a1500|a1700|a1800|a <n> a|s <s>]\n\
-        \n\
-        \Match stdin against (a?){n}a{n}, .*a.{n}a.* or literal string"
+        \match [2|3] [a<n>|a <n> a|s <s>]\n\n\
+        \Match stdin using implementation from Act 2 or Act 3 against\n\
+        \^(a?){n}a{n}$, ^[ab]*a[ab]{n}a[ab]*$ or a literal string."
 
-makeRE :: [String] -> Maybe (Reg Bool Char)
-makeRE = work
-  where work ["a5"] = Just $ buildAn 5
-        work ["a10"] = Just $ buildAn 10
-        work ["a100"] = Just $ buildAn 100
-        work ["a200"] = Just $ buildAn 200
-        work ["a300"] = Just $ buildAn 300
-        work ["a400"] = Just $ buildAn 400
-        work ["a500"] = Just $ buildAn 500
-        work ["a600"] = Just $ buildAn 600
-        work ["a675"] = Just $ buildAn 675
-        work ["a700"] = Just $ buildAn 700
-        work ["a800"] = Just $ buildAn 800
-        work ["a900"] = Just $ buildAn 900
-        work ["a1000"] = Just $ buildAn 1000
-        work ["a1400"] = Just $ buildAn 1400
-        work ["a1500"] = Just $ buildAn 1500
-        work ["a1700"] = Just $ buildAn 1700
-        work ["a1800"] = Just $ buildAn 1800
-        work ["a", ns, "a"] = case readMaybe ns of
-                                Just n -> Just $ buildAnA n
-                                Nothing -> Nothing
-        work ["s", s@(_:_)] = Just $ seqS repAny $ seqS (mxToS $ sequ s) repAny
-        work _ = Nothing
-        seqn n = foldr1 seqS . replicate n
-        a = symS ('a' ==)
-        buildAn n = (seqn n $ altS a epsS) `seqS` (seqn n a)
-        anyS = symS $ const True
-        repAny = repS anyS
-        buildAnA n = seqS repAny $ seqS a $ seqS (seqn n anyS) $ seqS a repAny
+buildMatcher :: LibToUse -> RegExpToUse -> (String -> Bool)
+buildMatcher = work
+  where work libToUse (AqnAn n) = matchCompile libToUse $ buildAn n
+        work libToUse (AnA n) = matchCompile libToUse $ buildAnA n
+        work libToUse (Lit s) = matchWrapCompile libToUse $ foldr1 SeqMX $ map sym s
+        seqn n = foldr1 SeqMX . replicate n
+        matchCompile Two = LibAct2.matchS . LibAct2.mxToS
+        matchCompile Three = LibAct3.matchS . LibAct3.mxToS
+        matchWrapCompile Two = LibAct2.matchS . LibAct2.unAnchor . LibAct2.mxToS
+        matchWrapCompile Three = LibAct3.matchS . LibAct3.unAnchor . LibAct3.mxToS
+        a = sym 'a'
+        buildAn n = (seqn n $ a `AltMX` EpsMX) `SeqMX` (seqn n a)
+        anyS = a `AltMX` sym 'b'
+        repAny = RepMX anyS
+        buildAnA n = repAny `SeqMX` a `SeqMX` (seqn n anyS) `SeqMX` a `SeqMX` repAny

@@ -13,6 +13,7 @@ module LibAct3 (
   , seqS
   , shiftS
   , symS
+  , unAnchor
 )
 where
 
@@ -130,3 +131,7 @@ mxToS (SymMX _ a) = symS $ \x -> if x == a then one else zero
 mxToS (AltMX a b) = altS (mxToS a) (mxToS b)
 mxToS (SeqMX a b) = seqS (mxToS a) (mxToS b)
 mxToS (RepMX r) = repS $ mxToS r
+
+unAnchor :: Semiring s => Reg s a -> Reg s a
+unAnchor r = whatever `seqS` r `seqS` whatever
+  where whatever = repS $ symS $ const one
