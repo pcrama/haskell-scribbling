@@ -1,0 +1,32 @@
+#!/bin/bash
+cabal new-build match || exit 1
+
+MATCH=$(cabal new-exec which match)
+GENRND=$(cabal new-exec which genrnd)
+awkScript='/bytes allocated in the heap/ { bytes=$1 } /Gen  0/ { gen0colls = $3; gen0time = $8 } /Gen  1/ { gen1colls = $3; gen1time = $8 } /MUT *time/ { mutTime = $3 } /^real.*[0-9]*m/ { realTime = $2 } END { print "|", bytes, "|", gen0colls, "|", gen0time, "|", gen1colls, "|", gen1time, "|", mutTime, "|", realTime, "|" }'
+
+echo '| Test | Bytes allocated | Gen 0 colls | Gen 0 elapsed | Gen 1 colls | Gen 1 elapsed | MUT [s] | real [s] |'
+echo '|------+-----------------+-------------+---------------+-------------+---------------+---------+----------|'
+echo -n "| 2 a800 "
+(time $GENRND -aa 800 | $MATCH 2 a800 +RTS -s) 2>&1 | awk "$awkScript"
+
+echo -n "| 3 a800 "
+(time $GENRND -aa 800 | $MATCH 3 a800 +RTS -s) 2>&1 | awk "$awkScript"
+
+echo -n "| 2 a1000 "
+(time $GENRND -aa 1000 | $MATCH 2 a1000 +RTS -s) 2>&1 | awk "$awkScript"
+
+echo -n "| 3 a1000 "
+(time $GENRND -aa 1000 | $MATCH 3 a1000 +RTS -s) 2>&1 | awk "$awkScript"
+
+echo -n "| 2 a 45 a "
+(time $GENRND 45 200 | $MATCH 2 a 45 a +RTS -s) 2>&1 | awk "$awkScript"
+
+echo -n "| 3 a 45 a "
+(time $GENRND 45 200 | $MATCH 3 a 45 a +RTS -s) 2>&1 | awk "$awkScript"
+
+echo -n "| 2 a 60 a "
+(time $GENRND 60 200 | $MATCH 2 a 60 a +RTS -s) 2>&1 | awk "$awkScript"
+
+echo -n "| 3 a 60 a "
+(time $GENRND 60 200 | $MATCH 3 a 60 a +RTS -s) 2>&1 | awk "$awkScript"

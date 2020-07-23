@@ -103,25 +103,27 @@ finalA :: Semiring s => Reg s a -> s
 finalA r = if activeS r then finalS r else zero
 
 shiftS :: SemiringEq s => s -> Reg s a -> a -> Reg s a
-shiftS _ r@(Reg { regS=EpsS }) _ = r
+{-# SPECIALISE INLINE shiftS :: Bool -> Reg Bool Char -> Char -> Reg Bool Char #-}
 shiftS m (Reg { regS=SymS f }) x = let final = m `stimes` f x
                                        active = not $ isSZero final in
                                      symSAF active final f
-shiftS m r a | isSZero m && (not $ activeS r) = r
+shiftS _ r@(Reg { regS=EpsS }) _ = r
+shiftS m r a | (not $ activeS r) && isSZero m = r
              | otherwise = stepS m (regS r) a
 
 stepS :: SemiringEq s => s -> RegS s a -> a -> Reg s a
+{-# SPECIALISE INLINE stepS :: Bool -> RegS Bool Char -> Char -> Reg Bool Char #-}
 stepS m (AltS p q) x = altS_ p' q'
   where p' = shiftS m p x
         q' = shiftS m q x
 stepS m (SeqS p q) x = seqS_ p' q'
   where p' = shiftS m p x
-        q' = shiftS ((m `stimes` emptyS p) `splus` finalA p) q x
+        q' = shiftS (finalA p `splus` (m `stimes` emptyS p)) q x
 stepS m (RepS r) x = repS_ $ shiftS (m `splus` finalA r) r x
 stepS _ _ _ = error "This case should have been handled in shiftS"
 
 matchS :: SemiringEq s => Reg s a -> [a] -> s
--- SPECIALISE INLINE matchS :: Reg Bool Char > String > Bool #-}
+{-# SPECIALISE INLINE matchS :: Reg Bool Char -> String -> Bool #-}
 matchS r [] = emptyS r
 matchS r (a:as) = finalA $ foldl' (shiftS zero) (shiftS one r a) as
 

@@ -29,10 +29,11 @@ the functions on (Char, Bool) and mainly, making the ~emptyS~ and
 #+begin_src shell :exports code
   MATCH=$(cabal new-exec which match)
   GENRND=$(cabal new-exec which genrnd)
-  for x in 5 10 100 200 300 400 500 600 700 800 900 1000 ; do echo $x ; time $GENRND -aa $x | $MATCH a$x ; done
+  for x in 5 10 100 200 300 400 500 600 700 800 900 1000 ; do echo $x ; time $GENRND -aa $x | $MATCH 2 a$x ; done
 #+end_src
 
 *** Results
+**** On laptop
 |    n | real [s] | user [s] | sys [s] |
 |    5 |    0.003 |    0.000 |   0.005 |
 |   10 |    0.003 |    0.002 |   0.003 |
@@ -46,6 +47,19 @@ the functions on (Char, Bool) and mainly, making the ~emptyS~ and
 |  800 |    0.231 |    0.233 |   0.000 |
 |  900 |    0.298 |    0.299 |   0.000 |
 | 1000 |    0.397 |    0.399 |   0.000 |
+
+**** On tablet
+~./benchmark~:
+| Test     | Bytes allocated | Gen 0 colls | Gen 0 elapsed | Gen 1 colls | Gen 1 elapsed | MUT [s] | real [s] |
+|----------+-----------------+-------------+---------------+-------------+---------------+---------+----------|
+| 2 a800   | 220,751,016     |         209 | 0.197s        |           2 | 0.003s        | 0.884s  | 0m1.142s |
+| 3 a800   | 97,700,772      |          92 | 0.062s        |           2 | 0.002s        | 0.454s  | 0m0.582s |
+| 2 a1000  | 344,779,096     |         328 | 0.377s        |           2 | 0.003s        | 1.411s  | 0m1.841s |
+| 3 a1000  | 152,127,412     |         144 | 0.116s        |           2 | 0.003s        | 0.720s  | 0m0.884s |
+| 2 a 45 a | 48,832,716      |          45 | 0.007s        |           2 | 0.002s        | 0.200s  | 0m0.279s |
+| 3 a 45 a | 46,491,920      |          43 | 0.007s        |           2 | 0.002s        | 0.203s  | 0m0.276s |
+| 2 a 60 a | 84,585,248      |          79 | 0.012s        |           2 | 0.002s        | 0.349s  | 0m0.441s |
+| 3 a 60 a | 79,314,408      |          74 | 0.012s        |           2 | 0.002s        | 0.350s  | 0m0.460s |
 
 ** Grep
 *** Command Line

@@ -12,7 +12,7 @@ data LibToUse = Two | Three
 
 data RegExpToUse = AqnAn Int
                  | AnA Int
-                 | Lit String
+                 | Lit Char String
 
 main :: IO ()
 main = do
@@ -25,7 +25,7 @@ main = do
         , case args of
             [_, ('a':(ns@(_:_)))] -> fmap AqnAn $ readMaybe ns
             [_, "a", ns, "a"] -> fmap AnA $ readMaybe ns
-            [_, "s", s] -> return $ Lit s
+            [_, "s", (s:ss)] -> return $ Lit s ss
             _ -> Nothing)
   case parsedArgs of
     (Just libToUse, Just re) -> do
@@ -40,16 +40,20 @@ main = do
 
 buildMatcher :: LibToUse -> RegExpToUse -> (String -> Bool)
 buildMatcher = work
-  where work libToUse (AqnAn n) = matchCompile libToUse $ buildAn n
-        work libToUse (AnA n) = matchCompile libToUse $ buildAnA n
-        work libToUse (Lit s) = matchWrapCompile libToUse $ foldr1 SeqMX $ map sym s
-        seqn n = foldr1 SeqMX . replicate n
+  where work libToUse (AqnAn n) = matchCompile libToUse $ buildAn libToUse n
+        work libToUse (AnA n) = matchCompile libToUse $ buildAnA libToUse n
+        work libToUse (Lit s ss) = matchWrapCompile libToUse $ foldr1 SeqMX $ map sym $ s:ss
+        seqn Two n x = foldr1 SeqMX $ replicate n x
+        seqn Three 0 _ = EpsMX
+        seqn Three 1 x = x
+        seqn Three n x = (seqn Three half x) `SeqMX` (seqn Three (n - half) x)
+          where half = n `div` 2
         matchCompile Two = LibAct2.matchS . LibAct2.mxToS
         matchCompile Three = LibAct3.matchS . LibAct3.mxToS
         matchWrapCompile Two = LibAct2.matchS . LibAct2.unAnchor . LibAct2.mxToS
         matchWrapCompile Three = LibAct3.matchS . LibAct3.unAnchor . LibAct3.mxToS
         a = sym 'a'
-        buildAn n = (seqn n $ a `AltMX` EpsMX) `SeqMX` (seqn n a)
-        anyS = a `AltMX` sym 'b'
-        repAny = RepMX anyS
-        buildAnA n = repAny `SeqMX` a `SeqMX` (seqn n anyS) `SeqMX` a `SeqMX` repAny
+        buildAn libToUse n = (seqn libToUse n $ a `AltMX` EpsMX) `SeqMX` (seqn libToUse n a)
+        aOrB = a `AltMX` sym 'b'
+        repAorB = RepMX aOrB
+        buildAnA libToUse n = repAorB `SeqMX` a `SeqMX` (seqn libToUse n aOrB) `SeqMX` a `SeqMX` repAorB
