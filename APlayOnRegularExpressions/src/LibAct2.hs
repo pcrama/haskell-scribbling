@@ -21,11 +21,13 @@ module LibAct2 (
   , sym
   , symI
   , symS
+  , tmatchS
   , unAnchor
 )
 where
 
 import Data.List (foldl')
+import qualified Data.Text as T
 import Semiring (Semiring(..))
 
 data RegMX a = EpsMX
@@ -224,3 +226,11 @@ instance SemiringI LeftLong where
 unAnchor :: Semiring s => Reg s a -> Reg s a
 unAnchor r = whatever `seqS` r `seqS` whatever
   where whatever = repS $ symS $ const one
+
+tmatchS :: Semiring s => Reg s Char -> T.Text -> s
+{-# SPECIALISE INLINE tmatchS :: Reg Bool Char -> T.Text -> Bool #-}
+tmatchS r t
+  | T.null t = emptyS r
+  | otherwise = let a = T.head t
+                    as = T.tail t in
+                  finalS $ T.foldl' (shiftS zero . regS) (shiftS one (regS r) a) as

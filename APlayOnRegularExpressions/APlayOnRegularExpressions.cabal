@@ -69,21 +69,21 @@ library
 
   -- Directories containing source files.
   hs-source-dirs:      src
+  build-depends:       text
 
 
 executable genrnd
   import:              shared-properties
   hs-source-dirs:      genrnd
   main-is:             Main.hs
-  build-depends:       base
-                     , random
+  build-depends:       random
 
 
 executable match
   import:              shared-properties
   hs-source-dirs:      app
   main-is:             Main.hs
-  build-depends:       base
+  build-depends:       text
                      , APlayOnRegularExpressions
 
 test-suite spec

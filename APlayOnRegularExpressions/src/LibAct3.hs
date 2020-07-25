@@ -13,11 +13,13 @@ module LibAct3 (
   , seqS
   , shiftS
   , symS
+  , tmatchS
   , unAnchor
 )
 where
 
 import Data.List (foldl')
+import qualified Data.Text as T
 import Semiring (Semiring(..), SemiringEq(..))
 
 import LibAct2 (
@@ -137,3 +139,11 @@ mxToS (RepMX r) = repS $ mxToS r
 unAnchor :: Semiring s => Reg s a -> Reg s a
 unAnchor r = whatever `seqS` r `seqS` whatever
   where whatever = repS $ symS $ const one
+
+tmatchS :: SemiringEq s => Reg s Char -> T.Text -> s
+{-# SPECIALISE INLINE tmatchS :: Reg Bool Char -> T.Text -> Bool #-}
+tmatchS r t
+  | T.null t = emptyS r
+  | otherwise = let a = T.head t
+                    as = T.tail t in
+                  finalA $ T.foldl' (shiftS zero) (shiftS one r a) as
