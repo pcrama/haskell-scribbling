@@ -15,6 +15,7 @@ module LibAct2 (
   , repS
   , seqS
   , sequ
+  , sequ_
   , shiftS
   , split2
   , submatchW
@@ -48,12 +49,15 @@ split2 (a:as@(_:fast)) = go as fast [a]
         go slow [_] acc = (acc, slow)
         go (h:s) (_:_:f) acc = go s f $ acc ++ [h]
         go [] _ _ = error "Not reached: fast list traversal should have got to end of list first"
-      
-sequ :: [a] -> RegMX a
-sequ [] = EpsMX
-sequ [a] = sym a
-sequ as = SeqMX (sequ lf) (sequ rg)
+
+sequ_ :: f a -> (a -> f a) -> (f a -> f a -> f a) -> [a] -> f a
+sequ_ eps _ _ [] = eps
+sequ_ _ symb _ [a] = symb a
+sequ_ eps symb after as = sequ_ eps symb after lf `after` sequ_ eps symb after rg
   where (lf, rg) = split2 as
+
+sequ :: [a] -> RegMX a
+sequ = sequ_ EpsMX sym SeqMX
 
 evenCs :: RegMX Char
 evenCs = let aOrB = AltMX (sym 'a') (sym 'b')

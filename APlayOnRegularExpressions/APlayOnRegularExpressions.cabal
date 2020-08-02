@@ -56,6 +56,7 @@ library
   exposed-modules:     Lib
                      , LibAct2
                      , LibAct3
+                     , LibOwn
                      , Semiring
 
   -- Modules included in this library but not exported.
@@ -94,8 +95,10 @@ test-suite spec
                      , Act2Scene1
                      , Act2Scene2
                      , Act3Scene1
+                     , OwnBase
                      , SemiringSpec
                      , SpecHelper
+                     , SpecHelperOwn
   hs-source-dirs:      test
   main-is:             Spec.hs
   build-depends:       hspec >= 2.7
