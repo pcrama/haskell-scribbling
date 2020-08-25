@@ -25,6 +25,9 @@ echo -n "| 2t a1000 "
 echo -n "| 3t a1000 "
 (time $GENRND -aa 1000 | $MATCH 3t a1000 +RTS -s) 2>&1 | awk "$awkScript"
 
+echo -n "| ot a1000 "
+(time $GENRND -aa 1000 | $MATCH ot a1000 +RTS -s) 2>&1 | awk "$awkScript"
+
 echo -n "| 2s a 45 a "
 (time $GENRND 45 200 | $MATCH 2s a 45 a +RTS -s) 2>&1 | awk "$awkScript"
 
@@ -42,3 +45,6 @@ echo -n "| 2t a 60 a "
 
 echo -n "| 3t a 60 a "
 (time $GENRND 60 200 | $MATCH 3t a 60 a +RTS -s) 2>&1 | awk "$awkScript"
+
+echo -n "| ot a 60 a "
+(time $GENRND 60 200 | $MATCH ot a 60 a +RTS -s) 2>&1 | awk "$awkScript"

@@ -9,8 +9,9 @@ import Text.Read (readMaybe)
 import qualified LibAct2
 import LibAct2 (RegMX(..), sym)
 import qualified LibAct3
+import qualified LibOwn
 
-data LibToUse = Two | Three
+data LibToUse = Two | Three | Own
 
 data RegExpToUse = AqnAn Int
                  | AnA Int
@@ -27,6 +28,8 @@ main = do
           ("3t":_) -> Just (Three, AsText)
           ("2s":_) -> Just (Two, AsString)
           ("3s":_) -> Just (Three, AsString)
+          ("ot":_) -> Just (Own, AsText)
+          ("os":_) -> Just (Own, AsString)
           _ -> Nothing
         , case args of
             [_, ('a':(ns@(_:_)))] -> fmap AqnAn $ readMaybe ns
@@ -44,8 +47,8 @@ main = do
       putStrLn $ if match input then "Found" else "NOT FOUND"
     _ ->
       putStrLn "\
-        \match [2|3][s|t] [a<n>|a <n> a|s <s>]\n\n\
-        \Match stdin using implementation from Act 2 or Act 3 against\n\
+        \match [2|3|o][s|t] [a<n>|a <n> a|s <s>]\n\n\
+        \Match stdin using implementation from Act 2, Act 3 or own extensions against\n\
         \^(a?){n}a{n}$, ^[ab]*a[ab]{n}a[ab]*$ or a literal string."
 
 buildMatcher :: LibToUse -> RegExpToUse -> (String -> Bool)
@@ -54,14 +57,16 @@ buildMatcher = work
         work libToUse (AnA n) = matchCompile libToUse $ buildAnA libToUse n
         work libToUse (Lit s ss) = matchWrapCompile libToUse $ foldr1 SeqMX $ map sym $ s:ss
         seqn Two n x = foldr1 SeqMX $ replicate n x
-        seqn Three 0 _ = EpsMX
-        seqn Three 1 x = x
-        seqn Three n x = (seqn Three half x) `SeqMX` (seqn Three (n - half) x)
+        seqn _ 0 _ = EpsMX
+        seqn _ 1 x = x
+        seqn lib n x = (seqn lib half x) `SeqMX` (seqn lib (n - half) x)
           where half = n `div` 2
         matchCompile Two = LibAct2.matchS . LibAct2.mxToS
         matchCompile Three = LibAct3.matchS . LibAct3.mxToS
+        matchCompile Own = LibOwn.matchS . LibOwn.mxToS . LibOwn.libAct2MXtoOwnMX
         matchWrapCompile Two = LibAct2.matchS . LibAct2.unAnchor . LibAct2.mxToS
         matchWrapCompile Three = LibAct3.matchS . LibAct3.unAnchor . LibAct3.mxToS
+        matchWrapCompile Own = LibOwn.matchS . LibOwn.unAnchor . LibOwn.mxToS . LibOwn.libAct2MXtoOwnMX
         a = sym 'a'
         buildAn libToUse n = (seqn libToUse n $ a `AltMX` EpsMX) `SeqMX` (seqn libToUse n a)
         aOrB = a `AltMX` sym 'b'
@@ -74,14 +79,16 @@ buildTMatcher = work
         work libToUse (AnA n) = matchCompile libToUse $ buildAnA libToUse n
         work libToUse (Lit s ss) = matchWrapCompile libToUse $ foldr1 SeqMX $ map sym $ s:ss
         seqn Two n x = foldr1 SeqMX $ replicate n x
-        seqn Three 0 _ = EpsMX
-        seqn Three 1 x = x
-        seqn Three n x = (seqn Three half x) `SeqMX` (seqn Three (n - half) x)
+        seqn _ 0 _ = EpsMX
+        seqn _ 1 x = x
+        seqn lib n x = (seqn lib half x) `SeqMX` (seqn lib (n - half) x)
           where half = n `div` 2
         matchCompile Two = LibAct2.tmatchS . LibAct2.mxToS
         matchCompile Three = LibAct3.tmatchS . LibAct3.mxToS
+        matchCompile Own = LibOwn.tmatchS . LibOwn.mxToS . LibOwn.libAct2MXtoOwnMX
         matchWrapCompile Two = LibAct2.tmatchS . LibAct2.unAnchor . LibAct2.mxToS
         matchWrapCompile Three = LibAct3.tmatchS . LibAct3.unAnchor . LibAct3.mxToS
+        matchWrapCompile Own = LibOwn.tmatchS . LibOwn.unAnchor . LibOwn.mxToS . LibOwn.libAct2MXtoOwnMX
         a = sym 'a'
         buildAn libToUse n = (seqn libToUse n $ a `AltMX` EpsMX) `SeqMX` (seqn libToUse n a)
         aOrB = a `AltMX` sym 'b'

@@ -5,6 +5,7 @@ module LibOwn (
   , altS
   , endOfWordAfter
   , epsS
+  , libAct2MXtoOwnMX
   , matchMX
   , matchS
   , mxToS
@@ -38,6 +39,7 @@ import Data.Char (isAlphaNum)
 import Data.List (foldl')
 import qualified Data.Text as T
 import LibAct2 (sequ_)
+import qualified LibAct2
 import Semiring (Semiring(..))
 
 data RegMX a = EpsMX
@@ -58,6 +60,13 @@ instance Show a => Show (RegMX a) where
   show (AltMX r s) = "(AltMX " ++ show r ++ " " ++ show s ++ ")"
   show (SeqMX r s) = "(SeqMX " ++ show r ++ " " ++ show s ++ ")"
   show (RepMX r) = "(RepMX " ++ show r ++ ")"
+
+libAct2MXtoOwnMX :: LibAct2.RegMX a -> RegMX a
+libAct2MXtoOwnMX LibAct2.EpsMX = EpsMX
+libAct2MXtoOwnMX (LibAct2.SymMX f a) = SymMX f a
+libAct2MXtoOwnMX (LibAct2.AltMX r s) = libAct2MXtoOwnMX r `AltMX` libAct2MXtoOwnMX s
+libAct2MXtoOwnMX (LibAct2.SeqMX r s) = libAct2MXtoOwnMX r `SeqMX` libAct2MXtoOwnMX s
+libAct2MXtoOwnMX (LibAct2.RepMX r) = RepMX $ libAct2MXtoOwnMX r
 
 sym :: a -> RegMX a
 sym = SymMX False
