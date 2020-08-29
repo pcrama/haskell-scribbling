@@ -3,6 +3,9 @@ module OwnBase (
 )
 where
 
+import Data.Char (isAlphaNum)
+import qualified Data.Text as T
+
 import LibOwn
 import Semiring (Semiring(..))
 import SpecHelperOwn
@@ -23,8 +26,27 @@ testMatchS r as expected =
   it ((if (expected == zero) then "rejec" else "accep") ++ "ts " ++ show as) $
      matchS r as `shouldBe` expected
 
+testMatchSTwice :: (Show s, Eq s, Semiring s)
+                => Reg s Char -> [Char] -> s -> SpecWith ()
+testMatchSTwice r as expected =
+  let verb s = (if (expected == zero) then "rejec" else "accep") ++ "ts " ++ show as ++ " (" ++ s ++ ")" in do
+    it (verb "String") $ matchS r as `shouldBe` expected
+    it (verb "Text") $ tmatchS r (T.pack as) `shouldBe` expected
+
 symC :: Semiring s => Char -> Reg s Char
 symC c = symS $ \x -> if x == c then one else zero
+
+startOfWordThenS :: Semiring s => Reg s Char -> Reg s Char
+startOfWordThenS = preS Nothing f
+  where f Nothing (Just c) = boolToSemiring $ isAlphaNum c
+        f (Just b) (Just c) = boolToSemiring $ (not $ isAlphaNum b) && isAlphaNum c
+        f _ Nothing = zero
+
+endOfWordAfterS :: Semiring s => Reg s Char -> Reg s Char
+endOfWordAfterS r = postS r f Nothing Nothing
+  where f Nothing _ = zero
+        f (Just c) Nothing = boolToSemiring $ isAlphaNum c
+        f (Just c) (Just d) = boolToSemiring $ isAlphaNum c && (not $ isAlphaNum d)
 
 spec :: Spec
 spec = describe "Own extension (base implementation)" $ do
@@ -39,13 +61,53 @@ spec = describe "Own extension (base implementation)" $ do
         test "a" True
         test "b" False
         test "ab" False
-      context "PreMX _ _ _" $ let test = testMatchMX $ startOfWordThen $ sym 'a' in do
-        test "" False
-        test "a" True
-        test "1" False
-        test "-" False
-        test "-a" False
-        test "a-" False
+      context "PreMX _ _ _" $ do
+        context "empty input" $ let f Nothing Nothing = True
+                                    f _ _ = False
+                                    g x y = not $ f x y
+                                    testPos = testMatchMX $ PreMX Nothing f EpsMX
+                                    testNeg = testMatchMX $ PreMX Nothing g EpsMX in do
+          testPos "" True
+          testPos "a" False
+          testNeg "" False
+          testNeg "a" False
+        context "one char" $ let test = testMatchMX $ startOfWordThen $ sym 'a' in do
+          test "" False
+          test "a" True
+          test "1" False
+          test "-" False
+          test "-a" False
+          test "a-" False
+        context "two chars -\\<b" $ let test = testMatchMX $ SeqMX (sym '-') $ startOfWordThen $ sym 'b' in do
+          test "" False
+          test "-" False
+          test "-a" False
+          test "-b" True
+          test "b-" False
+      context "PostMX _ _ _" $ do
+        context "empty input" $ let f Nothing Nothing = True
+                                    f _ _ = False
+                                    g x y = not $ f x y
+                                    testPos = testMatchMX $ PostMX EpsMX Nothing f
+                                    testNeg = testMatchMX $ PostMX EpsMX Nothing g in do
+          testPos "" True
+          testPos "a" False
+          testNeg "" False
+          testNeg "a" False
+        context "one char" $ let test = testMatchMX $ endOfWordAfter $ sym 'a' in do
+          test "" False
+          test "a" True
+          test "1" False
+          test "-" False
+          test "-a" False
+          test "a-" False
+        context "two chars [ab]\\>[a-]" $ let test = testMatchMX $ (endOfWordAfter $ sym 'a' `AltMX` sym 'b') `SeqMX` (sym 'b' `AltMX` sym '-') in do
+          test "" False
+          test "-" False
+          test "-a" False
+          test "-b" False
+          test "b-" True
+          test "aa" False
       context "SeqMX ['a'] ['b']" $ let a = sym 'a'
                                         b = sym 'b'
                                         s = SeqMX a b
@@ -113,11 +175,11 @@ spec = describe "Own extension (base implementation)" $ do
                     , ("abba@aba", True), ("aaa", False)]
   context "has a function matchS that matches text for" $ do
     context "basic operators:" $ do
-      context "epsS" $ let test = testMatchS epsS in do
+      context "epsS" $ let test = testMatchSTwice epsS in do
         test [] True
         test "a" False
         test "ab" False
-      context "symS" $ let testC = testMatchS (symC 'a')
+      context "symS" $ let testC = testMatchSTwice (symC 'a')
                            testOdd = testMatchS $ symS (`mod` (2 :: Int)) in do
         testC "" (0 :: Int)
         testC "a" 1
@@ -128,7 +190,7 @@ spec = describe "Own extension (base implementation)" $ do
         testOdd [2] 0
         testOdd [3] 1
         testOdd [1, 3] 0
-      context "altS" $ let test = testMatchS $ altS (symC 'a') (symC 'b') in do
+      context "altS" $ let test = testMatchSTwice $ altS (symC 'a') (symC 'b') in do
         test "" False
         test "a" True
         test "b" True
@@ -136,7 +198,7 @@ spec = describe "Own extension (base implementation)" $ do
         test "ab" False
         test "aa" False
         test "cc" False
-      context "seqS" $ let test = testMatchS $ seqS (symC 'a') (symC 'b') in do
+      context "seqS" $ let test = testMatchSTwice $ seqS (symC 'a') (symC 'b') in do
         test [] False
         test "a" False
         test "b" False
@@ -154,9 +216,56 @@ spec = describe "Own extension (base implementation)" $ do
         test [1, 2, 4] 2
         test [1, 2, 4, 5] 4
         test [2, 5, 8, 11] 16
+      context "PreS _ _ _" $ do
+        context "empty input" $ let f Nothing Nothing = True
+                                    f _ _ = False
+                                    g x y = not $ f x y
+                                    testPos = testMatchSTwice $ postS epsS f Nothing Nothing
+                                    testNeg = testMatchSTwice $ postS epsS g Nothing Nothing in do
+          testPos "" True
+          testPos "a" False
+          testNeg "" False
+          testNeg "a" False
+        context "one char" $ let test = testMatchSTwice $ startOfWordThenS $ symC 'a' in do
+          test "" False
+          test "a" True
+          test "1" False
+          test "-" False
+          test "-a" False
+          test "a-" False
+        context "two chars -\\<b" $ let test = testMatchSTwice $ seqS (symC '-') $ startOfWordThenS $ symC 'b' in do
+          test "" False
+          test "-" False
+          test "-a" False
+          test "-b" True
+          test "b-" False
+      context "PostS _ _ _" $ do
+        context "empty input" $ let f Nothing Nothing = True
+                                    f _ _ = False
+                                    g x y = not $ f x y
+                                    testPos = testMatchSTwice $ postS epsS f Nothing Nothing
+                                    testNeg = testMatchSTwice $ postS epsS g Nothing Nothing in do
+          testPos "" True
+          testPos "a" False
+          testNeg "" False
+          testNeg "a" False
+        context "one char" $ let test = testMatchSTwice $ endOfWordAfterS $ symC 'a' in do
+          test "" False
+          test "a" True
+          test "1" False
+          test "-" False
+          test "-a" False
+          test "a-" False
+        context "two chars [ab]\\>[a-]" $ let test = testMatchSTwice $ (endOfWordAfterS $ symC 'a' `altS` symC 'b') `seqS` (symC 'b' `altS` symC '-') in do
+          test "" False
+          test "-" False
+          test "-a" False
+          test "-b" False
+          test "b-" True
+          test "aa" False
     context "more complex regular expressions" $ do
       context "eps*" $ do
-        let test = testMatchS $ repS epsS in do
+        let test = testMatchSTwice $ repS epsS in do
           test "" True
           test "a" False
           test "bc" False
@@ -167,13 +276,13 @@ spec = describe "Own extension (base implementation)" $ do
           a8 = seqS a4 a4
           a10 = seqS a8 a2 in do
         context "(a|eps)" $
-          let test = testMatchS aOrEps in do
+          let test = testMatchSTwice aOrEps in do
             test "" True
             test "a" True
             test "b" False
             test "aa" False
         context "(a|eps)*" $
-          let test = testMatchS $ repS aOrEps in do
+          let test = testMatchSTwice $ repS aOrEps in do
             test "" True
             test "a" True
             test "b" False
@@ -181,13 +290,13 @@ spec = describe "Own extension (base implementation)" $ do
             test "ba" False
             test "ab" False
         context "a{4}" $
-          let test = testMatchS $ a4 in do
+          let test = testMatchSTwice $ a4 in do
             flip mapM_ [0..6] $ \len -> do
               test (replicate len 'a') $ len == 4
               test ('b':(replicate len 'a')) False
               test ((replicate len 'a') ++ "b") False
         context "(a|<eps>)*a{10}" $
-          let test = testMatchS $ seqS (repS aOrEps) a10 in do
+          let test = testMatchSTwice $ seqS (repS aOrEps) a10 in do
             flip mapM_ [0..20] $ \len -> do
               test (replicate len 'a') $ len >= 10
               test ('b':(replicate len 'a')) False
@@ -205,7 +314,7 @@ spec = describe "Own extension (base implementation)" $ do
             aOrB4 = seqS aOrB2 aOrB2
             aOrB8 = seqS aOrB4 aOrB4
             aOrB16 = seqS aOrB8 aOrB8
-            test = testMatchS $ seqS (seqS (repS a) b) $ seqS aOrB16 $ seqS b $ repS abOrBa in do
+            test = testMatchSTwice $ seqS (seqS (repS a) b) $ seqS aOrB16 $ seqS b $ repS abOrBa in do
           test "" False
           test "bb" False
           test "bbbbbbbbbbbbbbbbbb" True
@@ -218,4 +327,5 @@ spec = describe "Own extension (base implementation)" $ do
           test "bbbbbbbbabbbbbbbbbbaabababbabaababbab" False
           test "aaabbbbbbbbabbbbbbbbbbaabababbabaababbab" False
           test "aaabbbbbbbbabbbbbbbbbbaabababbabaababbaba" True
-  spec_matchSameWithAndWithoutCaching $ matchS . mxToS
+  spec_matchSameWithAndWithoutCaching mxToS id matchS "matchS"
+  spec_matchSameWithAndWithoutCaching mxToS T.pack tmatchS "tmatchS"

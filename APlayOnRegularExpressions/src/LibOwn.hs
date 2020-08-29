@@ -3,12 +3,15 @@ module LibOwn (
   RegMX(..)
   , Reg
   , altS
+  , boolToSemiring
   , endOfWordAfter
   , epsS
   , libAct2MXtoOwnMX
   , matchMX
   , matchS
   , mxToS
+  , preS
+  , postS
   , repS
   , seqS
   , sequ
@@ -78,7 +81,7 @@ startOfWordThen :: RegMX Char -> RegMX Char
 startOfWordThen = PreMX Nothing f
   where f Nothing _ = True
         f (Just b) (Just c) = (not $ isAlphaNum b) && isAlphaNum c
-        f _ Nothing = False
+        f (Just _) Nothing = False
 
 endOfWordAfter :: RegMX Char -> RegMX Char
 endOfWordAfter r = PostMX r Nothing f
@@ -126,6 +129,8 @@ shift m (SeqMX r s) a mb = SeqMX (shift m r a mb)
 shift m (RepMX r) a mb = RepMX $ shift (m || final r (Just a)) r a mb
 
 matchMX :: (Show a, Eq a) => RegMX a -> [a] -> Bool
+matchMX (PreMX _ f rx) [] = f Nothing Nothing && empty rx
+matchMX (PostMX rx _ f) [] = f Nothing Nothing && empty rx
 matchMX rx [] = empty rx
 matchMX rx [a] = final (shift True rx a Nothing) Nothing
 matchMX rx (a:b:bs) = final (foldl' (shift_ False) (shift_ True rx (a, Just b)) $ zipped b bs) Nothing
@@ -192,7 +197,10 @@ shiftS m (RepS r) x mb = repS $ shiftS (m `splus` finalS r) (regS r) x mb
 
 matchS :: Semiring s => Reg s a -> [a] -> s
 {-# SPECIALISE INLINE matchS :: Reg Bool Char -> String -> Bool #-}
-matchS r [] = emptyS r
+matchS r [] = matchEmptyInput r
+  where matchEmptyInput (Reg { regS=PreS _ f (Reg { emptyS=e })}) = f Nothing Nothing `stimes` e
+        matchEmptyInput (Reg { regS=PostS (Reg { emptyS=e }) f}) = f Nothing Nothing `stimes` e
+        matchEmptyInput (Reg { emptyS=e }) = e
 matchS r [a] = finalS $ shiftS one (regS r) a Nothing
 matchS r (a:b:bs) = finalS (foldl' (shift_ zero . regS) (shift_ one (regS r) (a, Just b)) $ zipped b bs)
   where shift_ f rx (x, mb) = shiftS f rx x mb
@@ -224,7 +232,7 @@ unAnchor r = whatever `seqS` r `seqS` whatever
 tmatchS :: Semiring s => Reg s Char -> T.Text -> s
 {-# SPECIALISE INLINE tmatchS :: Reg Bool Char -> T.Text -> Bool #-}
 tmatchS r t
-  | T.null t = emptyS r
+  | T.null t = matchEmptyInput r
   | otherwise = let a = T.head t
                     as = T.tail t in
                   if T.null as
@@ -235,3 +243,6 @@ tmatchS r t
   where shift_ f rx (x, mb) = shiftS f rx x mb
         zipped x [] = [(x, Nothing)]
         zipped x (y:ys) = (x, Just y):zipped y ys
+        matchEmptyInput (Reg { regS=PreS _ f (Reg { emptyS=e })}) = f Nothing Nothing `stimes` e
+        matchEmptyInput (Reg { regS=PostS (Reg { emptyS=e }) f}) = f Nothing Nothing `stimes` e
+        matchEmptyInput (Reg { emptyS=e }) = e
