@@ -47,10 +47,10 @@ import Semiring (Semiring(..))
 
 data RegMX a = EpsMX
              | SymMX Bool a
-             -- previous ---v---------v          v--- elt
-             | PreMX (Maybe a) (Maybe a -> Maybe a -> Bool) (RegMX a)
-             --       last seen elt ---v---------v          v--- peek next elt
-             | PostMX (RegMX a) (Maybe a) (Maybe a -> Maybe a -> Bool)
+             -- previous ---v          v--- elt
+             | PreMX (Maybe a -> Maybe a -> Bool) (RegMX a)
+             --       last seen elt --------v          v--- peek next elt
+             | PostMX (RegMX a) Bool (Maybe a -> Maybe a -> Bool)
              | AltMX (RegMX a) (RegMX a)
              | SeqMX (RegMX a) (RegMX a)
              | RepMX (RegMX a)
@@ -58,7 +58,7 @@ data RegMX a = EpsMX
 instance Show a => Show (RegMX a) where
   show EpsMX = "EpsMX"
   show (SymMX f a) = "(SymMX " ++ show f ++ " " ++ show a ++ ")"
-  show (PreMX p _ r) = "(PreMX " ++ show p ++ " ? " ++ show r ++ ")"
+  show (PreMX _ r) = "(PreMX " ++ " ? " ++ show r ++ ")"
   show (PostMX r p _) = "(PostMX " ++ show r ++ " " ++ show p ++ " ?)"
   show (AltMX r s) = "(AltMX " ++ show r ++ " " ++ show s ++ ")"
   show (SeqMX r s) = "(SeqMX " ++ show r ++ " " ++ show s ++ ")"
@@ -78,23 +78,22 @@ sequ :: [a] -> RegMX a
 sequ = sequ_ EpsMX sym SeqMX
 
 startOfWordThen :: RegMX Char -> RegMX Char
-startOfWordThen = PreMX Nothing f
-  where f Nothing _ = True
+startOfWordThen = PreMX f
+  where f Nothing (Just c) = isAlphaNum c
         f (Just b) (Just c) = (not $ isAlphaNum b) && isAlphaNum c
-        f (Just _) Nothing = False
+        f _ Nothing = False
 
 endOfWordAfter :: RegMX Char -> RegMX Char
-endOfWordAfter r = PostMX r Nothing f
-  where f Nothing Nothing = True
+endOfWordAfter r = PostMX r False f
+  where f Nothing _ = False
         f (Just c) Nothing = isAlphaNum c
         f (Just c) (Just d) = isAlphaNum c && (not $ isAlphaNum d)
-        f Nothing (Just _) = False
 
 -- True if regular expression matches the empty String
 empty :: RegMX a -> Bool
 empty EpsMX = True
 empty (SymMX _ _) = False
-empty (PreMX _ _ s) = empty s
+empty (PreMX _ s) = empty s
 empty (PostMX s _ _) = empty s
 empty (AltMX a b) = empty a || empty b
 empty (SeqMX a b) = empty a && empty b
@@ -102,41 +101,44 @@ empty (RepMX _) = True
 
 -- | True if final character of regular expression contains is matched
 final :: RegMX a -- ^ regular expression
-      -> Maybe a -- ^ peek next element
       -> Bool
-final EpsMX _ = False
-final (SymMX m _) _ = m
-final (PreMX _ _ r) mb = final r mb
-final (PostMX r ma f) mb = final r mb && f ma mb
-final (AltMX a b) mb = final a mb || final b mb
-final (SeqMX a b) mb = (final a mb && empty b) || final b mb
-final (RepMX a) mb = final a mb
+final EpsMX = False
+final (SymMX m _) = m
+final (PreMX _ r) = final r
+final (PostMX r b _) = b && final r
+final (AltMX a b) = final a || final b
+final (SeqMX a b) = (final a && empty b) || final b
+final (RepMX a) = final a
 
-shift :: Eq a => Bool -> RegMX a -> a -> Maybe a -> RegMX a
-shift _ EpsMX _ _ = EpsMX
-shift m (SymMX _ c) a _ = SymMX (m && a == c) c -- previous symbol was marked and this one matches
-shift m (PreMX p f r) a mb = PreMX (Just a) f $ shift (m && f p (Just a)) r a mb
-shift m (PostMX r _ f) a mb = PostMX (shift m r a mb) (Just a) f
-shift m (AltMX r s) a mb = AltMX (shift m r a mb) (shift m s a mb)
-shift m (SeqMX r s) a mb = SeqMX (shift m r a mb)
-                              $ shift (-- had a match & 1st part of SeqMX matches empty input
-                                       (m && empty r)
-                                       -- or first part has been matched up to the end
-                                       || final r (Just a))
-                                      s
-                                      a
-                                      mb
-shift m (RepMX r) a mb = RepMX $ shift (m || final r (Just a)) r a mb
+shift :: Eq a => Bool -> RegMX a -> (Maybe a, a, Maybe a) -> RegMX a
+shift _ EpsMX _ = EpsMX
+shift m (SymMX _ c) (_, a, _) = SymMX (m && a == c) c -- previous symbol was marked and this one matches
+shift m (PreMX f r) x@(mp, a, _) = PreMX f $ shift (m && f mp (Just a)) r x
+shift m (PostMX r _ f) x@(_, a, mp) = PostMX (shift m r x) (f (Just a) mp) f
+shift m (AltMX r s) x = AltMX (shift m r x) (shift m s x)
+shift m (SeqMX r s) x = SeqMX (shift m r x)
+                            $ shift (-- had a match & 1st part of SeqMX matches empty input
+                                     (m && empty r)
+                                     -- or first part has been matched up to the end
+                                     || final r)
+                                    s
+                                    x
+shift m (RepMX r) x = RepMX $ shift (m || final r) r x
+
+zipDelayed :: a -> a -> [a] -> [(Maybe a, a, Maybe a)]
+zipDelayed a b cs = merge (Just a:Just b:justified) (b:cs) justified
+  where justified = map Just cs
+        merge (x:_) (y:_) [] = [(x, y, Nothing)]
+        merge (x:xs) (y:ys) (z:zs) = (x, y, z):merge xs ys zs
+        merge [] _ _ = error "NOTREACHED 1"
+        merge (_:_) [] _ = error "NOTREACHED 2"
 
 matchMX :: (Show a, Eq a) => RegMX a -> [a] -> Bool
-matchMX (PreMX _ f rx) [] = f Nothing Nothing && empty rx
+matchMX (PreMX f rx) [] = f Nothing Nothing && empty rx
 matchMX (PostMX rx _ f) [] = f Nothing Nothing && empty rx
 matchMX rx [] = empty rx
-matchMX rx [a] = final (shift True rx a Nothing) Nothing
-matchMX rx (a:b:bs) = final (foldl' (shift_ False) (shift_ True rx (a, Just b)) $ zipped b bs) Nothing
-  where shift_ f r (x, mb) = shift f r x mb
-        zipped x [] = [(x, Nothing)]
-        zipped x (y:ys) = (x, Just y):zipped y ys
+matchMX rx [a] = final $ shift True rx (Nothing, a, Nothing)
+matchMX rx (a:b:bs) = final $ foldl' (shift False) (shift True rx (Nothing, a, Just b)) $ zipDelayed a b bs
 
 -- emptyS: True if regular expression matches the empty String
 -- finalS: True if final character of regular expression is matched, i.e.
@@ -215,8 +217,8 @@ boolToSemiring True = one
 mxToS :: (Semiring s, Eq a) => RegMX a -> Reg s a
 mxToS EpsMX = epsS
 mxToS (SymMX _ a) = symS $ \x -> if x == a then one else zero
-mxToS (PreMX p f r) = preS p (\x y -> boolToSemiring $ f x y) $ mxToS r
-mxToS (PostMX r p f) = postS (mxToS r) (\x y -> boolToSemiring $ f x y) p Nothing
+mxToS (PreMX f r) = preS Nothing (\x y -> boolToSemiring $ f x y) $ mxToS r
+mxToS (PostMX r _ f) = postS (mxToS r) (\x y -> boolToSemiring $ f x y) Nothing Nothing
 mxToS (AltMX a b) = altS (mxToS a) (mxToS b)
 mxToS (SeqMX a b) = seqS (mxToS a) (mxToS b)
 mxToS (RepMX r) = repS $ mxToS r

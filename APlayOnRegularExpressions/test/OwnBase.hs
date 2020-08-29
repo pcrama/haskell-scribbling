@@ -65,8 +65,8 @@ spec = describe "Own extension (base implementation)" $ do
         context "empty input" $ let f Nothing Nothing = True
                                     f _ _ = False
                                     g x y = not $ f x y
-                                    testPos = testMatchMX $ PreMX Nothing f EpsMX
-                                    testNeg = testMatchMX $ PreMX Nothing g EpsMX in do
+                                    testPos = testMatchMX $ PreMX f EpsMX
+                                    testNeg = testMatchMX $ PreMX g EpsMX in do
           testPos "" True
           testPos "a" False
           testNeg "" False
@@ -88,8 +88,8 @@ spec = describe "Own extension (base implementation)" $ do
         context "empty input" $ let f Nothing Nothing = True
                                     f _ _ = False
                                     g x y = not $ f x y
-                                    testPos = testMatchMX $ PostMX EpsMX Nothing f
-                                    testNeg = testMatchMX $ PostMX EpsMX Nothing g in do
+                                    testPos = testMatchMX $ PostMX EpsMX False f
+                                    testNeg = testMatchMX $ PostMX EpsMX False g in do
           testPos "" True
           testPos "a" False
           testNeg "" False

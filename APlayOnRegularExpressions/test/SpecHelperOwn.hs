@@ -48,15 +48,15 @@ instance Arbitrary ArbRegMX where
             return $ sym 'b',
             return $ sym '0',
             return $ sym '1',
-            PreMX Nothing letterThenDigitPre <$> (arb' $ n - 1),
-            (\r -> PostMX r Nothing letterThenDigitPost) <$> (arb' $ n - 1),
+            PreMX letterThenDigitPre <$> (arb' $ n - 1),
+            (\r -> PostMX r False letterThenDigitPost) <$> (arb' $ n - 1),
             AltMX <$> (arb' $ n `div` 2) <*> (arb' $ n `div` 2),
             SeqMX <$> (arb' $ n `div` 2) <*> (arb' $ n `div` 2),
             RepMX <$> (arb' $ n `div` 2)]
   shrink (ARX EpsMX) = []
   shrink (ARX (SymMX _ c)) = [ARX EpsMX] ++ if (c == 'a') then [] else [ARX $ sym 'a']
-  shrink (ARX (PreMX _ _ EpsMX)) = []
-  shrink (ARX (PreMX p f r)) = map ARX $ r:(map (\(ARX s) -> PreMX p f s) $ shrink $ ARX r)
+  shrink (ARX (PreMX _ EpsMX)) = []
+  shrink (ARX (PreMX f r)) = map ARX $ r:(map (\(ARX s) -> PreMX f s) $ shrink $ ARX r)
   shrink (ARX (PostMX EpsMX _ _)) = []
   shrink (ARX (PostMX r p f)) = map ARX $ r:(map (\(ARX s) -> PostMX s p f) $ shrink $ ARX r)
   shrink (ARX (AltMX a b)) = [ARX $ sym 'b', ARX a, ARX b]
@@ -119,7 +119,7 @@ instance Arbitrary MatchingRegAndInput where
       return $ MRAI (ARX rx, AIn s)
     where genInput EpsMX = return []
           genInput (SymMX _ c) = return [c]
-          genInput (PreMX _ _ r) = do
+          genInput (PreMX _ r) = do
             attempts <- traverse genInput (replicate 10 r)
             case filter startWithDigit attempts of
               [] -> return []
@@ -148,7 +148,7 @@ instance Arbitrary MatchingRegAndInput where
 nonTrivialMX :: RegMX Char -> Bool
 nonTrivialMX EpsMX = False
 nonTrivialMX (SymMX _ _) = True
-nonTrivialMX (PreMX _ _ r) = nonTrivialMX r
+nonTrivialMX (PreMX _ r) = nonTrivialMX r
 nonTrivialMX (PostMX r _ _) = nonTrivialMX r
 nonTrivialMX (AltMX x y) = nonTrivialMX x || nonTrivialMX y
 nonTrivialMX (SeqMX x y) = nonTrivialMX x || nonTrivialMX y
