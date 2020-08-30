@@ -148,7 +148,7 @@ data Reg s a = Reg { emptyS :: !s, finalS :: !s, regS :: RegS s a }
 
 data RegS s a = EpsS
               | SymS (a -> s)
-              | PreS (Maybe a) (Maybe a -> Maybe a -> s) (Reg s a)
+              | PreS (Maybe a -> Maybe a -> s) (Reg s a)
               | PostS (Reg s a) (Maybe a -> Maybe a -> s)
               | AltS (Reg s a) (Reg s a)
               | SeqS (Reg s a) (Reg s a)
@@ -160,15 +160,16 @@ epsS = Reg { emptyS=one, finalS=zero, regS=EpsS }
 symS :: Semiring s => (a -> s) -> Reg s a
 symS f = Reg { emptyS=zero, finalS=zero, regS=SymS f }
 
-preS :: Semiring s => Maybe a -> (Maybe a -> Maybe a -> s) -> Reg s a -> Reg s a
-preS p f r = Reg { emptyS = emptyS r
-                 , finalS = finalS r
-                 , regS = PreS p f r
-                 }
-postS :: Semiring s => Reg s a -> (Maybe a -> Maybe a -> s) -> Maybe a -> Maybe a -> Reg s a
-postS r f x p = r { finalS = finalS r `stimes` f x p
-                  , regS = PostS r f
-                  }
+preS :: Semiring s => (Maybe a -> Maybe a -> s) -> Reg s a -> Reg s a
+preS f r = r { regS = PreS f r }
+
+postSgen :: Semiring s => Reg s a -> (Maybe a -> Maybe a -> s) -> Maybe a -> Maybe a -> Reg s a
+postSgen r f x p = r { finalS = finalS r `stimes` f x p
+                     , regS = PostS r f
+                     }
+
+postS :: Semiring s => Reg s a -> (Maybe a -> Maybe a -> s) -> Reg s a
+postS r f = postSgen r f Nothing Nothing
 
 altS :: Semiring s => Reg s a -> Reg s a -> Reg s a
 altS r s = Reg { emptyS = emptyS r `splus` emptyS s
@@ -181,33 +182,31 @@ seqS r s = Reg { emptyS = emptyS r `stimes` emptyS s
                , finalS = (finalS r `stimes` emptyS s) `splus` finalS s
                , regS = SeqS r s
                }
+
 repS :: Semiring s => Reg s a -> Reg s a
 repS r@(Reg { finalS = f }) = Reg { emptyS = one, finalS = f, regS = RepS r }
 
-shiftS :: Semiring s => s -> RegS s a -> a -> Maybe a -> Reg s a
-shiftS _ EpsS _ _ = epsS
-shiftS m (SymS f) x _ = (symS f) { finalS=m `stimes` f x }
-shiftS m (PreS ma f r) x mb = preS (Just x) f $ shiftS (m `stimes` f ma (Just x)) (regS r) x mb
-shiftS m (PostS r f) x mb = postS (shiftS m (regS r) x mb) f (Just x) mb
-shiftS m (AltS p q) x mb = altS p' q'
-  where p' = shiftS m (regS p) x mb
-        q' = shiftS m (regS q) x mb
-shiftS m (SeqS p q) x mb = seqS p' q'
-  where p' = shiftS m (regS p) x mb
-        q' = shiftS ((m `stimes` emptyS p) `splus` finalS p) (regS q) x mb
-shiftS m (RepS r) x mb = repS $ shiftS (m `splus` finalS r) (regS r) x mb
+shiftS :: Semiring s => s -> RegS s a -> (Maybe a, a, Maybe a) -> Reg s a
+shiftS _ EpsS _ = epsS
+shiftS m (SymS f) (_, x, _) = (symS f) { finalS=m `stimes` f x }
+shiftS m (PreS f r) x@(mp, a, _) = preS f $ shiftS (m `stimes` f mp (Just a)) (regS r) x
+shiftS m (PostS r f) x@(_, a, mb) = postSgen (shiftS m (regS r) x) f (Just a) mb
+shiftS m (AltS p q) x = altS p' q'
+  where p' = shiftS m (regS p) x
+        q' = shiftS m (regS q) x
+shiftS m (SeqS p q) x = seqS p' q'
+  where p' = shiftS m (regS p) x
+        q' = shiftS ((m `stimes` emptyS p) `splus` finalS p) (regS q) x
+shiftS m (RepS r) x = repS $ shiftS (m `splus` finalS r) (regS r) x
 
 matchS :: Semiring s => Reg s a -> [a] -> s
 {-# SPECIALISE INLINE matchS :: Reg Bool Char -> String -> Bool #-}
 matchS r [] = matchEmptyInput r
-  where matchEmptyInput (Reg { regS=PreS _ f (Reg { emptyS=e })}) = f Nothing Nothing `stimes` e
-        matchEmptyInput (Reg { regS=PostS (Reg { emptyS=e }) f}) = f Nothing Nothing `stimes` e
+  where matchEmptyInput (Reg { regS=PreS f (Reg { emptyS=e })}) = e `stimes` f Nothing Nothing
+        matchEmptyInput (Reg { regS=PostS (Reg { emptyS=e }) f}) = e `stimes` f Nothing Nothing
         matchEmptyInput (Reg { emptyS=e }) = e
-matchS r [a] = finalS $ shiftS one (regS r) a Nothing
-matchS r (a:b:bs) = finalS (foldl' (shift_ zero . regS) (shift_ one (regS r) (a, Just b)) $ zipped b bs)
-  where shift_ f rx (x, mb) = shiftS f rx x mb
-        zipped x [] = [(x, Nothing)]
-        zipped x (y:ys) = (x, Just y):zipped y ys
+matchS r [a] = finalS $ shiftS one (regS r) (Nothing, a, Nothing)
+matchS r (a:b:bs) = finalS $ foldl' (shiftS zero . regS) (shiftS one (regS r) (Nothing, a, Just b)) $ zipDelayed a b bs
 
 boolToSemiring :: Semiring s => Bool -> s
 {-# SPECIALISE INLINE boolToSemiring :: Bool -> Bool #-}
@@ -217,8 +216,8 @@ boolToSemiring True = one
 mxToS :: (Semiring s, Eq a) => RegMX a -> Reg s a
 mxToS EpsMX = epsS
 mxToS (SymMX _ a) = symS $ \x -> if x == a then one else zero
-mxToS (PreMX f r) = preS Nothing (\x y -> boolToSemiring $ f x y) $ mxToS r
-mxToS (PostMX r _ f) = postS (mxToS r) (\x y -> boolToSemiring $ f x y) Nothing Nothing
+mxToS (PreMX f r) = preS (\x y -> boolToSemiring $ f x y) $ mxToS r
+mxToS (PostMX r _ f) = postS (mxToS r) (\x y -> boolToSemiring $ f x y)
 mxToS (AltMX a b) = altS (mxToS a) (mxToS b)
 mxToS (SeqMX a b) = seqS (mxToS a) (mxToS b)
 mxToS (RepMX r) = repS $ mxToS r
@@ -238,13 +237,10 @@ tmatchS r t
   | otherwise = let a = T.head t
                     as = T.tail t in
                   if T.null as
-                  then finalS $ shiftS one (regS r) a Nothing
+                  then finalS $ shiftS one (regS r) (Nothing, a, Nothing)
                   else let b = T.head as
                            bs = T.tail as in
-                         finalS (foldl' (shift_ zero . regS) (shift_ one (regS r) (a, Just b)) $ zipped b $ T.unpack bs)
-  where shift_ f rx (x, mb) = shiftS f rx x mb
-        zipped x [] = [(x, Nothing)]
-        zipped x (y:ys) = (x, Just y):zipped y ys
-        matchEmptyInput (Reg { regS=PreS _ f (Reg { emptyS=e })}) = f Nothing Nothing `stimes` e
-        matchEmptyInput (Reg { regS=PostS (Reg { emptyS=e }) f}) = f Nothing Nothing `stimes` e
+                         finalS (foldl' (shiftS zero . regS) (shiftS one (regS r) (Nothing, a, Just b)) $ zipDelayed a b $ T.unpack bs)
+  where matchEmptyInput (Reg { regS=PreS f (Reg { emptyS=e })}) = e `stimes` f Nothing Nothing
+        matchEmptyInput (Reg { regS=PostS (Reg { emptyS=e }) f}) = e `stimes` f Nothing Nothing
         matchEmptyInput (Reg { emptyS=e }) = e

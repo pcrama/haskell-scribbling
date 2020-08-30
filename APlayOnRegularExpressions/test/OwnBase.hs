@@ -37,13 +37,13 @@ symC :: Semiring s => Char -> Reg s Char
 symC c = symS $ \x -> if x == c then one else zero
 
 startOfWordThenS :: Semiring s => Reg s Char -> Reg s Char
-startOfWordThenS = preS Nothing f
+startOfWordThenS = preS f
   where f Nothing (Just c) = boolToSemiring $ isAlphaNum c
         f (Just b) (Just c) = boolToSemiring $ (not $ isAlphaNum b) && isAlphaNum c
         f _ Nothing = zero
 
 endOfWordAfterS :: Semiring s => Reg s Char -> Reg s Char
-endOfWordAfterS r = postS r f Nothing Nothing
+endOfWordAfterS r = postS r f
   where f Nothing _ = zero
         f (Just c) Nothing = boolToSemiring $ isAlphaNum c
         f (Just c) (Just d) = boolToSemiring $ isAlphaNum c && (not $ isAlphaNum d)
@@ -220,8 +220,8 @@ spec = describe "Own extension (base implementation)" $ do
         context "empty input" $ let f Nothing Nothing = True
                                     f _ _ = False
                                     g x y = not $ f x y
-                                    testPos = testMatchSTwice $ postS epsS f Nothing Nothing
-                                    testNeg = testMatchSTwice $ postS epsS g Nothing Nothing in do
+                                    testPos = testMatchSTwice $ postS epsS f
+                                    testNeg = testMatchSTwice $ postS epsS g in do
           testPos "" True
           testPos "a" False
           testNeg "" False
@@ -243,8 +243,8 @@ spec = describe "Own extension (base implementation)" $ do
         context "empty input" $ let f Nothing Nothing = True
                                     f _ _ = False
                                     g x y = not $ f x y
-                                    testPos = testMatchSTwice $ postS epsS f Nothing Nothing
-                                    testNeg = testMatchSTwice $ postS epsS g Nothing Nothing in do
+                                    testPos = testMatchSTwice $ postS epsS f
+                                    testNeg = testMatchSTwice $ postS epsS g in do
           testPos "" True
           testPos "a" False
           testNeg "" False

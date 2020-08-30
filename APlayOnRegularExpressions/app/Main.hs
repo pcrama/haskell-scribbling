@@ -63,15 +63,24 @@ buildMatcher = work
           where half = n `div` 2
         matchCompile Two = LibAct2.matchS . LibAct2.mxToS
         matchCompile Three = LibAct3.matchS . LibAct3.mxToS
-        matchCompile Own = LibOwn.matchS . LibOwn.mxToS . LibOwn.libAct2MXtoOwnMX
+        matchCompile Own = LibOwn.matchS . LibOwn.mxToS . prePosterize
         matchWrapCompile Two = LibAct2.matchS . LibAct2.unAnchor . LibAct2.mxToS
         matchWrapCompile Three = LibAct3.matchS . LibAct3.unAnchor . LibAct3.mxToS
-        matchWrapCompile Own = LibOwn.matchS . LibOwn.unAnchor . LibOwn.mxToS . LibOwn.libAct2MXtoOwnMX
+        matchWrapCompile Own = LibOwn.matchS . LibOwn.unAnchor . LibOwn.mxToS . prePosterize
         a = sym 'a'
         buildAn libToUse n = (seqn libToUse n $ a `AltMX` EpsMX) `SeqMX` (seqn libToUse n a)
         aOrB = a `AltMX` sym 'b'
         repAorB = RepMX aOrB
         buildAnA libToUse n = repAorB `SeqMX` a `SeqMX` (seqn libToUse n aOrB) `SeqMX` a `SeqMX` repAorB
+        prePosterize LibAct2.EpsMX = LibOwn.EpsMX
+        prePosterize (LibAct2.SymMX _ c) = LibOwn.PreMX f $ LibOwn.PostMX (LibOwn.sym c) False g
+          where f _ Nothing = False
+                f _ (Just d) = d == c
+                g Nothing _ = False
+                g (Just d) _ = d == c
+        prePosterize (LibAct2.AltMX r s) = prePosterize r `LibOwn.AltMX` prePosterize s
+        prePosterize (LibAct2.SeqMX r s) = prePosterize r `LibOwn.SeqMX` prePosterize s
+        prePosterize (LibAct2.RepMX r) = LibOwn.RepMX $ prePosterize r
 
 buildTMatcher :: LibToUse -> RegExpToUse -> (T.Text -> Bool)
 buildTMatcher = work
@@ -85,12 +94,21 @@ buildTMatcher = work
           where half = n `div` 2
         matchCompile Two = LibAct2.tmatchS . LibAct2.mxToS
         matchCompile Three = LibAct3.tmatchS . LibAct3.mxToS
-        matchCompile Own = LibOwn.tmatchS . LibOwn.mxToS . LibOwn.libAct2MXtoOwnMX
+        matchCompile Own = LibOwn.tmatchS . LibOwn.mxToS . prePosterize
         matchWrapCompile Two = LibAct2.tmatchS . LibAct2.unAnchor . LibAct2.mxToS
         matchWrapCompile Three = LibAct3.tmatchS . LibAct3.unAnchor . LibAct3.mxToS
-        matchWrapCompile Own = LibOwn.tmatchS . LibOwn.unAnchor . LibOwn.mxToS . LibOwn.libAct2MXtoOwnMX
+        matchWrapCompile Own = LibOwn.tmatchS . LibOwn.unAnchor . LibOwn.mxToS . prePosterize
         a = sym 'a'
         buildAn libToUse n = (seqn libToUse n $ a `AltMX` EpsMX) `SeqMX` (seqn libToUse n a)
         aOrB = a `AltMX` sym 'b'
         repAorB = RepMX aOrB
         buildAnA libToUse n = repAorB `SeqMX` a `SeqMX` (seqn libToUse n aOrB) `SeqMX` a `SeqMX` repAorB
+        prePosterize LibAct2.EpsMX = LibOwn.EpsMX
+        prePosterize (LibAct2.SymMX _ c) = LibOwn.PreMX f $ LibOwn.PostMX (LibOwn.sym c) False g
+          where f _ Nothing = False
+                f _ (Just d) = d == c
+                g Nothing _ = False
+                g (Just d) _ = d == c
+        prePosterize (LibAct2.AltMX r s) = prePosterize r `LibOwn.AltMX` prePosterize s
+        prePosterize (LibAct2.SeqMX r s) = prePosterize r `LibOwn.SeqMX` prePosterize s
+        prePosterize (LibAct2.RepMX r) = LibOwn.RepMX $ prePosterize r
