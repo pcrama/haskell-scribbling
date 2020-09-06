@@ -22,15 +22,13 @@ import LibAct2 (
 newtype ArbRegMX = ARX (RegMX Char)
   deriving Show
 
-letterThenDigitPre :: Maybe Char -> Maybe Char -> Bool
-letterThenDigitPre _ Nothing = False
-letterThenDigitPre Nothing (Just d) = isDigit d
-letterThenDigitPre (Just c) (Just d) = isLetter c && isDigit d
+letterThenDigitPre :: Maybe Char -> Char -> Bool
+letterThenDigitPre Nothing d = isDigit d
+letterThenDigitPre (Just c) d = isLetter c && isDigit d
 
-letterThenDigitPost :: Maybe Char -> Maybe Char -> Bool
-letterThenDigitPost Nothing _ = False
-letterThenDigitPost (Just c) Nothing = isLetter c
-letterThenDigitPost (Just c) (Just d) = isLetter c && isDigit d
+letterThenDigitPost :: Char -> Maybe Char -> Bool
+letterThenDigitPost c Nothing = isLetter c
+letterThenDigitPost c (Just d) = isLetter c && isDigit d
 
 startWithDigit :: [Char] -> Bool
 startWithDigit [] = False
@@ -48,17 +46,17 @@ instance Arbitrary ArbRegMX where
             return $ sym 'b',
             return $ sym '0',
             return $ sym '1',
-            PreMX letterThenDigitPre <$> (arb' $ n - 1),
-            (\r -> PostMX r False letterThenDigitPost) <$> (arb' $ n - 1),
+            PreMX False letterThenDigitPre <$> (arb' $ n - 1),
+            (\r -> PostMX r False letterThenDigitPost False) <$> (arb' $ n - 1),
             AltMX <$> (arb' $ n `div` 2) <*> (arb' $ n `div` 2),
             SeqMX <$> (arb' $ n `div` 2) <*> (arb' $ n `div` 2),
             RepMX <$> (arb' $ n `div` 2)]
   shrink (ARX EpsMX) = []
   shrink (ARX (SymMX _ c)) = [ARX EpsMX] ++ if (c == 'a') then [] else [ARX $ sym 'a']
-  shrink (ARX (PreMX _ EpsMX)) = []
-  shrink (ARX (PreMX f r)) = map ARX $ r:(map (\(ARX s) -> PreMX f s) $ shrink $ ARX r)
-  shrink (ARX (PostMX EpsMX _ _)) = []
-  shrink (ARX (PostMX r p f)) = map ARX $ r:(map (\(ARX s) -> PostMX s p f) $ shrink $ ARX r)
+  shrink (ARX (PreMX _ _ EpsMX)) = []
+  shrink (ARX (PreMX e f r)) = map ARX $ r:(map (\(ARX s) -> PreMX e f s) $ shrink $ ARX r)
+  shrink (ARX (PostMX EpsMX _ _ _)) = []
+  shrink (ARX (PostMX r p f e)) = map ARX $ r:(map (\(ARX s) -> PostMX s p f e) $ shrink $ ARX r)
   shrink (ARX (AltMX a b)) = [ARX $ sym 'b', ARX a, ARX b]
                           ++ [ARX $ AltMX a' b'
                              | ARX a' <- (shrink $ ARX a)
@@ -119,12 +117,12 @@ instance Arbitrary MatchingRegAndInput where
       return $ MRAI (ARX rx, AIn s)
     where genInput EpsMX = return []
           genInput (SymMX _ c) = return [c]
-          genInput (PreMX _ r) = do
+          genInput (PreMX _ _ r) = do
             attempts <- traverse genInput (replicate 10 r)
             case filter startWithDigit attempts of
               [] -> return []
               probablyValid -> oneof $ map return probablyValid
-          genInput (PostMX r _ _) = do
+          genInput (PostMX r _ _ _) = do
             attempts <- traverse genInput (replicate 10 r)
             case filter endWithLetter attempts of
               [] -> return []
@@ -148,8 +146,8 @@ instance Arbitrary MatchingRegAndInput where
 nonTrivialMX :: RegMX Char -> Bool
 nonTrivialMX EpsMX = False
 nonTrivialMX (SymMX _ _) = True
-nonTrivialMX (PreMX _ r) = nonTrivialMX r
-nonTrivialMX (PostMX r _ _) = nonTrivialMX r
+nonTrivialMX (PreMX _ _ r) = nonTrivialMX r
+nonTrivialMX (PostMX r _ _ _) = nonTrivialMX r
 nonTrivialMX (AltMX x y) = nonTrivialMX x || nonTrivialMX y
 nonTrivialMX (SeqMX x y) = nonTrivialMX x || nonTrivialMX y
 nonTrivialMX (RepMX x) = nonTrivialMX x

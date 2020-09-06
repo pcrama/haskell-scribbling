@@ -7,7 +7,7 @@ import Data.Char (isAlphaNum)
 import qualified Data.Text as T
 
 import LibOwn
-import Semiring (Semiring(..))
+import Semiring (Semiring(..), SemiringEq)
 import SpecHelperOwn
 
 testMatchMX :: (Show a, Eq a)
@@ -20,13 +20,13 @@ testAll :: Monad m => (x -> y -> m a) -> [(x, y)] -> m ()
 testAll f = foldr g (return ())
   where g (x, y) m = f x y >> m
 
-testMatchS :: (Show a, Eq a, Show s, Eq s, Semiring s)
+testMatchS :: (Show a, Eq a, Show s, Eq s, SemiringEq s)
             => Reg s a -> [a] -> s -> SpecWith ()
 testMatchS r as expected =
   it ((if (expected == zero) then "rejec" else "accep") ++ "ts " ++ show as) $
      matchS r as `shouldBe` expected
 
-testMatchSTwice :: (Show s, Eq s, Semiring s)
+testMatchSTwice :: (Show s, Eq s, SemiringEq s)
                 => Reg s Char -> [Char] -> s -> SpecWith ()
 testMatchSTwice r as expected =
   let verb s = (if (expected == zero) then "rejec" else "accep") ++ "ts " ++ show as ++ " (" ++ s ++ ")" in do
@@ -37,16 +37,14 @@ symC :: Semiring s => Char -> Reg s Char
 symC c = symS $ \x -> if x == c then one else zero
 
 startOfWordThenS :: Semiring s => Reg s Char -> Reg s Char
-startOfWordThenS = preS f
-  where f Nothing (Just c) = boolToSemiring $ isAlphaNum c
-        f (Just b) (Just c) = boolToSemiring $ (not $ isAlphaNum b) && isAlphaNum c
-        f _ Nothing = zero
+startOfWordThenS = preS zero f
+  where f Nothing c = boolToSemiring $ isAlphaNum c
+        f (Just b) c = boolToSemiring $ (not $ isAlphaNum b) && isAlphaNum c
 
 endOfWordAfterS :: Semiring s => Reg s Char -> Reg s Char
-endOfWordAfterS r = postS r f
-  where f Nothing _ = zero
-        f (Just c) Nothing = boolToSemiring $ isAlphaNum c
-        f (Just c) (Just d) = boolToSemiring $ isAlphaNum c && (not $ isAlphaNum d)
+endOfWordAfterS r = postS r f zero
+  where f c Nothing = boolToSemiring $ isAlphaNum c
+        f c (Just d) = boolToSemiring $ isAlphaNum c && (not $ isAlphaNum d)
 
 spec :: Spec
 spec = describe "Own extension (base implementation)" $ do
@@ -62,11 +60,10 @@ spec = describe "Own extension (base implementation)" $ do
         test "b" False
         test "ab" False
       context "PreMX _ _ _" $ do
-        context "empty input" $ let f Nothing Nothing = True
-                                    f _ _ = False
+        context "empty input" $ let f _ _ = False
                                     g x y = not $ f x y
-                                    testPos = testMatchMX $ PreMX f EpsMX
-                                    testNeg = testMatchMX $ PreMX g EpsMX in do
+                                    testPos = testMatchMX $ PreMX True f EpsMX
+                                    testNeg = testMatchMX $ PreMX False g EpsMX in do
           testPos "" True
           testPos "a" False
           testNeg "" False
@@ -84,12 +81,11 @@ spec = describe "Own extension (base implementation)" $ do
           test "-a" False
           test "-b" True
           test "b-" False
-      context "PostMX _ _ _" $ do
-        context "empty input" $ let f Nothing Nothing = True
-                                    f _ _ = False
+      context "PostMX _ _ _ _" $ do
+        context "empty input" $ let f _ _ = False
                                     g x y = not $ f x y
-                                    testPos = testMatchMX $ PostMX EpsMX False f
-                                    testNeg = testMatchMX $ PostMX EpsMX False g in do
+                                    testPos = testMatchMX $ PostMX EpsMX False f True
+                                    testNeg = testMatchMX $ PostMX EpsMX False g False in do
           testPos "" True
           testPos "a" False
           testNeg "" False
@@ -217,11 +213,10 @@ spec = describe "Own extension (base implementation)" $ do
         test [1, 2, 4, 5] 4
         test [2, 5, 8, 11] 16
       context "PreS _ _ _" $ do
-        context "empty input" $ let f Nothing Nothing = True
-                                    f _ _ = False
+        context "empty input" $ let f _ _ = False
                                     g x y = not $ f x y
-                                    testPos = testMatchSTwice $ postS epsS f
-                                    testNeg = testMatchSTwice $ postS epsS g in do
+                                    testPos = testMatchSTwice $ preS one f epsS
+                                    testNeg = testMatchSTwice $ preS zero g epsS in do
           testPos "" True
           testPos "a" False
           testNeg "" False
@@ -240,11 +235,10 @@ spec = describe "Own extension (base implementation)" $ do
           test "-b" True
           test "b-" False
       context "PostS _ _ _" $ do
-        context "empty input" $ let f Nothing Nothing = True
-                                    f _ _ = False
+        context "empty input" $ let f _ _ = False
                                     g x y = not $ f x y
-                                    testPos = testMatchSTwice $ postS epsS f
-                                    testNeg = testMatchSTwice $ postS epsS g in do
+                                    testPos = testMatchSTwice $ postS epsS f one
+                                    testNeg = testMatchSTwice $ postS epsS g zero in do
           testPos "" True
           testPos "a" False
           testNeg "" False

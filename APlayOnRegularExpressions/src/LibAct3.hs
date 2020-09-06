@@ -102,6 +102,7 @@ repS_ r = Reg { activeS = activeS r
               , regS = RepS r }
 
 finalA :: Semiring s => Reg s a -> s
+{-# SPECIALISE INLINE finalA :: Reg Bool Char -> Bool #-}
 finalA r = if activeS r then finalS r else zero
 
 shiftS :: SemiringEq s => s -> Reg s a -> a -> Reg s a
