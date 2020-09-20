@@ -95,6 +95,7 @@ test-suite spec
                      , Act2Scene2
                      , Act3Scene1
                      , OwnBase
+                     , OwnMatchGroup
                      , SemiringSpec
                      , SpecHelper
                      , SpecHelperOwn

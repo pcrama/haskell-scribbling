@@ -1,6 +1,8 @@
 -- Expand on ideas of LibAct2 & LibAct3
 module LibOwn (
-  RegMX(..)
+  MatchGroup(..)
+  , MatchInfo(..)
+  , RegMX(..)
   , Reg
   , altS
   , boolToSemiring
@@ -8,6 +10,7 @@ module LibOwn (
   , epsS
   , libAct2MXtoOwnMX
   , matchMX
+  , mergeMatchInfo -- for test purposes
   , matchS
   , mxToS
   , preS
@@ -275,3 +278,43 @@ tmatchS r t
   where matchEmptyInput (Reg { regS=PreS v _ (Reg { emptyS=e })}) = e `stimes` v
         matchEmptyInput (Reg { regS=PostS (Reg { emptyS=e }) _ v}) = e `stimes` v
         matchEmptyInput (Reg { emptyS=e }) = e
+
+data MatchGroup = NoMG | MG MatchInfo
+  deriving (Show, Eq)
+
+data MatchInfo = MI [(Int, Int, Maybe Int)]
+  deriving (Show, Eq)
+
+instance Semiring MatchGroup where
+  zero = NoMG
+  one = MG $ MI []
+  NoMG `splus` x = x
+  x `splus` NoMG = x
+  (MG (MI as)) `splus` (MG (MI bs)) = MG . MI $ mergeMatchInfo as bs
+  NoMG `stimes` _ = NoMG
+  _ `stimes` NoMG = NoMG
+  (MG (MI as)) `stimes` (MG (MI bs)) = MG . MI $ mergeMatchInfo as bs
+
+mergeMatchInfo :: (Ord a, Ord b)
+               => [(a, b, Maybe b)] -> [(a, b, Maybe b)] -> [(a, b, Maybe b)]
+mergeMatchInfo as [] = as
+mergeMatchInfo [] bs = bs
+mergeMatchInfo xxx@(xx@(ai, ab, mbAe):as) yyy@(yy@(bi, bb, mbBe):bs)
+  | ai < bi = xx:mergeMatchInfo as yyy
+  | ai > bi = yy:mergeMatchInfo xxx bs
+  -- ai == bi if we get here:
+  | ab <= bb = case (mbAe, mbBe) of
+                 (_, Nothing) -> aOnly
+                 (Nothing, _) -> bOnly
+                 (Just a, Just b) -> case (ab == bb, a == b, a > b) of
+                                       -- ab < bb
+                                       (False, _, _) -> aFirst -- leftmost first
+                                       -- both groups start on same element
+                                       (True, True, _) -> aOnly -- end on same element -> duplicates
+                                       (True, False, True) -> aFirst -- longest first
+                                       (True, False, False) -> bFirst -- longest first
+  | otherwise = mergeMatchInfo yyy xxx
+  where aFirst = xx:mergeMatchInfo as yyy
+        bFirst = yy:mergeMatchInfo xxx bs
+        aOnly = xx:mergeMatchInfo as bs
+        bOnly = yy:mergeMatchInfo as bs

@@ -9,6 +9,7 @@ import qualified Act2Scene1
 import qualified Act2Scene2
 import qualified Act3Scene1
 import qualified OwnBase
+import qualified OwnMatchGroup
 
 main :: IO ()
 main = hspec $ do
@@ -19,3 +20,4 @@ main = hspec $ do
   Act2Scene2.spec
   Act3Scene1.spec
   OwnBase.spec
+  OwnMatchGroup.spec
