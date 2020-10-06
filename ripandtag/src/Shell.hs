@@ -3,6 +3,7 @@ module Shell
   ( safeTrackName
   , breakOnPredicate -- for testing purposes
   , shellCommands
+  , Extractor(..)
   )
 
 where
@@ -86,14 +87,22 @@ safeTrackName x = makeSafe
               l = length s
           in Just $ if l < w then replicate (w - l) '0' ++ s else s
 
-shellCommands :: [PreciseTrackRipSpec] -> [String]
-shellCommands = map shellCommand
-  where shellCommand :: PreciseTrackRipSpec -> String
+data Extractor = Icedax | Cdda2Wav
+
+shellCommands :: Extractor -> [PreciseTrackRipSpec] -> [String]
+shellCommands extractor = map shellCommand
+  where extractToStdout :: Extractor -> PreciseTrackRipSpec -> String
+        extractToStdout Icedax trs = "icedax -vall cddb=0 speed=4 -D /dev/sr0 --track "
+                                     ++ (show $ track trs)
+                                     ++ " - | "
+        extractToStdout Cdda2Wav trs = "cdda2wav -O wav -t "
+                                       ++ (show $ track trs)
+                                       ++ " - | "
+        shellCommand :: PreciseTrackRipSpec -> String
         shellCommand trs =
           let trackStr = show $ track trs
-          in "icedax -vall cddb=0 speed=4 -D /dev/sr0 --track "
-             ++ trackStr
-             ++ " - | " -- write audio samples to stdout, then pipe to ...
+          in extractToStdout extractor trs
+             -- write audio samples to stdout, then pipe to ...
              ++ "lame --preset 128 --add-id3v2 --id3v2-latin1"
              ++ (mkAccStringField title "tt"
                . mkAccStringField artist "ta"
