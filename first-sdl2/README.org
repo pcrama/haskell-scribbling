@@ -20,4 +20,4 @@ Install the following packages:
 Use ~cabal new-run first-sdl2 "$(fc-match --format "%{file}")"~.
 
 To revert to previous state run:
-    cabal update --index-state='2019-06-20T07:03:20Z'
+    cabal update --index-state='2020-02-20T14:50:35Z'
