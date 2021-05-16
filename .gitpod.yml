@@ -1,0 +1,99 @@
+# Dockerfile copied from https://github.com/complyue/GHCiCode under the
+# BSD 3-Clause License
+#
+# Copyright (c) Compl Yue. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+image:
+  file: .gitpod.Dockerfile
+
+tasks:
+  - name: Setup Haskell Tooling
+
+    # These will run only for Gitpod workspace pre-building
+    init: |
+      # ~/.ghcup will be lost across Gitpod workspace restarts,
+      # install ghcup to /workspace/ so it is persisted as part of prebuilt workspace
+      # Note `/workspace/.ghcup/bin` should have been added to PATH in Dockerfile
+      mkdir -p /workspace/.ghcup/bin || true
+      curl -sSL https://downloads.haskell.org/~ghcup/x86_64-linux-ghcup \
+            -o /workspace/.ghcup/bin/ghcup
+      chmod a+x /workspace/.ghcup/bin/ghcup
+      # Install ghc/cabal-install/hls via ghcup
+      ghcup upgrade
+      ghcup install ghc
+      # It should has been told ENV CABAL_DIR=/workspace/.cabal in Dockerfile
+      # Also `/workspace/.cabal/bin` should have been added to PATH in Dockerfile
+      ghcup install cabal
+      ghcup install hls
+      # set default version of GHC, or simple cmd like `ghci` and `cabal repl all` won't work
+      ghcup set ghc
+      # Install stack to /workspace/
+      # Note `/workspace/.local/bin` should have been added to PATH in Dockerfile
+      mkdir -p /workspace/.local/bin || true
+      curl -sSL https://get.haskellstack.org/stable/linux-x86_64.tar.gz | \
+        tar -xzf - \
+          --strip-components=1 -C /workspace/.local/bin --wildcards '*/stack'
+      # In case stack would be used, you want to setup GHC and other things for
+      # the project right now. Or hls will race to do similar things on IDE
+      # startup, which tends to corrupt things with unstable network connection.
+      cd /workspace/GHCiCode
+      stack setup
+
+    # These will run each time a new Gitpod workspace is open
+    command: |
+      # Refresh cabal package index
+      cabal update
+      # Keep ghcup up-to-date
+      ghcup upgrade
+      # Show what's currently installed, and what's out there
+      ghcup list
+
+  # Note this has to be the last task to make its terminal session shown
+  # initially, it can reduce the chance for the IDE to hang up on open
+  - name: Open Welcome File(s)
+    command: |
+      # We have to wait IDE ready anyway, a perfect moment to refresh stack
+      # package index now
+      stack update
+      # Note `gp open` will fail until the IDE is up and ready, VSCode takes
+      # more time than Theia as time being, keep attempting until success
+      WelcomeFile='/workspace/GHCiCode/README.md'
+      # gp open won't work until the IDE GUI is ready
+      until gp open ${WelcomeFile}; do
+        echo "Waiting IDE activated ..."
+        sleep 1
+      done
+      echo "Showing tutorial(s) ..."
+      # Safe to open more files from now on
+      gp open '/workspace/GHCiCode/ghci-code/tutor/Tutor1.hs'
+
+vscode:
+  extensions:
+    - justusadam.language-haskell
+    - haskell.haskell
+    - complyue.vscode-ghci
