@@ -12,6 +12,7 @@ executable wolfenhain
   other-modules:       AllSDL
                      , AtLeast2
                      , Physics
+                     , Terrain
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:       base
                      , array

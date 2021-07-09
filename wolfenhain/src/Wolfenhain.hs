@@ -11,7 +11,6 @@ import Control.Concurrent     (threadDelay)
 import Control.Exception      (handle, throw)
 import Control.Monad          (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Array.Unboxed     (UArray, array, bounds, (!))
 import Data.List              (foldl', unfoldr)
 import System.Environment     (getArgs)
 
@@ -21,7 +20,7 @@ import qualified SDL.Video.Renderer
 
 import AllSDL
 import Physics
-
+import Terrain
 
 data AppContext = AppContext {
   _renderer :: SDL.Renderer
@@ -40,7 +39,7 @@ data AppState = AppState {
 
 
 win :: MonadIO m => R1st2D -> SDL.Font.Font -> SDL.Window -> m ()
-win room@(R1st2D cols _) font w = do
+win room font w = do
     renderer <- liftIO $ handle ((\e -> do
                                     backupRendererIndex <- getSoftwareRendererIndex
                                     case backupRendererIndex of
@@ -49,31 +48,11 @@ win room@(R1st2D cols _) font w = do
                                  ) :: SDL.SDLException -> IO SDL.Renderer)
                               $ mkRenderer (-1)
     now <- SDL.ticks
-    appLoop (AppState { _heroX = fromIntegral cols / 2.0, _heroY = (fromIntegral $ rowCount room) / 2.0, _heroDir = 0.0, _lastTicks = now, _fpsEst = 0.0 })
+    let cols = colCount room
+    let rows = rowCount room
+    appLoop (AppState { _heroX = fromIntegral cols / 2.0, _heroY = fromIntegral rows / 2.0, _heroDir = 0.0, _lastTicks = now, _fpsEst = 0.0 })
             (AppContext { _renderer = renderer, _font = font, _room = room })
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
-
-
-data R1st2D = R1st2D Int (UArray Int Int)
-
-
-rowFirst2DArray :: Int -- ^ row count
-                -> Int -- ^ column count
-                -> [(Int, Int, Int)] -- ^ list of (row, column, value) associations
-                -> R1st2D
-rowFirst2DArray 0 _ _ = error "Number of rows must be higher than 0"
-rowFirst2DArray _ 0 _ = error "Number of columns must be higher than 0"
-rowFirst2DArray rows cols assocs =
-  R1st2D cols $ array (0, rows * cols - 1) [(r * cols + c, e) | (r, c, e) <- assocs]
-
-
-rowCount :: R1st2D -- ^ 2-D array
-         -> Int -- ^ row count
-rowCount (R1st2D cols a) = (top - bot + 1) `div` cols
-  where (bot, top) = bounds a
-
-r12d :: R1st2D -> Int -> Int -> Int
-r12d (R1st2D cols a) r c = a ! (r * cols + c)
 
 
 lineOfFlight :: Double -- ^ X coordinate of player
@@ -81,7 +60,7 @@ lineOfFlight :: Double -- ^ X coordinate of player
              -> Double -- ^ angle of ray (in radians, 0 means east, pi/2 means north)
              -> R1st2D -- ^ Map (0 means empty)
              -> Double -- ^ Distance
-lineOfFlight x y dir room@(R1st2D cols _) =
+lineOfFlight x y dir room =
     headWithDefault $ filter isWall $ unfoldr stepAndStopOutside lineOfFlightSteps
   where
     stepAndStopOutside distances = let (d:rest) = distances
@@ -91,6 +70,7 @@ lineOfFlight x y dir room@(R1st2D cols _) =
                                      then Nothing
                                      else Just ((d, p, q), rest)
     rows = rowCount room
+    cols = colCount room
     uhz = cos dir -- unit vector, horizontal
     uvt = sin dir -- unit vector, vertical
     infinity = 1.0e6 * fromIntegral cols
@@ -111,7 +91,7 @@ lineOfFlightSteps = [0.001, 0.002, 0.004, 0.008]
 
 updateAppForEvent :: SDL.Event -> AppContext -> AppState -> Maybe AppState
 updateAppForEvent (SDL.Event _t SDL.QuitEvent) _ _ = Nothing
-updateAppForEvent e (AppContext { _room = room@(R1st2D cols _) }) s0
+updateAppForEvent e (AppContext { _room = room }) s0
   | eventIsPress SDL.KeycodeEscape e = Nothing
   | eventIsPress SDL.KeycodeLeft e = Just $ s0 { _heroDir = _heroDir s0 + 0.15 }
   | eventIsPress SDL.KeycodeRight e = Just $ s0 { _heroDir = _heroDir s0 - 0.15 }
@@ -126,7 +106,7 @@ updateAppForEvent e (AppContext { _room = room@(R1st2D cols _) }) s0
               newY = _heroY s0 + mult * vt
               x' = round newX
               y' = round newY in
-            if (newX < 0 || x' >= cols || newY < 0 || y' >= rowCount room
+            if (newX < 0 || x' >= colCount room || newY < 0 || y' >= rowCount room
                 || (((room `r12d` y') x') /= 0))
             then Just s0
             else Just $ s0 { _heroX = newX, _heroY = newY }
@@ -170,7 +150,7 @@ drawApp :: MonadIO m
         => AppState -- ^ current application state
         -> AppContext -- ^ application graphic context
         -> m ()
-drawApp s (AppContext { _renderer=renderer, _font=font, _room = room@(R1st2D cols _) }) = do
+drawApp s (AppContext { _renderer=renderer, _font=font, _room = room }) = do
   SDL.rendererDrawColor renderer SDL.$= skyBlue
   SDL.clear renderer
   SDL.rendererDrawColor renderer SDL.$= green
@@ -182,6 +162,7 @@ drawApp s (AppContext { _renderer=renderer, _font=font, _room = room@(R1st2D col
   let atanScale = fromIntegral to / 1.25
   let maxHeight = 0.45 * fromIntegral winHeight
   let rows = rowCount room
+  let cols = colCount room
   let maxD = (0.8 :: Double) * (fromIntegral $ rows + cols)
   flip mapM_ [from..to] $ \angle -> do
     let alpha = _heroDir s - (atan $ fromIntegral angle / atanScale)
