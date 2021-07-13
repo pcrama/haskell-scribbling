@@ -11,7 +11,7 @@ import Control.Concurrent     (threadDelay)
 import Control.Exception      (handle, throw)
 import Control.Monad          (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.List              (foldl', unfoldr)
+import Data.List              (foldl')
 import System.Environment     (getArgs)
 
 import qualified SDL
@@ -21,6 +21,7 @@ import qualified SDL.Video.Renderer
 import AllSDL
 import Physics
 import Terrain
+import LineOfFlight
 
 data AppContext = AppContext {
   _renderer :: SDL.Renderer
@@ -53,40 +54,6 @@ win room font w = do
     appLoop (AppState { _heroX = fromIntegral cols / 2.0, _heroY = fromIntegral rows / 2.0, _heroDir = 0.0, _lastTicks = now, _fpsEst = 0.0 })
             (AppContext { _renderer = renderer, _font = font, _room = room })
   where mkRenderer c = SDL.createRenderer w c SDL.defaultRenderer
-
-
-lineOfFlight :: Double -- ^ X coordinate of player
-             -> Double -- ^ Y coordinate of player
-             -> Double -- ^ angle of ray (in radians, 0 means east, pi/2 means north)
-             -> R1st2D -- ^ Map (0 means empty)
-             -> Double -- ^ Distance
-lineOfFlight x y dir room =
-    headWithDefault $ filter isWall $ unfoldr stepAndStopOutside lineOfFlightSteps
-  where
-    stepAndStopOutside distances = let (d:rest) = distances
-                                       p = floor $ x + uhz * d
-                                       q = floor $ y + uvt * d in
-                                     if (p < 0 || q < 0 || p >= cols || q >= rows)
-                                     then Nothing
-                                     else Just ((d, p, q), rest)
-    rows = rowCount room
-    cols = colCount room
-    uhz = cos dir -- unit vector, horizontal
-    uvt = sin dir -- unit vector, vertical
-    infinity = 1.0e6 * fromIntegral cols
-    isWall (_, col, row) = ((room `r12d` row) col) /= 0
-    headWithDefault [] = infinity
-    headWithDefault ((h, _, _):_) = h
-
-
-lineOfFlightSteps :: [Double]
-lineOfFlightSteps = [0.001, 0.002, 0.004, 0.008]
-                 ++ map ((0.01 *) . fromIntegral) [1..19 :: Int]
-                 ++ map ((0.2 +) . (0.02 *) . fromIntegral) [0..24 :: Int]
-                 ++ map ((0.7 +) . (0.05 *) . fromIntegral) [0..19 :: Int]
-                 ++ map ((1.7 +) . (0.1 *) . fromIntegral) [0..24 :: Int]
-                 ++ map ((4.2 +) . (0.25 *) . fromIntegral) [0..29 :: Int]
-                 ++ map ((11.7 +) . (0.3 *) . fromIntegral) [0 :: Int ..]
 
 
 updateAppForEvent :: SDL.Event -> AppContext -> AppState -> Maybe AppState
@@ -159,14 +126,18 @@ drawApp s (AppContext { _renderer=renderer, _font=font, _room = room }) = do
                                                  $ SDL.V2 winWidth $ winHeight - horizont
   let from = -winWidth `div` 2
   let to = winWidth + from - 1
-  let atanScale = fromIntegral to / 1.25
+  let maxAngleTangent = 1.25
+  let atanScale = fromIntegral to / maxAngleTangent
+  let maxAngle = atan maxAngleTangent
   let maxHeight = 0.45 * fromIntegral winHeight
   let rows = rowCount room
   let cols = colCount room
   let maxD = (0.8 :: Double) * (fromIntegral $ rows + cols)
   flip mapM_ [from..to] $ \angle -> do
     let alpha = _heroDir s - (atan $ fromIntegral angle / atanScale)
-    let d = lineOfFlight (_heroX s) (_heroY s) alpha room
+    let d = case lineOfFlight (_heroX s) (_heroY s) alpha room of
+              Horizon -> maxD
+              Obstacle di _ _ _ -> di
     when (d < maxD) $ do
       let len = round $ maxHeight / (1 + d * (maxHeight - 1)/maxD)
       let rgb = round $ 176 * (maxD - d) / maxD
@@ -174,22 +145,32 @@ drawApp s (AppContext { _renderer=renderer, _font=font, _room = room }) = do
       SDL.rendererDrawColor renderer SDL.$= SDL.V4 rgb rgb rgb 1
       SDL.drawLine renderer (SDL.P $ SDL.V2 x (horizont - len)) (SDL.P $ SDL.V2 x (horizont + len))
   SDL.rendererDrawColor renderer SDL.$= black
-  let mapScale = 5 :: Position
+  let mapScale = 6 :: Position
   let mapScaleD = fromIntegral mapScale
-  flip mapM_ [1..rows] $ \row -> do
-    flip mapM_ [0..cols - 1] $ \col ->
-      if ((room `r12d` (rows - row)) col == 0)
+  let toMapD x = round $ ((2 * x + 1) * mapScaleD) / 2
+  flip mapM_ [0..rows - 1] $ \row -> do
+    let rowRow = rows - row
+    SDL.drawLine renderer (SDL.P $ fmap (toMapD . fromIntegral) $ SDL.V2 0 $ rowRow) $ SDL.P $ fmap (toMapD . fromIntegral) $ SDL.V2 (cols - 1) rowRow
+    flip mapM_ [0..cols - 1] $ \col -> do
+      when (row == 0) $
+        SDL.drawLine renderer (SDL.P $ fmap (toMapD . fromIntegral) $ SDL.V2 col 1)
+                            $ SDL.P $ fmap (toMapD . fromIntegral) $ SDL.V2 col $ rows
+      if ((room `r12d` row) col == 0)
       then return ()
-      else SDL.fillRect renderer $ Just $ SDL.Rectangle (SDL.P $ fmap ((mapScale *) . fromIntegral) $ SDL.V2 col $ row - 1)
+      else SDL.fillRect renderer $ Just $ SDL.Rectangle (SDL.P $ fmap (toMapD . (+ (negate 0.5)) . fromIntegral) $ SDL.V2 col $ rows - row)
                                                       $ SDL.V2 mapScale mapScale
-  let bp offs = SDL.P $ fmap (round . (mapScaleD *)) $ SDL.V2 (_heroX s + (cos $ _heroDir s + offs))
-                                                              (fromIntegral rows - _heroY s - (sin $ _heroDir s + offs))
-  let center = SDL.P $ fmap (round . (mapScaleD *)) $ SDL.V2 (_heroX s) (fromIntegral rows - _heroY s)
+  let megaBp offs = SDL.P $ fmap toMapD $ SDL.V2 (_heroX s + 15 * (cos $ _heroDir s + offs))
+                                                 (fromIntegral rows - _heroY s - 15 * (sin $ _heroDir s + offs))
+  let bp offs = SDL.P $ fmap toMapD $ SDL.V2 (_heroX s + (cos $ _heroDir s + offs))
+                                             (fromIntegral rows - _heroY s - (sin $ _heroDir s + offs))
+  let center = SDL.P $ fmap toMapD $ SDL.V2 (_heroX s) (fromIntegral rows - _heroY s)
   SDL.drawLine renderer center $ bp $ pi + 0.5
   SDL.drawLine renderer center $ bp $ pi - 0.5
+  SDL.drawLine renderer center $ megaBp $ maxAngle
+  SDL.drawLine renderer center $ megaBp $ negate maxAngle
   let fpsEst = _fpsEst s
   let fps = (take 5 $ show fpsEst) ++ " x=" ++ (take 5 $ show $ _heroX s) ++ " y=" ++ (take 5 $ show $ _heroY s)
-  when (fpsEst > 25) $ do
+  when (fpsEst > 5) $ do
     withStringTexture renderer font black fps $ \fpsTexture -> do
       SDL.TextureInfo { SDL.textureWidth = textWidth
                       , SDL.textureHeight = textHeight
@@ -217,11 +198,16 @@ main = withSDL $ do
                                                     || (r > 2 && c == width - 1))
                                                 then 1 else 0)
                                         | r <- [0..height - 1], c <- [0..width - 1]]
+  let simple = rowFirst2DArray height width [(r, c, if ((r == 0 && c == 0)
+                                                        || (r == height - 1 && c == 0)
+                                                        || ((abs $ r - height `div` 2) == 2 && c == width - 4))
+                                                    then 1 else 0)
+                                            | r <- [0..height - 1], c <- [0..width - 1]]
   getArgs >>= \case
     [] -> putStrLn "Need a font...\n\
                    \cabal new-run wolfenhain \"$(fc-match --format \"%{file}\")\""
-    (fontPath:_) ->
+    (fontPath:x) ->
       withSDLFont fontPath 36 $ \font ->
         withWindow "Wolfenhain"
                    (fromIntegral winWidth, fromIntegral winHeight)
-                 $ win aa font
+                 $ win (if null x then aa else simple) font

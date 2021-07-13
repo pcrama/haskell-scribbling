@@ -11,6 +11,7 @@ executable wolfenhain
   main-is:             Wolfenhain.hs
   other-modules:       AllSDL
                      , AtLeast2
+                     , LineOfFlight
                      , Physics
                      , Terrain
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
