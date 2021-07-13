@@ -205,7 +205,7 @@ main = withSDL $ do
                                             | r <- [0..height - 1], c <- [0..width - 1]]
   getArgs >>= \case
     [] -> putStrLn "Need a font...\n\
-                   \cabal new-run wolfenhain \"$(fc-match --format \"%{file}\")\""
+                   \cabal new-run exe:wolfenhain \"$(fc-match --format \"%{file}\")\""
     (fontPath:x) ->
       withSDLFont fontPath 36 $ \font ->
         withWindow "Wolfenhain"
