@@ -18,6 +18,8 @@ data ObstacleHit = Horizon -- ^ look to infinity
                                    --   1: North-East corner
                                    --   2: North-West corner
                                    --   3: South-West corner
+  deriving (Eq, Show)
+
 
 lineOfFlight :: Double -- ^ X coordinate of player
              -> Double -- ^ Y coordinate of player
