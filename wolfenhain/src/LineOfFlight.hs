@@ -74,7 +74,7 @@ internalLineOfFlight xp yp room u v rightI upI ix iy
         (xu, yu) = let (x', y') = diagUpLeft ix iy 1 in (intMean ix x', intMean iy y')
         (xr, yr) = let (x', y') = diagDownRight ix iy 1 in (intMean ix x', intMean iy y')
         distanceFromRay x y = u * (y - yp) + v * (xp - x)
-        epsilon = 0.0001
+        epsilon = 0.000001
         cornerDistanceFromRay = distanceFromRay xc yc
         upDistanceFromRay = distanceFromRay xu yu
         rightDistanceFromRay = distanceFromRay xr yr

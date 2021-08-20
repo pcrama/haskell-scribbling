@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeApplications #-}
 module Main (
   main
 )
@@ -11,6 +12,7 @@ import Test.QuickCheck
 import Test.Hspec
 
 import LineOfFlight
+import Tagged
 import Terrain
 
 
@@ -30,36 +32,41 @@ traceFailureWithTerrain a o1 o2 b
   | otherwise = traceTerrain a o1 o2 False
 
 
-data ArbitraryTerrain = ArbitraryTerrain { atRows :: NonNegative Int
-                                         , atCols :: NonNegative Int
-                                         , atAssocs :: [(NonNegative Int, NonNegative Int)]
-                                         , atX :: NonNegative Double
-                                         , atY :: NonNegative Double
+data Row
+data Col
+
+
+data ArbitraryTerrain = ArbitraryTerrain { atRows :: Tagged Row Int
+                                         , atCols :: Tagged Col Int
+                                         , atAssocs :: [(Tagged Row Int, Tagged Col Int)]
+                                         , atX :: Tagged Col Double
+                                         , atY :: Tagged Row Double
                                          , atAngle :: Double }
   deriving (Show, Eq)
 
 
 buildTerrainArray :: ArbitraryTerrain -> R1st2D
-buildTerrainArray ArbitraryTerrain { atRows = NonNegative rows
-                                   , atCols = NonNegative cols
+buildTerrainArray ArbitraryTerrain { atRows = Tagged rows
+                                   , atCols = Tagged cols
                                    , atAssocs = assocs }
   = rowFirst2DArray rows
                     cols
-                    [(r, c, 1) | (NonNegative r, NonNegative c) <- assocs]
-
+                  $ map toWall assocs --  [(r, c, 1) | (r :: Tagged Row Int, c :: Tagged Row Int) <- assocs]
+  where toWall :: (Tagged Row Int, Tagged Col Int) -> (Int, Int, Int)
+        toWall (Tagged r, Tagged c) = (r, c, 1)
 
 evaluateTerrain :: ArbitraryTerrain -> ObstacleHit
-evaluateTerrain terrain@(ArbitraryTerrain { atX = NonNegative x
-                                          , atY = NonNegative y
+evaluateTerrain terrain@(ArbitraryTerrain { atX = Tagged x
+                                          , atY = Tagged y
                                           , atAngle = angle })
   = lineOfFlight x y angle $ buildTerrainArray terrain
 
 
 renderTerrain :: ArbitraryTerrain -> ObstacleHit -> ObstacleHit -> String
-renderTerrain a@(ArbitraryTerrain { atRows = NonNegative rows
-                                  , atCols = NonNegative cols
-                                  , atX = NonNegative x
-                                  , atY = NonNegative y })
+renderTerrain a@(ArbitraryTerrain { atRows = Tagged rows
+                                  , atCols = Tagged cols
+                                  , atX = Tagged x
+                                  , atY = Tagged y })
               o1
               o2
   | (rows + cols) > 20 = joinWithSep lineSep ["(R: " <> show rows <> ", C: " <> show cols <> ")", show o1, show o2]
@@ -123,7 +130,7 @@ isDistance p (Obstacle d _ _ _) = p d
 prop_distanceConstantUnderSomeTransformation :: TerrainTransformation -> ArbitraryTerrain -> Property
 prop_distanceConstantUnderSomeTransformation xform x =
     checkCoverage $
-    cover 10 (isHorizon d1) "horizon" $
+    cover 5 (isHorizon d1) "horizon" $
     cover 10 (isDistance (> 5) d1) "distance > 5" $
     cover 5 (isSide 0 d1) "east side" $
     cover 5 (isSide 1 d1) "north side" $
@@ -136,7 +143,8 @@ prop_distanceConstantUnderSomeTransformation xform x =
         isSide _ Horizon = False
         isSide n (Obstacle _ _ _ t) = (n <= t && t <= n + 1) || (t == n + 4) || (t == n - 4)
         equalObstacle Horizon Horizon = True
-        equalObstacle (Obstacle _ xh yh _) (Obstacle _ x' y' _) = fI yh xh == (y', x')
+        equalObstacle (Obstacle _ xh yh _) (Obstacle _ x' y' _)
+            = fI (Tagged @Row yh) (Tagged @Col xh) == (Tagged @Row y', Tagged @Col x')
         equalObstacle (Obstacle _ _ _ _) Horizon = False
         equalObstacle Horizon (Obstacle _ _ _ _) = False
 
@@ -145,45 +153,55 @@ fmod :: Double -> Int -> Double
 fmod x y = x - (fromIntegral $ (floor x `div` y) * y)
 
 
+fmodTagged :: Tagged t Double -> Tagged t Int -> Tagged t Double
+fmodTagged (Tagged x) (Tagged y) = Tagged $ x `fmod` y
+
+
+roundTagged :: Tagged t Double -> Tagged t Int
+roundTagged = Tagged . round . getTagged
+
+
 instance Arbitrary ArbitraryTerrain where
   arbitrary = do
-    NonNegative arbRows <- arbitrary
-    NonNegative arbCols <- arbitrary
-    NonNegative arbX <- arbitrary
-    NonNegative arbY <- arbitrary
+    arbRows <- arbitrary
+    arbCols <- arbitrary
+    arbX <- arbitrary
+    arbY <- arbitrary
     arbAngle <- arbitrary
     let rows = arbRows + 3 -- at least 3 rows
     let cols = arbCols + 3 -- at least 3 columns
-    let x = arbX `fmod` cols
-    let y = arbY `fmod` rows
-    let intX = round x
-    let intY = round y
+    let x = arbX `fmodTagged` cols
+    let y = arbY `fmodTagged` rows
+    let intX = roundTagged x
+    let intY = roundTagged y
     let angle = arbAngle `fmod` 13
     assocs <- oneof [return $ [p
                               | c <- [0..cols - 1]
-                              , p <- [(NonNegative $ c `mod` 2, NonNegative c)
-                                     , (NonNegative $ rows - c `mod` 2 - 1, NonNegative c)]]
+                              , p <- [(Tagged $ getTagged c `mod` 2, c)
+                                     , (rows - (Tagged $ getTagged c `mod` 2) - 1, c)]]
                            ++ [p
                               | r <- [0..rows - 1]
-                              , p <- [(NonNegative r, NonNegative $ r `mod` 2)
-                                     , (NonNegative r, NonNegative $ cols - r `mod` 2 - 1)]]
+                              , p <- [(r, Tagged $ getTagged r `mod` 2)
+                                     , (r, cols - (Tagged $ getTagged r `mod` 2) - 1)]]
                     , do
                         NonNegative arbThreshold <- arbitrary
+                        randomOffsets <- arbitrary
                         let threshold = (arbThreshold `mod` 10 + 2)
-                        return [(NonNegative r, NonNegative c)
-                               | r <- [0..rows - 1]
-                               , c <- [0..cols - 1]
-                               , (r + c) `mod` 14 >= threshold]]
-    return ArbitraryTerrain { atRows = NonNegative rows
-                            , atCols = NonNegative cols
-                            , atAssocs = [(NonNegative $ r `rem` rows, NonNegative $ c `rem` cols)
-                                         | (NonNegative r, NonNegative c) <- assocs
-                                         , r /= intY && c /= intX]
-                            , atX = NonNegative x
-                            , atY = NonNegative y
+                        return [(r, c)
+                               | ((r, c), o) <- zip [(r, c) | r <- [0..rows - 1], c <- [0..cols - 1]]
+                                                  $ map (\(NonNegative ro) -> (ro `mod` 15) - (2 :: Int))
+                                                      $ cycle $ NonNegative 0:randomOffsets
+                               , (getTagged r + getTagged c) `mod` 16 >= threshold + o]]
+    return ArbitraryTerrain { atRows = rows
+                            , atCols = cols
+                            , atAssocs = [(r `rem` rows, c `rem` cols)
+                                         | (r, c) <- assocs
+                                         , r /= intY || c /= intX]
+                            , atX = x
+                            , atY = y
                             , atAngle = angle}
   shrink (ArbitraryTerrain { atAssocs = [] }) = []
-  shrink at@(ArbitraryTerrain { atRows = NonNegative rows, atCols = NonNegative cols, atAssocs = assocs, atAngle = angle, atX = NonNegative x, atY = NonNegative y }) =
+  shrink at@(ArbitraryTerrain { atRows = rows, atCols = cols, atAssocs = assocs, atAngle = angle, atX = x, atY = y }) =
       shrinkRows ++ shrinkCols ++ shrinkWalls ++ shrinkAngle ++ shrinkRounding (x, y) (coordRounder 10) coordSetter ++ shrinkRounding angle (doubleRounder 10) angleSetter
     where shrinkRows
             | rows `mod` 2 == 0 = shrunkTop at ++ shrunkBottom at
@@ -191,12 +209,14 @@ instance Arbitrary ArbitraryTerrain where
           shrinkCols
             | cols `mod` 2 == 0 = shrunkLeft at ++ shrunkRight at
             | otherwise = shrunkRight at ++ shrunkLeft at
-          shrinkWalls = do
-                          shrunkAssocs <- shrinkHeadTail assocs ++ shrinkOddEvenGo assocs [] []
-                          guard $ null shrunkAssocs
-                          return $ at { atAssocs = shrunkAssocs }
-          shrinkHeadTail [] = []
-          shrinkHeadTail (z:zs) = [[z], zs]
+          shrinkWalls = case assocs of
+                          [] -> []
+                          [_] -> [at { atAssocs = [] }]
+                          [v, w] ->  [at { atAssocs = [v] }, at { atAssocs = [w] }]
+                          (z:zs) -> do
+                                      shrunkAssocs <- ([z]:shrinkOddEvenGo assocs [] []) ++ [zs]
+                                      guard $ null shrunkAssocs
+                                      return $ at { atAssocs = shrunkAssocs }
           shrinkOddEvenGo [] xs ys = [xs, ys]
           shrinkOddEvenGo (z:zs) xs ys = shrinkOddEvenGo zs ys $ z:xs
           twoPi = 2 * pi
@@ -215,95 +235,108 @@ instance Arbitrary ArbitraryTerrain where
             in if rounded == val then [] else [setter rounded]
           doubleRounder :: Double -> Double -> Double
           doubleRounder factor xf = fromIntegral (round $ xf * factor :: Int) / factor
-          coordRounder factor (xf, yf) = (doubleRounder factor xf, doubleRounder factor yf)
+          coordRounder :: Double -> (Tagged Col Double, Tagged Row Double) ->  (Tagged Col Double, Tagged Row Double)
+          coordRounder factor (Tagged xf, Tagged yf) = (Tagged @Col $ doubleRounder factor xf
+                                                       , Tagged @Row $ doubleRounder factor yf)
           angleSetter a' = at { atAngle = a' }
-          coordSetter (x', y') = at { atX = NonNegative x', atY = NonNegative y' }
+          coordSetter (x', y') = at { atX = x', atY = y' }
 
 
 shrunkTop, shrunkBottom, shrunkLeft, shrunkRight :: ArbitraryTerrain -> [ArbitraryTerrain]
-shrunkTop (ArbitraryTerrain { atRows = NonNegative rows
-                            , atCols = NonNegative cols
+shrunkTop (ArbitraryTerrain { atRows = rows
+                            , atCols = cols
                             , atAssocs = assocs
                             , atX = x
-                            , atY = NonNegative y
+                            , atY = y
                             , atAngle = angle })
-  | round y >= rows - 1 || rows <= 3 = []
-  | otherwise = let newRows = rows - 1 in
-                case [(r, c) | (r, c) <- assocs, r < NonNegative newRows] of
+  | roundY >= newRows || (rows <= 3 && roundY > 0) || (rows <= 2 && roundY == 0) = []
+  | otherwise = case [(r, c) | (r, c) <- assocs, r < newRows] of
                   [] -> []
-                  shrunkAssocs -> [ArbitraryTerrain { atRows = NonNegative newRows
-                                                    , atCols = NonNegative cols
-                                                    , atAssocs = shrunkAssocs
-                                                    , atX = x
-                                                    , atY = NonNegative y
-                                                    , atAngle = angle }]
-
-
-shrunkBottom (ArbitraryTerrain { atRows = NonNegative rows
-                               , atCols = cols
-                               , atAssocs = assocs
-                               , atX = x
-                               , atY = NonNegative y
-                               , atAngle = angle })
-  | round y <= (0 :: Int) || rows <= 3 = []
-  | otherwise = let newRows = rows - 1 in
-                case [(NonNegative $ r - 1, c) | (NonNegative r, c) <- assocs, r > 0] of
-                  [] -> []
-                  shrunkAssocs -> [ArbitraryTerrain { atRows = NonNegative newRows
+                  shrunkAssocs -> [ArbitraryTerrain { atRows = newRows
                                                     , atCols = cols
                                                     , atAssocs = shrunkAssocs
                                                     , atX = x
-                                                    , atY = NonNegative $ y - 1
-                                                    , atAngle = angle }]
-
-
-shrunkRight (ArbitraryTerrain { atRows = NonNegative rows
-                              , atCols = NonNegative cols
-                              , atAssocs = assocs
-                              , atX = NonNegative x
-                              , atY = y
-                              , atAngle = angle })
-  | round x >= cols - 1 || cols <= 3 = []
-  | otherwise = let newCols = cols - 1 in
-                case [(r, c) | (r, c) <- assocs, c < NonNegative newCols] of
-                  [] -> []
-                  shrunkAssocs -> [ArbitraryTerrain { atRows = NonNegative rows
-                                                    , atCols = NonNegative newCols
-                                                    , atAssocs = shrunkAssocs
-                                                    , atX = NonNegative x
                                                     , atY = y
                                                     , atAngle = angle }]
+  where roundY :: Tagged Row Int
+        roundY = roundTagged y
+        newRows :: Tagged Row Int
+        newRows = rows - 1
+
+
+shrunkBottom (ArbitraryTerrain { atRows = rows
+                               , atCols = cols
+                               , atAssocs = assocs
+                               , atX = x
+                               , atY = y
+                               , atAngle = angle })
+  | roundY <= 0 || rows <= 3 = []
+  | otherwise = let newRows = rows - 1 in
+                case [(r - 1, c) | (r, c) <- assocs, r > 0] of
+                  [] -> []
+                  shrunkAssocs -> [ArbitraryTerrain { atRows = newRows
+                                                    , atCols = cols
+                                                    , atAssocs = shrunkAssocs
+                                                    , atX = x
+                                                    , atY = y - 1
+                                                    , atAngle = angle }]
+  where roundY :: Tagged Row Int
+        roundY = roundTagged y
+
+
+shrunkRight (ArbitraryTerrain { atRows = rows
+                              , atCols = cols
+                              , atAssocs = assocs
+                              , atX = x
+                              , atY = y
+                              , atAngle = angle })
+  | roundX >= newCols || (cols <= 3 && roundX > 0) || (cols <= 2 && roundX <= 0) = []
+  | otherwise = case [(r, c) | (r, c) <- assocs, c < newCols] of
+                  [] -> []
+                  shrunkAssocs -> [ArbitraryTerrain { atRows = rows
+                                                    , atCols = newCols
+                                                    , atAssocs = shrunkAssocs
+                                                    , atX = x
+                                                    , atY = y
+                                                    , atAngle = angle }]
+  where roundX :: Tagged Col Int
+        roundX = roundTagged x
+        newCols :: Tagged Col Int
+        newCols = cols - 1
 
 
 shrunkLeft (ArbitraryTerrain { atRows = rows
-                             , atCols = NonNegative cols
+                             , atCols = cols
                              , atAssocs = assocs
-                             , atX = NonNegative x
+                             , atX = x
                              , atY = y
                              , atAngle = angle })
-  | round x <= (0 :: Int) || cols <= 3 = []
-  | otherwise = let newCols = cols - 1 in
-                case [(r, NonNegative $ c - 1) | (r, NonNegative c) <- assocs, c > 0] of
+  | roundX <= 0 || cols <= 3 = []
+  | otherwise = case [(r, c - 1) | (r, c) <- assocs, c > 0] of
                   [] -> []
                   shrunkAssocs -> [ArbitraryTerrain { atRows = rows
-                                                    , atCols = NonNegative newCols
+                                                    , atCols = newCols
                                                     , atAssocs = shrunkAssocs
-                                                    , atX = NonNegative $ x - 1
+                                                    , atX = x - 1
                                                     , atY = y
                                                     , atAngle = angle }]
+  where roundX :: Tagged Col Int
+        roundX = roundTagged x
+        newCols :: Tagged Col Int
+        newCols = cols - 1
 
 
-transformSize :: (Int -> Int -> (Int, Int)) -- ^ transform row col to (row', col')
-              -> Int -- ^ rows
-              -> Int -- ^ cols
-              -> (Int, Int) -- ^ size (rows', cols') of ([0..rows), [0..cols)) after transformation
+transformSize :: (Tagged Row Int -> Tagged Col Int -> (Tagged Row Int, Tagged Col Int)) -- ^ transform row col to (row', col')
+              -> Tagged Row Int -- ^ rows
+              -> Tagged Col Int -- ^ cols
+              -> (Tagged Row Int, Tagged Col Int) -- ^ size (rows', cols') of ([0..rows), [0..cols)) after transformation
 transformSize f rows cols = (1 + max r1 r2, 1 + max c1 c2)
   where (r1, c1) = f 0 0
         (r2, c2) = f (rows - 1) (cols - 1)
 
 
-data TerrainTransformationD = TerrainTransformationD (Int -> Int -> (Int, Int))
-                                                     (Double -> Double -> (Double, Double))
+data TerrainTransformationD = TerrainTransformationD (Tagged Row Int -> Tagged Col Int -> (Tagged Row Int, Tagged Col Int))
+                                                     (Tagged Col Double -> Tagged Row Double -> (Tagged Col Double, Tagged Row Double))
                                                      (Double -> Double)
 
 
@@ -311,18 +344,19 @@ type TerrainTransformation = ArbitraryTerrain -> TerrainTransformationD
 
 
 transpose, verticalAxisSymmetry, horizontalAxisSymmetry :: TerrainTransformation
-transpose _ = TerrainTransformationD (\r c -> (c, r)) (\x y -> (y, x)) (\angle -> pi / 2.0 - angle)
-
+transpose _ = TerrainTransformationD swapTagged swapTagged (\angle -> pi / 2.0 - angle)
+  where swapTagged :: Tagged o a -> Tagged p a -> (Tagged o a, Tagged p a)
+        swapTagged (Tagged o) (Tagged p) = (Tagged p, Tagged o)
 
 -- | Symmetry around a vertical axis
-verticalAxisSymmetry (ArbitraryTerrain { atCols = NonNegative cols })
+verticalAxisSymmetry (ArbitraryTerrain { atCols = cols })
     = TerrainTransformationD (\r c -> (r, cols - 1 - c))
-                            (\x y -> (fromIntegral cols - 1 - x, y))
-                            (\angle -> pi - angle)
+                             (\x y -> (fromIntegral cols - 1 - x, y))
+                             (\angle -> pi - angle)
 
 
 -- | Symmetry around a horizontal axis
-horizontalAxisSymmetry (ArbitraryTerrain { atRows = NonNegative rows })
+horizontalAxisSymmetry (ArbitraryTerrain { atRows = rows })
     = TerrainTransformationD (\r c -> (rows - 1 - r, c))
                              (\x y -> (x, fromIntegral rows - 1 - y))
                              (\angle -> 0 - angle)
@@ -330,33 +364,32 @@ horizontalAxisSymmetry (ArbitraryTerrain { atRows = NonNegative rows })
 
 transformTerrain :: TerrainTransformation -> ArbitraryTerrain -> ArbitraryTerrain
 transformTerrain xform
-                 at@(ArbitraryTerrain { atCols = NonNegative cols
-                                      , atRows = NonNegative rows
+                 at@(ArbitraryTerrain { atCols = cols
+                                      , atRows = rows
                                       , atAssocs = assocs
-                                      , atX = NonNegative x
-                                      , atY = NonNegative y
+                                      , atX = x
+                                      , atY = y
                                       , atAngle = angle })
-  = at { atCols = NonNegative cols'
-       , atRows = NonNegative rows'
-       , atAssocs = map fN assocs
-       , atX = NonNegative x'
-       , atY = NonNegative y'
+  = at { atCols = cols'
+       , atRows = rows'
+       , atAssocs = map (uncurry fI) assocs
+       , atX = x'
+       , atY = y'
        , atAngle = fA angle
        }
     where (TerrainTransformationD fI fD fA) = xform at
           (rows', cols') = transformSize fI rows cols
           (x', y') = fD x y
-          fN (NonNegative r, NonNegative c) = let (r', c') = fI r c in (NonNegative r', NonNegative c')
 
 
 -- | Compute distance to next obstacle analytically, assuming the terrain is simply a closed rectangle
-analyticalSolution :: Int -- ^ Rows
-                   -> Int -- ^ Cols
-                   -> Double -- ^ x
-                   -> Double -- ^ y
+analyticalSolution :: Tagged Row Int -- ^ Rows
+                   -> Tagged Col Int -- ^ Cols
+                   -> Tagged Col Double -- ^ x
+                   -> Tagged Row Double -- ^ y
                    -> Double -- ^ angle
                    -> Double
-analyticalSolution rows cols x y angle =
+analyticalSolution (Tagged rows) (Tagged cols) (Tagged x) (Tagged y) angle =
     traceShow "analyticalSolution: " (rows, cols, x, y, angle) $
     case traceShow "analyticalSolution (dX, dY): " (distanceX, distanceY) (distanceX, distanceY) of
       (Just a, Just b) -> min a b
@@ -378,21 +411,21 @@ analyticalSolution rows cols x y angle =
 
 
 prop_analyticalDistanceCalculation :: ArbitraryTerrain -> Bool
-prop_analyticalDistanceCalculation at@(ArbitraryTerrain { atRows = NonNegative rows
-                                                        , atCols = NonNegative cols
-                                                        , atX = NonNegative x
-                                                        , atY = NonNegative y
+prop_analyticalDistanceCalculation at@(ArbitraryTerrain { atRows = rows
+                                                        , atCols = cols
+                                                        , atX = x
+                                                        , atY = y
                                                         , atAngle = angle }) =
     equalDistance oh $ Obstacle analyticalDistance undefined undefined undefined
-  where oh = evaluateTerrain $ at { atAssocs = [(NonNegative r, NonNegative 0) | r <- [0..rows - 1]]
-                                            ++ [(NonNegative r, NonNegative $ cols - 1) | r <- [0..rows - 1]]
-                                            ++ [(NonNegative 0, NonNegative c) | c <- [0..cols - 1]]
-                                            ++ [(NonNegative $ rows - 1, NonNegative c) | c <- [0..cols - 1]]
-                                  , atX = NonNegative xMappedIntoTerrain
-                                  , atY = NonNegative yMappedIntoTerrain }
+  where oh = evaluateTerrain $ at { atAssocs = [(r, 0) | r <- [0..rows - 1]]
+                                            ++ [(r, cols - 1) | r <- [0..rows - 1]]
+                                            ++ [(0, c) | c <- [0..cols - 1]]
+                                            ++ [(rows - 1, c) | c <- [0..cols - 1]]
+                                  , atX = xMappedIntoTerrain
+                                  , atY = yMappedIntoTerrain }
         analyticalDistance = analyticalSolution rows cols xMappedIntoTerrain yMappedIntoTerrain angle
-        xMappedIntoTerrain = 0.501 + (x `fmod` (fromIntegral $ cols - 2)) * 0.9
-        yMappedIntoTerrain = 0.501 + (y `fmod` (fromIntegral $ rows - 2)) * 0.9
+        xMappedIntoTerrain = 0.501 + (x `fmodTagged` (fromIntegral $ cols - 2)) * 0.9
+        yMappedIntoTerrain = 0.501 + (y `fmodTagged` (fromIntegral $ rows - 2)) * 0.9
 
 
 distanceSmallerOrEqual :: ObstacleHit -> ObstacleHit -> Bool
@@ -413,26 +446,28 @@ prop_distanceGrowsWhenRemovingObstacles at@(ArbitraryTerrain { atAssocs = assocs
         prop (Obstacle _ x y _) = distanceSmallerOrEqual d1
                                                        $ evaluateTerrain
                                                        $ at { atAssocs = filter (not . obstacleNeighbour x y) assocs }
-        obstacleNeighbour x y (NonNegative r, NonNegative c) = (abs $ r - y) <= 1 && (abs $ c - x) <= 1
+        obstacleNeighbour x y (r, c) = (abs $ r - Tagged @Row y) <= 1 && (abs $ c - Tagged @Col x) <= 1
 
 
-addObstacles :: [(Int, Int)] -> ArbitraryTerrain -> ObstacleHit -> Maybe ArbitraryTerrain
+addObstacles :: [(Tagged Row Int, Tagged Col Int)] -> ArbitraryTerrain -> ObstacleHit -> Maybe ArbitraryTerrain
 addObstacles _ _ Horizon = Nothing
 addObstacles rowColOffs
-             at@(ArbitraryTerrain { atRows = NonNegative rows
-                                  , atCols = NonNegative cols
-                                  , atX = NonNegative x
-                                  , atY = NonNegative y
+             at@(ArbitraryTerrain { atRows = rows
+                                  , atCols = cols
+                                  , atX = x
+                                  , atY = y
                                   , atAssocs = assocs })
              (Obstacle _ c r _) = Just newTerrain
   where newTerrain = at { atAssocs = nub $ assocs
-                                        ++ [(NonNegative r', NonNegative c')
+                                        ++ [(r', c')
                                            | (ro, co) <- rowColOffs
-                                           , let r' = r + ro
+                                           , let r' = Tagged @Row r + ro
                                            , r' >= 0 && r' < rows
-                                           , let c' = c + co
+                                           , let c' = Tagged @Col c + co
                                            , c' >= 0 && c' < cols
-                                           , not $ round y == r' && round x == c'] }
+                                           , not $ roundY == r' && roundX == c'] }
+        roundX = roundTagged x
+        roundY = roundTagged y
 
 
 add8Obstacles, add4Obstacles :: ArbitraryTerrain -> ObstacleHit -> Maybe ArbitraryTerrain
@@ -502,22 +537,22 @@ main :: IO ()
 main = hspec $ do
   describe "add4Obstacles" $ do
      it "works on example" $
-       add4Obstacles (ArbitraryTerrain {atRows = NonNegative {getNonNegative = 3}
-                                       , atCols = NonNegative {getNonNegative = 3}
-                                       , atAssocs = [(NonNegative {getNonNegative = 1},NonNegative {getNonNegative = 2})]
-                                       , atX = NonNegative {getNonNegative = 0.1}
-                                       , atY = NonNegative {getNonNegative = 0.5}
+       add4Obstacles (ArbitraryTerrain {atRows = 3
+                                       , atCols = 3
+                                       , atAssocs = [(Tagged @Row 1, Tagged @Col 2)]
+                                       , atX = 0.1
+                                       , atY = 0.5
                                        , atAngle = 0.3})
                      (Obstacle 1.46545224215 2 1 2.56692925055)
        `shouldBe`
-       (Just $ ArbitraryTerrain {atRows = NonNegative {getNonNegative = 3}
-                                , atCols = NonNegative {getNonNegative = 3}
-                                , atAssocs = [(NonNegative {getNonNegative = 1},NonNegative {getNonNegative = 2})
-                                             ,(NonNegative {getNonNegative = 0},NonNegative {getNonNegative = 2})
-                                             ,(NonNegative {getNonNegative = 2},NonNegative {getNonNegative = 2})
-                                             ,(NonNegative {getNonNegative = 1},NonNegative {getNonNegative = 1})]
-                                , atX = NonNegative {getNonNegative = 0.1}
-                                , atY = NonNegative {getNonNegative = 0.5}
+       (Just $ ArbitraryTerrain {atRows = 3
+                                , atCols = 3
+                                , atAssocs = [(Tagged @Row 1, Tagged @Col 2)
+                                             ,(0, 2)
+                                             ,(2, 2)
+                                             ,(1, 1)]
+                                , atX = 0.1
+                                , atY = 0.5
                                 , atAngle = 0.3})
   describe "lineOfFlight" $ do
     describe "Properties" $ do
@@ -529,38 +564,37 @@ main = hspec $ do
       it "distance to obstacles decreases when adding 4 of them" $ property prop_distanceDecreasesWhenAdding4Obstacles
       it "distance to obstacles decreases when adding 8 of them" $ property prop_distanceDecreasesWhenAdding8Obstacles
     describe "Counter-examples found during test suite debugging" $ do
-      let ex1 = ArbitraryTerrain {atRows = NonNegative {getNonNegative = 3}
-                                 , atCols = NonNegative {getNonNegative = 3}
-                                 , atAssocs = [(NonNegative {getNonNegative = 0},NonNegative {getNonNegative = 0})
-                                              ,(NonNegative {getNonNegative = 0},NonNegative {getNonNegative = 0})
-                                              ,(NonNegative {getNonNegative = 2},NonNegative {getNonNegative = 0})
-                                              ,(NonNegative {getNonNegative = 0},NonNegative {getNonNegative = 2})
-                                              ,(NonNegative {getNonNegative = 2},NonNegative {getNonNegative = 2})
-                                              ,(NonNegative {getNonNegative = 0},NonNegative {getNonNegative = 0})
-                                              ,(NonNegative {getNonNegative = 2},NonNegative {getNonNegative = 0})]
-                                 , atX = NonNegative {getNonNegative = 1.0}
-                                 , atY = NonNegative {getNonNegative = 0.9}
+      let ex1 = ArbitraryTerrain {atRows = Tagged 3
+                                 , atCols = Tagged 3
+                                 , atAssocs = [(Tagged @Row 0,Tagged @Col 0)
+                                              ,(Tagged 0,Tagged 0)
+                                              ,(Tagged 2,Tagged 0)
+                                              ,(Tagged 0,Tagged 2)
+                                              ,(Tagged 2,Tagged 2)
+                                              ,(Tagged 0,Tagged 0)
+                                              ,(Tagged 2,Tagged 0)]
+                                 , atX = Tagged 1.0
+                                 , atY = Tagged 0.9
                                  , atAngle = 3.8} in
         describe "ex1" $ do
           it "computes distance" $ evaluateTerrain ex1 `shouldBe` (Obstacle 0.6537465740348641 0 0 1.0170924318362453)
           it "computes distance with 1 obstacle more" $
-            evaluateTerrain (ex1 {atAssocs = atAssocs ex1 ++ [(NonNegative 1, NonNegative 0)]})
+            evaluateTerrain (ex1 {atAssocs = atAssocs ex1 ++ [(Tagged @Row 1, Tagged @Col 0)]})
             `equalObstacleHit`
             (Obstacle 0.632137054991 0 1 0.013221954744)
           it "computes distance with 2 obstacles more" $
-            evaluateTerrain (ex1 {atAssocs = atAssocs ex1 ++ [(NonNegative 1, NonNegative 0), (NonNegative 0, NonNegative 1)]})
+            evaluateTerrain (ex1 {atAssocs = atAssocs ex1 ++ [(Tagged @Row 1, Tagged @Col 0), (0, 1)]})
             `equalObstacleHit`
             (Obstacle 0.632137054991 0 1 0.013221954744)
-      let ex2 = ArbitraryTerrain {atRows = NonNegative {getNonNegative = 3}
-                                 , atCols = NonNegative {getNonNegative = 3}
-                                 , atAssocs = [(NonNegative {getNonNegative = 1},NonNegative {getNonNegative = 2})]
-                                 , atX = NonNegative {getNonNegative = 0.1}
-                                 , atY = NonNegative {getNonNegative = 0.5}
+      let ex2 = ArbitraryTerrain {atRows = Tagged @Row 3
+                                 , atCols = Tagged @Col 3
+                                 , atAssocs = [(Tagged @Row 1,Tagged @Col 2)]
+                                 , atX = Tagged @Col 0.1
+                                 , atY = Tagged @Row 0.5
                                  , atAngle = 0.3}
           d2 = evaluateTerrain ex2
           expectedD2 = Obstacle 1.46545224215 2 1 2.56692925055
-          ex2p1 = ex2 {atAssocs = [(NonNegative {getNonNegative = 1},NonNegative {getNonNegative = 1})]
-                                ++ atAssocs ex2}
+          ex2p1 = ex2 {atAssocs = [(Tagged @Row 1,Tagged @Col 1)] ++ atAssocs ex2}
           d2p1 = evaluateTerrain ex2p1
           expectedD2p1 = Obstacle 0.418700640615 1 1 2.87626550016 in
         -- ex2 =   0    1    2
@@ -570,3 +604,23 @@ main = hspec $ do
         describe "ex2" $ do
           it "computes distance" $ d2 `equalObstacleHit` expectedD2
           it "computes distance with 1 obstacle more" $ d2p1 `equalObstacleHit` expectedD2p1
+      let ex3 = ArbitraryTerrain {atRows = 2
+                                 , atCols = 6
+                                 , atAssocs = [(Tagged @Row 1,Tagged @Col 1)
+                                              ,(Tagged 1,Tagged 2)
+                                              ,(Tagged 1,Tagged 3)
+                                              ,(Tagged 1,Tagged 4)]
+                                 , atX = -6.28442671097389e-2
+                                 , atY = -0.17558135838450717
+                                 , atAngle = 0.14697477611029086}
+          d3 = evaluateTerrain ex3
+          -- The ray passes close to a corner when computing with a tolerance of 1e-4.  With
+          -- epsilon = 1e-6, the ray "misses" the obstacle.
+          -- expectedD3 = Obstacle 4.613170990491703 4 1 4.0005904498241565
+          expectedD3 = Horizon
+          ex3p1 = ex3 {atAssocs = [(Tagged @Row 0,Tagged @Col 4)] ++ atAssocs ex3}
+          d3p1 = evaluateTerrain ex3p1
+          expectedD3p1 = Obstacle 3.6016752372242617 4 0 2.148129708697345 in
+        describe "ex3" $ do
+          it "computes distance" $ d3 `equalObstacleHit` expectedD3
+          it "computes distance with 1 obstacle more" $ d3p1 `equalObstacleHit` expectedD3p1

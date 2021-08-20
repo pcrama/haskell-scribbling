@@ -39,6 +39,7 @@ executable test
   import:              shared-properties
   main-is:             Test.hs
   hs-source-dirs:      test
+  other-modules:       Tagged
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   build-depends:       hspec >= 2.7
                      , QuickCheck >= 2.9.2 && < 3
