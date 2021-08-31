@@ -33,8 +33,8 @@ lineOfFlight xp yp dir room =
       (False, True) -> go left up
       (False, False) -> go left down
       (True, False) -> go right down
-  where u = cos dir -- ^ horizontal component of unity vector of ray
-        v = sin dir -- ^ vertical component of unity vector of ray
+  where u = cos dir -- horizontal component of unity vector of ray
+        v = sin dir -- vertical component of unity vector of ray
         {-# INLINE go #-}
         go !moveRight !moveUp = internalLineOfFlight xp yp room u v moveRight moveUp ix iy
         ix = round xp

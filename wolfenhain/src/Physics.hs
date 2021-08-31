@@ -87,9 +87,9 @@ muaMaxDistance (MUA { muaA=GA a, muaV=GS v }) = round $ (-0.5) * v * v / a
 
 -- | Jumping hero: constant horizontal speed, MUA for vertical movement
 data Jump = Jump {
-  jumpX0 :: !Position -- | ^ starting x position
-  , jumpVx0 :: !GameSpeed -- | ^ initial horizontal speed
-  , jumpYMvt :: !MUA -- | ^ movement along vertical axis (also contains starting time)
+  jumpX0 :: !Position -- ^ starting x position
+  , jumpVx0 :: !GameSpeed -- ^ initial horizontal speed
+  , jumpYMvt :: !MUA -- ^ movement along vertical axis (also contains starting time)
   }
 
 
