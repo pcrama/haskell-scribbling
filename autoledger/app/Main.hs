@@ -1,17 +1,24 @@
 module Main where
-import Control.Applicative
-import qualified Data.ByteString.Lazy as BL
-import Data.Csv
-import qualified Data.Vector as V
+import qualified Data.ByteString as BL
+import qualified Data.Text.IO as TIO
+import Data.Text.Encoding (decodeLatin1, decodeUtf8')
+import GHC.IO.Encoding (setLocaleEncoding, utf8)
 
-import qualified Lib (someFunc, name, salary)
+import qualified Lib (runUnstructuredDataParser)
 
 main :: IO ()
 main = do
-    putStrLn "Hello, Haskell!"
-    Lib.someFunc
-    csvData <- BL.readFile "salaries.csv"
-    case decodeByName csvData of
-        Left err -> putStrLn err
-        Right (_, v) -> V.forM_ v $ \ p ->
-            putStrLn $ Lib.name p ++ " earns " ++ show (Lib.salary p) ++ " dollars"
+    setLocaleEncoding utf8
+    let inputFile = "script-input.txt"
+    bankDataBytes <- BL.readFile inputFile
+    let (encoding, bankData) = case decodeUtf8' bankDataBytes of
+          Left _ -> ("latin1", decodeLatin1 bankDataBytes)
+          Right d -> ("utf8", d)
+    putStrLn $ inputFile <> " uses " <> encoding <> "."
+    case Lib.runUnstructuredDataParser inputFile bankData of
+      Left e -> print e
+      Right (_headers, columnNames, rows) -> do
+        case rows of
+          [] -> print columnNames
+          h:_ -> mapM_ (\(n, v) -> TIO.putStrLn $ n <> ": " <> v)
+                     $ zip columnNames h
