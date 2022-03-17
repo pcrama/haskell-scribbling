@@ -125,6 +125,19 @@ testParseUnstructuredData = describe "parseUnstructuredData" $ do
                             ,["col1","col2","col3"]
                             ,[["v1","v2","v3"]])
 
+testParseAmountToCents :: SpecWith ()
+testParseAmountToCents = describe "parseAmountToCents" $ do
+    testParser "1" 100
+    testParser "2,3" 230
+    testParser "2.34" 234
+    testParser "-3" (-300)
+    testParser "-3.4" (-340)
+    testParser "-3456.78" (-345678)
+    testParser "-3,4" (-340)
+    testParser "-34,78" (-3478)
+  where testParser input expected =
+            runParserT parseAmountToCents () "amountCents" input `shouldBe` Right expected
+
 main :: IO ()
 main = hspec $ do
   describe "Unstructured parsing (examples from playing in REPL)" $ do
@@ -133,3 +146,4 @@ main = hspec $ do
     testParseUnstructuredHeaderLine
     testParseUnstructuredHeaders
     testParseUnstructuredData
+    testParseAmountToCents

@@ -32,6 +32,7 @@ library
     build-depends:    base >=4.11
                     , text
                     , parsec
+                    , time >= 1.9
     ghc-options:      -Wall
     hs-source-dirs:   src
     default-language: Haskell2010

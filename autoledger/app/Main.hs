@@ -1,10 +1,13 @@
 module Main where
 import qualified Data.ByteString as BL
-import qualified Data.Text.IO as TIO
 import Data.Text.Encoding (decodeLatin1, decodeUtf8')
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 
-import qualified Lib (runUnstructuredDataParser)
+import qualified Lib (
+  UnstructuredData(..)
+  , columnsToBelfius
+  , runUnstructuredDataParser
+  )
 
 main :: IO ()
 main = do
@@ -17,8 +20,13 @@ main = do
     putStrLn $ inputFile <> " uses " <> encoding <> "."
     case Lib.runUnstructuredDataParser inputFile bankData of
       Left e -> print e
-      Right (_headers, columnNames, rows) -> do
-        case rows of
-          [] -> print columnNames
-          h:_ -> mapM_ (\(n, v) -> TIO.putStrLn $ n <> ": " <> v)
-                     $ zip columnNames h
+      Right ud -> do
+        case Lib.udData ud of
+          [] -> print $ Lib.udColumnNames ud
+          _ -> flip mapM_ (take 5 $ Lib.columnsToBelfius ud) $ \h -> do
+                      putStrLn "---"
+                      print h
+
+-- Local Variables:
+-- compile-command: "(cd .. && cabal new-run exe:autoledger)"
+-- End:
