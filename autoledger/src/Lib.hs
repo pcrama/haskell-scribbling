@@ -1,8 +1,12 @@
+{-# LANGUAGE PatternSynonyms #-}
 module Lib (
-  UnstructuredParser
+  ITransaction(..)
+  , UnstructuredParser
   , UnstructuredParsingState
   , UnstructuredData(..)
   , UnstructuredHeader(..)
+  , NonBlankText
+  , pattern NonBlankText
   , columnsToBelfius
   , parseUnstructuredData
   , parseUnstructuredDataRows
@@ -122,13 +126,17 @@ class ITransaction a where
   amountCents :: a -> Int
   currency :: a -> Text
 
-newtype NonBlankText = NonBlankText { getNonBlankText :: Text }
+newtype NonBlankText = NonBlankText' { getNonBlankText :: Text }
   deriving (Show, Eq)
+
+pattern NonBlankText :: Text -> NonBlankText
+pattern NonBlankText t <- (NonBlankText' t)
+{-# COMPLETE NonBlankText #-}
 
 mkNonBlankText :: Text -> Maybe NonBlankText
 mkNonBlankText t
   | T.all isSpace t = Nothing
-  | otherwise = Just $ NonBlankText t
+  | otherwise = Just $ NonBlankText' t
 
 data BelfiusTransaction = BelfiusTransaction
   {

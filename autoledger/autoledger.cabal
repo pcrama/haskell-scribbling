@@ -49,6 +49,7 @@ executable autoledger
         base >=4.11
       , bytestring
       , text
+      , time
       , vector
       , autoledger
 
