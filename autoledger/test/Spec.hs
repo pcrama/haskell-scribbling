@@ -2,7 +2,7 @@ module Main where
 
 import Data.Functor.Identity (Identity)
 -- import qualified Data.Text as T
-import           Data.Text (Text)
+import           Data.Text (Text, unpack)
 import           Test.Hspec
 import           Text.Parsec (
   ParseError
@@ -86,19 +86,19 @@ testParseUnstructuredDataRows = describe "parseUnstructuredDataRows" $ do
   flip mapM_ [("parses 1 data row"
               , Just 3
               , "a;b;c"
-              , Right [["a", "b", "c"]])
+              , Right [(1, ["a", "b", "c"])])
              ,("parses 2 data rows"
               , Just 3
               , "a;b;c\nde;fg;hi"
-              , Right [["a", "b", "c"], ["de", "fg", "hi"]])
+              , Right [(1, ["a", "b", "c"]), (2, ["de", "fg", "hi"])])
              ,("parses 2 data rows with trailing newline"
               , Just 3
               , "a;b;c\nde;fg;hi\n"
-              , Right [["a", "b", "c"], ["de", "fg", "hi"]])
+              , Right [(1, ["a", "b", "c"]), (2, ["de", "fg", "hi"])])
              ,("parses data row ignoring trailing blank column"
               , Just 3
               , "a;b;c;"
-              , Right [["a", "b", "c"]])]
+              , Right [(1, ["a", "b", "c"])])]
            $ \(name, state, input, expected) ->
                  parseWithEofAtEnd parseUnstructuredDataRows
                                    name
@@ -109,21 +109,23 @@ testParseUnstructuredDataRows = describe "parseUnstructuredDataRows" $ do
 testParseUnstructuredData :: SpecWith ()
 testParseUnstructuredData = describe "parseUnstructuredData" $ do
     parseWithEofAtEnd parseUnstructuredData
-                      "parses some data (no trailiing newline)"
+                      "parses some data (no trailing newline)"
                       Nothing
                       "header;value\nother;\n;\ncol1;col2;col3\nv1;v2;v3"
-                    $ Right ([UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"}
-                              ,UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = ""}]
-                            ,["col1","col2","col3"]
-                            ,[["v1","v2","v3"]])
+                    $ Right UnstructuredData {
+      udHeaders = [UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"}
+                  ,UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = ""}]
+      , udColumnNames = ["col1","col2","col3"]
+      , udData = [(5, ["v1","v2","v3"])] }
     parseWithEofAtEnd parseUnstructuredData
-                      "parses some data (with trailiing newline)"
+                      "parses some data (with trailing newline)"
                       Nothing
                       "header;value\nother;\n;\ncol1;col2;col3\nv1;v2;v3\n"
-                    $ Right ([UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"}
-                              ,UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = ""}]
-                            ,["col1","col2","col3"]
-                            ,[["v1","v2","v3"]])
+                    $ Right UnstructuredData {
+      udHeaders = [UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"}
+                  ,UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = ""}]
+      , udColumnNames = ["col1","col2","col3"]
+      , udData = [(5, ["v1","v2","v3"])] }
 
 testParseAmountToCents :: SpecWith ()
 testParseAmountToCents = describe "parseAmountToCents" $ do
@@ -136,7 +138,8 @@ testParseAmountToCents = describe "parseAmountToCents" $ do
     testParser "-3,4" (-340)
     testParser "-34,78" (-3478)
   where testParser input expected =
-            runParserT parseAmountToCents () "amountCents" input `shouldBe` Right expected
+            it (unpack input)
+             $ runParser parseAmountToCents () "amountCents" input `shouldBe` Right expected
 
 main :: IO ()
 main = hspec $ do
@@ -147,3 +150,8 @@ main = hspec $ do
     testParseUnstructuredHeaders
     testParseUnstructuredData
     testParseAmountToCents
+
+-- Local Variables:
+-- compile-command: "([ -r autoledger.cabal ] || cd ..; cabal new-test)"
+-- coding: utf-8
+-- End:

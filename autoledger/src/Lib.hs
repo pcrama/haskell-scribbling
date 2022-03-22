@@ -8,6 +8,7 @@ module Lib (
   , NonBlankText
   , pattern NonBlankText
   , columnsToBelfius
+  , parseAmountToCents
   , parseUnstructuredData
   , parseUnstructuredDataRows
   , parseUnstructuredDataSingleRow
