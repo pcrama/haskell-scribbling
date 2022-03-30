@@ -25,7 +25,8 @@ library
     exposed-modules: Lib
 
     -- Modules included in this library but not exported.
-    -- other-modules:
+    other-modules: Transaction
+                 , BelfiusParser
 
     -- LANGUAGE extensions used by modules in this package.
     default-extensions: OverloadedStrings
@@ -33,6 +34,7 @@ library
                     , text
                     , parsec
                     , time >= 1.9
+                    , mtl >= 2
     ghc-options:      -Wall
     hs-source-dirs:   src
     default-language: Haskell2010
@@ -63,13 +65,14 @@ test-suite test
     type:                exitcode-stdio-1.0
 
     -- Modules included in this executable, other than Main.
-    -- other-modules:
+    other-modules:       TransactionTest
 
     -- Other library packages from which modules are imported.
     build-depends:       base >=4.11
                        , parsec
                        , hspec >=2.7 && <2.8
                        , text >=1.2 && <1.3
+                       , time
                        , autoledger
 
     ghc-options:         -Wall
