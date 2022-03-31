@@ -88,3 +88,7 @@ spec = describe "Own extension (MatchGroup)" $ do
         ) `shouldBe` mergeMatchInfo [(24,2,Just 15)] [(24 :: Int, 15 :: Int, Just (115 :: Int))]
     it "example mergeMatchInfo [(24,2,Just 15)] [(24,15,Just 115)]" $
       mergeMatchInfo [(24,2,Just 15)] [(24,15,Just 115)] `shouldBe` [(24 :: Int, 2 :: Int, Just (15 :: Int)), (24 :: Int, 15 :: Int, Just (115 :: Int))]
+  context "Used in regular expression" $ do
+    it "SeqMX (RepMX $ AltMX (sym 'b') $ sym 'a') $ sequ \"aaaaaaaaaa\"" $
+      let rx = mxToS $ SeqMX (RepMX $ AltMX (sym 'b') $ sym 'a') $ sequ "aaaaaaaaaa" in
+        matchS rx "abababbbaaaaaaaaaaa" `shouldBe` (MG $ MI [])

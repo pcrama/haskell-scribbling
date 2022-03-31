@@ -57,6 +57,7 @@ data RegMX a = EpsMX
              | AltMX (RegMX a) (RegMX a)
              | SeqMX (RegMX a) (RegMX a)
              | RepMX (RegMX a)
+             | MaGrMX Int (RegMX a)
 
 instance Show a => Show (RegMX a) where
   show EpsMX = "EpsMX"
@@ -66,6 +67,7 @@ instance Show a => Show (RegMX a) where
   show (AltMX r s) = "(AltMX " ++ show r ++ " " ++ show s ++ ")"
   show (SeqMX r s) = "(SeqMX " ++ show r ++ " " ++ show s ++ ")"
   show (RepMX r) = "(RepMX " ++ show r ++ ")"
+  show (MaGrMX i r) = "(MaGrMX " ++ show i ++ " $ " ++ show r ++ ")"
 
 libAct2MXtoOwnMX :: LibAct2.RegMX a -> RegMX a
 libAct2MXtoOwnMX LibAct2.EpsMX = EpsMX
@@ -99,6 +101,7 @@ empty (PostMX s _ _ _) = empty s
 empty (AltMX a b) = empty a || empty b
 empty (SeqMX a b) = empty a && empty b
 empty (RepMX _) = True
+empty (MaGrMX _ a) = empty a
 
 -- | True if final character of regular expression contains is matched
 final :: RegMX a -- ^ regular expression
@@ -110,6 +113,7 @@ final (PostMX r b _ _) = b && final r
 final (AltMX a b) = final a || final b
 final (SeqMX a b) = (final a && empty b) || final b
 final (RepMX a) = final a
+final (MaGrMX _ a) = final a
 
 shift :: Eq a => Bool -> RegMX a -> (Maybe a, a, Maybe a) -> RegMX a
 shift _ EpsMX _ = EpsMX
@@ -125,6 +129,7 @@ shift m (SeqMX r s) x = SeqMX (shift m r x)
                                     s
                                     x
 shift m (RepMX r) x = RepMX $ shift (m || final r) r x
+shift m (MaGrMX i r) x = MaGrMX i $ shift m r x
 
 zipDelayed :: a -> a -> [a] -> [(Maybe a, a, Maybe a)]
 zipDelayed a b cs = merge (Just a:Just b:justified) (b:cs) justified
@@ -154,6 +159,7 @@ data RegS s a = EpsS
               | AltS (Reg s a) (Reg s a)
               | SeqS (Reg s a) (Reg s a)
               | RepS (Reg s a)
+              | MaGrS Int (Reg s a)
 
 epsS :: Semiring s => Reg s a
 epsS = epsGen False
@@ -206,6 +212,9 @@ repS = repGen False
 repGen :: Semiring s => Bool -> Reg s a -> Reg s a
 repGen a r@(Reg { finalS = f }) = Reg { activeS = a, emptyS = one, finalS = f, regS = RepS r }
 
+maGrS :: Semiring s => Int -> Reg s a -> Reg s a
+maGrS i r@(Reg { activeS = a, emptyS = e, finalS = f }) = Reg { activeS = a, emptyS = e, finalS = f, regS = MaGrS i r }
+
 finalA :: Semiring s => Reg s a -> s
 {-# SPECIALISE INLINE finalA :: Reg Bool Char -> Bool #-}
 finalA r = if activeS r then finalS r else zero
@@ -255,6 +264,7 @@ mxToS (PostMX r _ f e) = postS (mxToS r) (\x y -> boolToSemiring $ f x y) (boolT
 mxToS (AltMX a b) = altS (mxToS a) (mxToS b)
 mxToS (SeqMX a b) = seqS (mxToS a) (mxToS b)
 mxToS (RepMX r) = repS $ mxToS r
+mxToS (MaGrMX i r) = maGrS i $ mxToS r
 
 submatchW :: SemiringEq s => Reg s (Int, c) -> [c] -> s
 submatchW r = matchS (seqS arb $ seqS r arb) . zip [0..]
@@ -294,6 +304,10 @@ instance Semiring MatchGroup where
   NoMG `stimes` _ = NoMG
   _ `stimes` NoMG = NoMG
   (MG (MI as)) `stimes` (MG (MI bs)) = MG . MI $ mergeMatchInfo as bs
+
+instance SemiringEq MatchGroup where
+  isSZero NoMG = True
+  isSZero (MG _) = False
 
 mergeMatchInfo :: (Ord a, Ord b)
                => [(a, b, Maybe b)] -> [(a, b, Maybe b)] -> [(a, b, Maybe b)]
