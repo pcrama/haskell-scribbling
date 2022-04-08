@@ -1,4 +1,3 @@
-{-# LANGUAGE PatternSynonyms #-}
 module BelfiusParser (
   UnstructuredParser
   , UnstructuredParsingState
@@ -15,10 +14,8 @@ module BelfiusParser (
   ) where
 import qualified Data.Text as T
 import Data.Char (digitToInt, isDigit, isSpace)
-import Data.Function (on)
 import Data.Functor (void)
 import Data.List (foldl')
-import Data.Monoid (First(..))
 import Data.Text (Text)
 import Data.Time.Calendar (Day, fromGregorian, fromGregorianValid)
 import Text.Parsec
@@ -40,11 +37,11 @@ newLines :: String
 newLines = "\r\n"
 
 ssvChar :: Char -> Bool
-ssvChar = (not . (`elem` (fieldSeparator:newLines)))
+ssvChar = not . (`elem` (fieldSeparator:newLines))
 
 ssvText, ssvText1 :: Monad m => UnstructuredParser m Text
-ssvText = T.pack <$> (many $ satisfy ssvChar)
-ssvText1 = T.pack <$> (many1 $ satisfy ssvChar)
+ssvText = T.pack <$> many (satisfy ssvChar)
+ssvText1 = T.pack <$> many1 (satisfy ssvChar)
 
 type UnstructuredParsingState = Maybe Int
 type UnstructuredParser m a = ParsecT Text UnstructuredParsingState m a
@@ -142,12 +139,53 @@ instance ITransaction BelfiusTransaction where
   date = _accountingDate
   otherAccount = _otherAccount
   otherName = _otherName
-  description = getFirst . ((<>) `on` (First .)) _communication _transactionDescription
+  description = getBelfiusDescription
   amountCents = _amountCents
   currency = _currency
 
+getBelfiusDescription :: BelfiusTransaction -> Maybe NonBlankText
+getBelfiusDescription BelfiusTransaction { _communication = Nothing, _transactionDescription = mbT@(Just _) } =
+  mbT >>= simplifyTransactionDescription
+getBelfiusDescription BelfiusTransaction { _communication = mbC@(Just (NonBlankText c)), _transactionDescription = mbT }
+  | isStructuredCommunication c = mbT >>= simplifyTransactionDescription
+  | otherwise = mbC >>= simplifyTransactionDescription
+  where isStructuredCommunication = T.all (\h -> isDigit h || h == '+' || h == '/') 
+getBelfiusDescription BelfiusTransaction { _communication = Nothing, _transactionDescription = Nothing } = Nothing
+
+simplifyTransactionDescription :: NonBlankText -> Maybe NonBlankText
+simplifyTransactionDescription x = dropAchatBancontact x
+  >>= dropAchatContactLess
+  >>= dropVirementMobile
+  >>= dropAchatParInternet
+  >>= dropPaiementViaApp
+  >>= dropPaiementMaestro
+  >>= dropRefVal
+  where dropAchatBancontact = dropPrefix "ACHAT BANCONTACT AVEC CARTE N°" cardNumber
+        dropAchatContactLess = dropPrefix "ACHAT BANCONTACT CONTACTLESS AVEC CARTE N°" cardNumber
+        dropVirementMobile = dropPrefix "VIREMENT BELFIUS MOBILE VERS " $ const False
+        dropAchatParInternet = dropPrefix "ACHAT PAR INTERNET AVEC CARTE N°" cardNumber
+        dropPaiementViaApp = dropPrefix "PAIEMENT VIA VOTRE APP MOBILE BANKING OU VOTRE         BANCONTACT-APP A " $ const False
+        dropPaiementMaestro = dropPrefix "PAIEMENT MAESTRO " cardNumber
+        cardNumber c = isDigit c || c == ' ' || c == '-'
+        patternRef = " REF. : "
+        patternRefLen = T.length patternRef
+        patternVal = " VAL. "
+        patternValLen = T.length patternVal
+        dropRefVal nb@(NonBlankText y) = let (prefix, s) = T.breakOn patternRef y in
+          if T.null s
+          then Just nb
+          else let (t, suffix) = T.breakOn patternVal $ T.drop patternRefLen s in
+                 case (T.null suffix,
+                       not (T.any isSpace t)
+                       && T.all cardNumber (T.drop patternValLen suffix)) of
+                   (False, True) -> mkNonBlankText prefix
+                   _ -> Just nb
+        dropPrefix pfx extra nb@(NonBlankText y) = case T.stripPrefix pfx y of
+          Just rest -> mkNonBlankText $ T.dropWhile extra rest
+          Nothing -> Just nb
+
 parseUnsignedInt :: Monad m => ParsecT Text () m Int
-parseUnsignedInt = digitListToInt <$> (many1 $ satisfy isDigit)
+parseUnsignedInt = digitListToInt <$> many1 (satisfy isDigit)
   where digitListToInt = foldl' (\val dig -> val * 10 + digitToInt dig) 0
 
 parseFractionalPart :: Monad m => ParsecT Text () m Int
@@ -186,7 +224,7 @@ data UnstructuredDataToRecordError a =
 type FailableToRecord a = Either (UnstructuredDataToRecordError Text) a
 
 columnsToBelfius :: UnstructuredData -> [FailableToRecord BelfiusTransaction]
-columnsToBelfius (UnstructuredData { udColumnNames = columnNames, udData = dataRows }) =
+columnsToBelfius UnstructuredData { udColumnNames = columnNames, udData = dataRows } =
   map (makeBelfiusPicking columnNames . snd) dataRows
 
 type Filler i r = i -> r -> Either (UnstructuredDataToRecordError Text) r
@@ -266,14 +304,15 @@ makePicking lkp defaultRecord columnNames = case traverse selectPicker columnNam
     Right fillers -> \cols -> picking fillers cols defaultRecord
   where selectPicker h = case lkp h of
           Nothing -> Left h
-          Just f -> Right f
+          Just f -> Right $ f . T.unwords . T.words
 
 makeBelfiusPicking ::
-  [Text] -- ^ column names
-  -> ([Text] -- ^ data row
-      -> FailableToRecord BelfiusTransaction) -- ^ function mapping a data row to a `BelfiusTransaction'
-makeBelfiusPicking = makePicking (flip lookup belfiusColumnNames) $ BelfiusTransaction {
-  _account = ""
+  -- | column names
+  [Text] ->
+  -- | function mapping a data row to a `BelfiusTransaction`
+  ([Text] -> FailableToRecord BelfiusTransaction)
+makeBelfiusPicking = makePicking bilingualLookup $ BelfiusTransaction {
+  _account = T.empty
   , _accountingDate = fromGregorian 1970 1 1
   , _extractNumber = Nothing
   , _transactionNumber = Nothing
@@ -284,25 +323,27 @@ makeBelfiusPicking = makePicking (flip lookup belfiusColumnNames) $ BelfiusTrans
   , _transactionDescription = Nothing
   , _valueDate = fromGregorian 1970 1 1
   , _amountCents = 0
-  , _currency = ""
-  , _bankIdentificationCode = ""
-  , _countryCode = ""
+  , _currency = T.empty
+  , _bankIdentificationCode = T.empty
+  , _countryCode = T.empty
   , _communication = Nothing
   }
-  where belfiusColumnNames = [
-          ("Date de comptabilisation", pickAccountingDate)
-          , ("Date valeur", pickValueDate)
-          , ("Compte", pickAccount)
-          , ("Numéro d'extrait", pickExtractNumber)
-          , ("Numéro de transaction", pickTransactionNumber)
-          , ("Compte contrepartie", pickOtherAccount)
-          , ("Nom contrepartie contient", pickOtherName)
-          , ("Rue et numéro", pickOtherStreetAndNumber)
-          , ("Code postal et localité", pickOtherCity)
-          , ("Transaction", pickTransactionDescription)
-          , ("Montant", pickAmountCents)
-          , ("Devise", pickCurrency)
-          , ("BIC", pickBankIdentificationCode)
-          , ("Code pays", pickCountryCode)
-          , ("Communications", pickCommunication)
-          ]
+  where bilingualLookup :: T.Text -> Maybe (Filler T.Text BelfiusTransaction)
+        bilingualLookup s =
+          foldr (\(fr, nl, res) other -> if s == fr || s == nl then Just res else other)
+                Nothing
+                [("Communications", "Mededelingen", pickCommunication),
+                 ("Compte", "Rekening", pickAccount),
+                 ("Date de comptabilisation", "Boekingsdatum", pickAccountingDate),
+                 ("Numéro d'extrait", "Rekeninguittrekselnummer", pickExtractNumber),
+                 ("Numéro de transaction", "Transactienummer", pickTransactionNumber),
+                 ("Compte contrepartie", "Rekening tegenpartij", pickOtherAccount),
+                 ("Nom contrepartie contient", "Naam tegenpartij bevat", pickOtherName),
+                 ("Rue et numéro", "Straat en nummer", pickOtherStreetAndNumber),
+                 ("Code postal et localité", "Postcode en plaats", pickOtherCity),
+                 ("Transaction", "Transactie", pickTransactionDescription),
+                 ("Date valeur", "Valutadatum", pickValueDate),
+                 ("Montant", "Bedrag", pickAmountCents),
+                 ("Devise", "Devies", pickCurrency),
+                 ("BIC", "BIC", pickBankIdentificationCode),
+                 ("Code pays", "Landcode", pickCountryCode)]
