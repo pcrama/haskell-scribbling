@@ -150,10 +150,6 @@ parseUnsignedInt :: Monad m => ParsecT Text () m Int
 parseUnsignedInt = digitListToInt <$> (many1 $ satisfy isDigit)
   where digitListToInt = foldl' (\val dig -> val * 10 + digitToInt dig) 0
 
-parseIntegerPart :: Monad m => ParsecT Text () m Int
-parseIntegerPart = signParser <*> parseUnsignedInt
-  where signParser = maybe id (const $ ((-1)*)) <$> (optionMaybe $ char '-')
-
 parseFractionalPart :: Monad m => ParsecT Text () m Int
 parseFractionalPart = do
     void $ char '.' <|> char ','
@@ -162,9 +158,14 @@ parseFractionalPart = do
         parseDigit = digitToInt <$> satisfy isDigit
 
 parseAmountToCents :: Monad m => ParsecT Text () m Int
-parseAmountToCents = toCents <$> parseIntegerPart <*> optionMaybe parseFractionalPart <* eof
-  where toCents ip Nothing = ip * 100
-        toCents ip (Just fp) = signum ip * (100 * abs ip + fp)
+parseAmountToCents = toCents <$> signParser <*> parseUnsignedInt <*> optionMaybe parseFractionalPart <* eof
+  where toCents sign ip Nothing = sign * ip * 100
+        toCents sign ip (Just fp) = sign * (100 * abs ip + fp)
+        signParser = do
+          s <- optionMaybe (char '-')
+          return $ case s of
+            Just _ -> (-1)
+            Nothing -> 1
 
 parseDate :: Monad m => ParsecT Text () m Day
 parseDate = do

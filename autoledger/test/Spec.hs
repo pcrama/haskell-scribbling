@@ -131,6 +131,7 @@ testParseUnstructuredData = describe "parseUnstructuredData" $ do
 testParseAmountToCents :: SpecWith ()
 testParseAmountToCents = describe "parseAmountToCents" $ do
     testParser "1" 100
+    testParser "1,00" 100
     testParser "2,3" 230
     testParser "2.34" 234
     testParser "-3" (-300)
@@ -138,6 +139,10 @@ testParseAmountToCents = describe "parseAmountToCents" $ do
     testParser "-3456.78" (-345678)
     testParser "-3,4" (-340)
     testParser "-34,78" (-3478)
+    testParser "0,81" 81
+    testParser "0,01" 1
+    testParser "-0,18" (-18)
+    testParser "-0,75" (-75)
   where testParser input expected =
             it (unpack input)
              $ runParser parseAmountToCents () "amountCents" input `shouldBe` Right expected
