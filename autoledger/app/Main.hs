@@ -2,6 +2,7 @@ module Main where
 
 import qualified Data.ByteString as BL
 import Data.Char (isSpace)
+import Data.Monoid (mconcat)
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeLatin1, decodeUtf8')
 import qualified Data.Text.IO as TIO
@@ -15,6 +16,7 @@ import qualified Lib
     columnsToBelfius,
     mkLedgerEntry,
     runUnstructuredDataParser,
+    runValueParser,
   )
 import System.Environment (getArgs)
 
@@ -128,21 +130,23 @@ main :: IO ()
 main = do
   setLocaleEncoding utf8
   args <- getArgs
-  let inputFile = case args of
-        [f] -> f
-        _ -> "script-input.txt"
-  bankDataBytes <- BL.readFile inputFile
-  let (encoding, bankData) = case decodeUtf8' bankDataBytes of
-        Left _ -> ("latin1", decodeLatin1 bankDataBytes)
-        Right d -> ("utf8", d)
-  putStrLn $ inputFile <> " uses " <> encoding <> "."
-  case Lib.runUnstructuredDataParser inputFile bankData of
-    Left e -> print e
-    Right ud -> do
-      case Lib.udData ud of
-        [] -> print $ Lib.udColumnNames ud
-        _ -> mapM_ (TIO.putStrLn . uncurry renderTransaction) (reverse $ zip (Lib.udData ud) $ Lib.columnsToBelfius ud)
-
+  mconcat $ flip map args $ \x -> do
+    putStrLn x
+    putStrLn . show $ Lib.runValueParser "name" $ T.pack x
+  -- let inputFile = case args of
+  --       [f] -> f
+  --       _ -> "script-input.txt"
+  -- bankDataBytes <- BL.readFile inputFile
+  -- let (encoding, bankData) = case decodeUtf8' bankDataBytes of
+  --       Left _ -> ("latin1", decodeLatin1 bankDataBytes)
+  --       Right d -> ("utf8", d)
+  -- putStrLn $ inputFile <> " uses " <> encoding <> "."
+  -- case Lib.runUnstructuredDataParser inputFile bankData of
+  --   Left e -> print e
+  --   Right ud -> do
+  --     case Lib.udData ud of
+  --       [] -> print $ Lib.udColumnNames ud
+  --       _ -> mapM_ (TIO.putStrLn . uncurry renderTransaction) (reverse $ zip (Lib.udData ud) $ Lib.columnsToBelfius ud)
 -- Local Variables:
 -- compile-command: "(cd autoledger; cabal new-run exe:autoledger)"
 -- coding: utf-8

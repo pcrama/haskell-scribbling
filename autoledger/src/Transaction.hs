@@ -15,7 +15,6 @@ where
 
 import Control.Monad.Reader (MonadReader, asks, runReader)
 import Data.Char (isSpace)
-import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Data.Time.Calendar (Day)
 
@@ -43,7 +42,7 @@ mkNonBlankText t
 
 data TransactionEval a where
   Constant :: a -> TransactionEval a
-  Select :: a -> (b -> Maybe a) -> TransactionEval b -> TransactionEval a
+  Select :: TransactionEval a -> (b -> Maybe a) -> TransactionEval b -> TransactionEval a
   Cond :: TransactionEval a -> [(TransactionEval Bool, TransactionEval a)] -> TransactionEval a
   ContainsCaseInsensitive :: TransactionEval T.Text -> TransactionEval T.Text -> TransactionEval Bool
   Pair :: TransactionEval a -> TransactionEval b -> TransactionEval (a, b)
@@ -55,11 +54,25 @@ data TransactionEval a where
   OtherAccount :: TransactionEval T.Text -- `Nothing` becomes `T.empty`.
   Description :: TransactionEval T.Text
 
+instance Show a => Show (TransactionEval a) where
+  show (Constant a) = "(Constant " <> show a <> ")"
+  show (Select d _ _) = "(Select " <> show d <> " _f _v)"
+  show (Cond d xs) = "(Cond " <> show d <> " " <> foldMap show xs <> ")"
+  show (ContainsCaseInsensitive hayStack needle) = "(contains " <> show hayStack <> " " <> show needle <> ")"
+  show (Pair _ _) = "(Pair _ _)"
+  show (Fst _) = "(Fst _)"
+  show (Snd _) = "(Snd _)"
+  show (And x y) = "(And "<> show x <> " " <> show y <> ")"
+  show (Or x y) = "(Or "<> show x <> " " <> show y <> ")"
+  show Account = "account"
+  show OtherAccount = "other-account"
+  show Description = "description"
+
 eval :: (ITransaction t, MonadReader t m) => TransactionEval a -> m a
 eval (Constant a) = return a
 eval (Select defaultValue lookupFun x) = do
   x' <- eval x
-  return $ fromMaybe defaultValue $ lookupFun x'
+  maybe (eval defaultValue) pure $ lookupFun x'
 eval (Cond d conds) = foldr (\(test, expr) rest -> do
                                 b <- eval test
                                 if b then eval expr else rest)

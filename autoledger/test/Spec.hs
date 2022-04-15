@@ -13,6 +13,7 @@ import           Text.Parsec (
 import Lib
 
 import TransactionTest
+import ConfigLanguageTests
 
 parseWithEofAtEnd :: (Show a, Eq a)
                   => UnstructuredParser Identity a
@@ -158,6 +159,7 @@ main = hspec $ do
     testParseUnstructuredData
     testParseAmountToCents
   transactionSpecs
+  configLanguageSpecs
 
 -- Local Variables:
 -- compile-command: "([ -r autoledger.cabal ] || cd ..; cabal new-test)"

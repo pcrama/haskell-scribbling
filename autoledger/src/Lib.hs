@@ -2,6 +2,7 @@
 
 module Lib
   ( ITransaction (..),
+    Compiled (..),
     LedgerEntry (..),
     TransactionEval (..),
     UnstructuredParser,
@@ -12,9 +13,11 @@ module Lib
     pattern NonBlankText,
     evalForTransaction,
     columnsToBelfius,
+    compile,
     mkLedgerEntry,
     mkNonBlankText,
     parseAmountToCents,
+    parseConfigFileText,
     parseUnstructuredData,
     parseUnstructuredDataRows,
     parseUnstructuredDataSingleRow,
@@ -26,3 +29,4 @@ where
 
 import BelfiusParser
 import Transaction
+import ConfigLanguage

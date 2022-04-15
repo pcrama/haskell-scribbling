@@ -1,5 +1,6 @@
 module TransactionTest (
-  transactionSpecs
+  transactionSpecs,
+  Transaction(..)
   ) where
 
 import           Test.Hspec
@@ -42,8 +43,8 @@ transactionSpecs :: SpecWith ()
 transactionSpecs = describe "src/Transaction" $ do
   describe "works for simple evaluation" $ do
     it "Constant" $ evalForTransaction (Constant 'a') dummyTransaction `shouldBe` 'a'
-    it "Select (not found)" $ evalForTransaction (Select '?' (const Nothing) (Constant ())) dummyTransaction `shouldBe` '?'
-    it "Select (found)" $ evalForTransaction (Select '?' (const $ Just '!') (Constant ())) dummyTransaction `shouldBe` '!'
+    it "Select (not found)" $ evalForTransaction (Select (Constant '?') (const Nothing) (Constant ())) dummyTransaction `shouldBe` '?'
+    it "Select (found)" $ evalForTransaction (Select (Constant '?') (const $ Just '!') (Constant ())) dummyTransaction `shouldBe` '!'
     it "Account" $ evalForTransaction Account dummyTransaction `shouldBe` _account dummyTransaction
 
 -- Local Variables:
