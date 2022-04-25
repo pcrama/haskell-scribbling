@@ -1,5 +1,6 @@
 module Main where
 
+import Control.Monad (forM_)
 import Data.Functor.Identity (Identity)
 -- import qualified Data.Text as T
 import           Data.Text (Text, unpack)
@@ -25,87 +26,87 @@ parseWithEofAtEnd p nm s input expected =
 
 testParseUnstructuredDataSingleRow :: SpecWith ()
 testParseUnstructuredDataSingleRow = describe "parseUnstructuredDataSingleRow" $ do
-  flip mapM_ [("parses an empty row as a single empty column", "", Right [""])
-             ,("parses a row without empty columns", "a;b;c", Right ["a", "b", "c"])
-             ,("parses a row with an empty column in the middle", "a;;c", Right ["a", "", "c"])
-             ,("parses a row with an empty column at the end", "a;b;c;d;e;", Right ["a", "b", "c", "d", "e", ""])]
-           $ \(name, input, expected) ->
-                 parseWithEofAtEnd parseUnstructuredDataSingleRow
-                                   name
-                                   Nothing
-                                   input
-                                   expected
+  forM_ [("parses an empty row as a single empty column", "", Right [""])
+        ,("parses a row without empty columns", "a;b;c", Right ["a", "b", "c"])
+        ,("parses a row with an empty column in the middle", "a;;c", Right ["a", "", "c"])
+        ,("parses a row with an empty column at the end", "a;b;c;d;e;", Right ["a", "b", "c", "d", "e", ""])]
+    $ \(name, input, expected) ->
+        parseWithEofAtEnd parseUnstructuredDataSingleRow
+                          name
+                          Nothing
+                          input
+                          expected
 
 testParseUnstructuredHeaderLine :: SpecWith ()
 testParseUnstructuredHeaderLine = describe "parseUnstructuredHeaderLine" $ do
-  flip mapM_ [("parses an unstructured header"
-              , "header;value"
-              , Right $ UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"})
-             ,("strips whitespace"
-              , "  header  ; value  "
-              , Right $ UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"})
-             ,("handles empty value"
-              , "  header  ;"
-              , Right $ UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = ""})
-             ,("handles empty value (after stripping spaces)"
-              , "  header  ;   "
-              , Right $ UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = ""})]
-           $ \(name, input, expected) ->
-                 parseWithEofAtEnd parseUnstructuredHeaderLine
-                                   name
-                                   Nothing
-                                   input
-                                   expected
+  forM_ [("parses an unstructured header"
+         , "header;value"
+         , Right $ UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"})
+        ,("strips whitespace"
+         , "  header  ; value  "
+         , Right $ UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"})
+        ,("handles empty value"
+         , "  header  ;"
+         , Right $ UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = ""})
+        ,("handles empty value (after stripping spaces)"
+         , "  header  ;   "
+         , Right $ UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = ""})]
+      $ \(name, input, expected) ->
+            parseWithEofAtEnd parseUnstructuredHeaderLine
+                              name
+                              Nothing
+                              input
+                              expected
 
 testParseUnstructuredHeaders :: SpecWith ()
 testParseUnstructuredHeaders = describe "parseUnstructuredHeaders" $ do
-  flip mapM_ [("parses a set of unstructured headers without empty values"
-              , "header;value\nother;something else\n;\n"
-              , Right [UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"}
-                      , UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = "something else"}])
-             ,("parses a set of unstructured headers without empty values (carriage return + newline)"
-              , "header;value\r\nother;line ending\r\n;\r\n"
-              , Right [UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"}
-                      , UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = "line ending"}])
-             ,("parses a set of unstructured headers with empty first value"
-              , "header;\nother;value\n;\n"
-              , Right [UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = ""}
-                      , UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = "value"}])
-             ,("parses a set of unstructured headers with only empty values"
-              , "header;  \nother;\n;\n"
-              , Right [UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = ""}
-                      , UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = ""}])]
-           $ \(name, input, expected) ->
-                 parseWithEofAtEnd parseUnstructuredHeaders
-                                   name
-                                   Nothing
-                                   input
-                                   expected
+  forM_ [("parses a set of unstructured headers without empty values"
+         , "header;value\nother;something else\n;\n"
+         , Right [UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"}
+                 , UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = "something else"}])
+        ,("parses a set of unstructured headers without empty values (carriage return + newline)"
+         , "header;value\r\nother;line ending\r\n;\r\n"
+         , Right [UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = "value"}
+                 , UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = "line ending"}])
+        ,("parses a set of unstructured headers with empty first value"
+         , "header;\nother;value\n;\n"
+         , Right [UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = ""}
+                 , UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = "value"}])
+        ,("parses a set of unstructured headers with only empty values"
+         , "header;  \nother;\n;\n"
+         , Right [UnstructuredHeader {uhLine = 1, uhKey = "header", uhValue = ""}
+                 , UnstructuredHeader {uhLine = 2, uhKey = "other", uhValue = ""}])]
+      $ \(name, input, expected) ->
+            parseWithEofAtEnd parseUnstructuredHeaders
+                              name
+                              Nothing
+                              input
+                              expected
 
 testParseUnstructuredDataRows :: SpecWith ()
 testParseUnstructuredDataRows = describe "parseUnstructuredDataRows" $ do
-  flip mapM_ [("parses 1 data row"
-              , Just 3
-              , "a;b;c"
-              , Right [(1, ["a", "b", "c"])])
-             ,("parses 2 data rows"
-              , Just 3
-              , "a;b;c\nde;fg;hi"
-              , Right [(1, ["a", "b", "c"]), (2, ["de", "fg", "hi"])])
-             ,("parses 2 data rows with trailing newline"
-              , Just 3
-              , "a;b;c\nde;fg;hi\n"
-              , Right [(1, ["a", "b", "c"]), (2, ["de", "fg", "hi"])])
-             ,("parses data row ignoring trailing blank column"
-              , Just 3
-              , "a;b;c;"
-              , Right [(1, ["a", "b", "c"])])]
-           $ \(name, state, input, expected) ->
-                 parseWithEofAtEnd parseUnstructuredDataRows
-                                   name
-                                   state
-                                   input
-                                   expected
+  forM_ [("parses 1 data row"
+         , Just 3
+         , "a;b;c"
+         , Right [(1, ["a", "b", "c"])])
+        ,("parses 2 data rows"
+         , Just 3
+         , "a;b;c\nde;fg;hi"
+         , Right [(1, ["a", "b", "c"]), (2, ["de", "fg", "hi"])])
+        ,("parses 2 data rows with trailing newline"
+         , Just 3
+         , "a;b;c\nde;fg;hi\n"
+         , Right [(1, ["a", "b", "c"]), (2, ["de", "fg", "hi"])])
+        ,("parses data row ignoring trailing blank column"
+         , Just 3
+         , "a;b;c;"
+         , Right [(1, ["a", "b", "c"])])]
+      $ \(name, state, input, expected) ->
+            parseWithEofAtEnd parseUnstructuredDataRows
+                              name
+                              state
+                              input
+                              expected
 
 testParseUnstructuredData :: SpecWith ()
 testParseUnstructuredData = describe "parseUnstructuredData" $ do
