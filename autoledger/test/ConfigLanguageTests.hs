@@ -73,6 +73,13 @@ configLanguageSpecs = describe "src/ConfigLanguage" $ do
                    $ vCons (vCons (vSym "an-identifier_with-1-2-3")
                                 $ vCons vNil $ vList1 vNil)
                          $ vList1 $ vList1 $ vList1 vNil
+    testParser "( (a \"b c\"\n) ( an-identifier_with-1-2-3 ( ) nil\n)\t ((\tnil\n)))"
+               dropExtra
+             $ Just
+             $ vCons (vCons (vSym "a") $ vCons (vStr "b c") vNil)
+                   $ vCons (vCons (vSym "an-identifier_with-1-2-3")
+                                $ vCons vNil $ vList1 vNil)
+                         $ vList1 $ vList1 $ vList1 vNil
   describe "parseConfigFileText" $ do
     it "Test 1"
     $ (map dropExtra

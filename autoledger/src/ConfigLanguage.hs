@@ -81,7 +81,7 @@ whitespace1 = void $ many1 $ satisfy isSpace
 
 parseListContent :: Monad m => ValueParser m ParsedValue
 parseListContent = foldr (\x y -> Cons x y $ getTopExtraValue x) (Nil dummyParsingExtraValue)
-  <$> parseValue `sepBy` whitespace1
+  <$> (many (satisfy isSpace) *> many (parseValue <* many (satisfy isSpace)))
 
 -- Parse a string: no escaping character, no new lines
 parseStringContent :: Monad m => ValueParser m String
@@ -97,7 +97,7 @@ parseValue =
   enrichWithParserState (const (Nil dummyParsingExtraValue)) (string "nil")
   <|> enrichWithParserState (`Str` dummyParsingExtraValue) (between (char '"') (char '"') parseStringContent)
   <|> enrichWithParserState (`Sym` dummyParsingExtraValue) parseSymbolName
-  <|> enrichWithParserState id (between (char '(' >> many (satisfy isSpace)) (char ')') parseListContent)
+  <|> enrichWithParserState id (between (char '(') (char ')') parseListContent)
 
 data TEType = TEBool | TEString | TEPair | TEUnknown
   deriving (Show, Eq)
