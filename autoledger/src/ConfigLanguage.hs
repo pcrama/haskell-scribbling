@@ -1,18 +1,21 @@
 {-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 module ConfigLanguage (
   Compiled(..),
   CompilerError,
   CompilerErrorMessage(..),
   ParsePosition,
-  Value(..),
   ParsedValue,
+  TEType(..),
+  Value(..),
   compile,
   parseConfigFileText,
   runValueParser
   ) where
-import Control.Monad.Except (MonadError, catchError, throwError)
+import Control.Monad.Except (MonadError, throwError, liftEither)
 import Control.Monad.Reader (MonadReader, ask)
 import Data.Char (isDigit, isSpace, isLetter)
 import Data.Functor (void)
@@ -20,6 +23,7 @@ import qualified Data.Text as T
 import Text.Parsec
 
 import Transaction
+import Data.Bitraversable (bitraverse)
 
 -- | A `Value`, the type parameter `e` is for extra information (e.g. source
 -- location in a parsing context).
@@ -34,12 +38,23 @@ type ParsePosition = (String, Int, Int)
 
 type ParsedValue = Value ParsePosition
 
-pattern ProperList1 x e <- Cons x (Nil _) e
+pattern ProperList2 :: Value e -> Value e -> e -> Value e
 pattern ProperList2 x y e <- Cons x (Cons y (Nil _) _) e
-pattern ProperList2' x y zs e <- Cons x (Cons y zs _) e
-pattern ProperList3 x y z e <- Cons x (Cons y (Cons z (Nil _) _) _) e
-pattern ProperList3' w x y zs e <- Cons w (Cons x (Cons y zs _) _) e
-pattern ProperList4 w x y z e <- Cons w (Cons x (Cons y (Cons z (Nil _) _) _) _) e
+
+pattern Apply :: String -> Value e -> Value e
+pattern Apply x xs <- Cons (Sym x _) xs _
+
+pattern Apply2 :: String -> Value e -> Value e
+pattern Apply2 n p1 <- Cons (Sym n _) (Cons p1 (Nil _) _) _
+
+pattern Apply2' :: String -> Value e -> Value e -> Value e
+pattern Apply2' n p1 p2s <- Cons (Sym n _) (Cons p1 p2s _) _
+
+pattern Apply3 :: String -> Value e -> Value e -> Value e
+pattern Apply3 n p1 p2 <- Cons (Sym n _) (Cons p1 (Cons p2 (Nil _) _) _) _
+
+pattern Apply4 :: String -> Value e -> Value e -> Value e -> Value e
+pattern Apply4 n p1 p2 p3 <- Cons (Sym n _) (Cons p1 (Cons p2 (Cons p3 (Nil _) _) _) _) _
 
 setTopExtraValue :: a -> Value a -> Value a
 setTopExtraValue a (Sym s _) = Sym s a
@@ -99,6 +114,7 @@ parseValue =
   <|> enrichWithParserState (`Sym` dummyParsingExtraValue) parseSymbolName
   <|> enrichWithParserState id (between (char '(') (char ')') parseListContent)
 
+-- | Type specification for error messages
 data TEType = TEBool | TEString | TEPair | TEUnknown
   deriving (Show, Eq)
 
@@ -117,50 +133,30 @@ foldValue e _ _ v = throwError $ e v
 foldValueAsProperList :: MonadError (CompilerError z) m => String -> (Value z -> b -> m b) -> b -> Value z -> m b
 foldValueAsProperList s = foldValue $ \v -> (Msg s, getTopExtraValue v)
 
-data Compiled =
-  AsBool (TransactionEval Bool)
-  | AsText (TransactionEval T.Text)
-  | AsPair Compiled Compiled
+mapValueAsProperList :: MonadError (CompilerError z) m => String -> (Value z -> m b) -> Value z -> m [b]
+mapValueAsProperList s f = foldValue (\v -> (Msg s, getTopExtraValue v)) step []
+  where step x xs = (:xs) <$> f x
+
+assertListOfListOf2 :: MonadError (CompilerError b) m
+  => String
+  -> Value b
+  -> m [(Value b, Value b)]
+assertListOfListOf2 err = \case
+  Nil {} -> pure []
+  xs@Cons {} -> mapValueAsProperList err isListOf2 xs
+  v -> throwError (Msg $ err <> " must be a list of 2-element sublists"
+                  , getTopExtraValue v)
+  where isListOf2 (ProperList2 a b _) = pure (a, b)
+        isListOf2 v = throwError (Msg $ err <> " must be lists of exactly 2 values"
+                                 , getTopExtraValue v)
+
+data Compiled z =
+  AsBool z (TransactionEval Bool)
+  | AsText z (TransactionEval T.Text)
+  | AsTextPair z (TransactionEval (T.Text, T.Text))
   deriving (Show)
 
-type Env = String -> Maybe Compiled
-
--- | Run `MonadError e` action and always succeed returning the result in an Either
-dropIntoEither :: MonadError e m => m a -> m (Either e a)
-dropIntoEither action = (Right <$> action) `catchError` (pure . Left)
-
-compile :: (MonadReader Env m, MonadError (CompilerError b) m, Show b)
-        => Value b
-        -> m Compiled
-compile v = do
-  asBool <- dropIntoEither $ compileAsBool v
-  asText <- dropIntoEither $ compileAsText v
-  asPair <- dropIntoEither asPairME
-  case (asBool, asText, asPair) of
-    (Left (TypeError {}, _), Left (TypeError {}, _), Right (p, q)) -> pure $ AsPair p q
-    (Left (TypeError {}, _), Right t, Left (TypeError {}, _)) -> pure $ AsText t
-    (Right b, Left (TypeError {}, _), Left (TypeError {}, _)) -> pure $ AsBool b
-    (Left t, Left (TypeError {}, _), Left (TypeError {}, _)) -> throwError t
-    (Left (TypeError {}, _), Left t, Left (TypeError {}, _)) -> throwError t
-    (Left (TypeError {}, _), Left (TypeError {}, _), Left t) -> throwError t
-    (Left _, Left t, Left _) -> throwError t
-    (e, f, g) -> error $ "Bug in compiler implementation: types overlap" <> formatForError "b" e <> formatForError "t" f <> formatForError "p" g <> " @ "
-  where formatForError s (Right _) = " " <> s <> ":R"
-        formatForError s (Left e) = " " <> s <> ":" <> show (fst e) <> "@" <> show (snd e)
-        asPairME = case v of
-          ProperList3 (Sym "pair" _) fstSource sndSource _ -> do
-            p <- compile fstSource
-            q <- compile sndSource
-            pure (p, q)
-          Cons (Sym "pair" _) _ _ ->
-            throwError (Msg "pair expects exactly 2 arguments", getTopExtraValue v)
-          Sym s _ -> getSym s v $ \got -> assertPairFor ("pair variable " <> s) got v
-          -- do
-          --   env <- ask
-          --   case env s of
-          --     Nothing -> throwError (Msg $ "unknown symbol " <> s, getTopExtraValue v)
-          --     Just got -> assertPairFor ("pair variable " <> s) got v
-          _ -> throwError (TypeError "Not a proper pair" TEPair TEUnknown, getTopExtraValue v)
+type Env z = String -> Maybe (Compiled z)
 
 -- "literal constant"
 -- (lookup <def> ((<key1> <result1>)...) <key>)
@@ -173,257 +169,254 @@ compile v = do
 -- (or <bool1>...) :: Bool
 -- account :: Text
 -- other-account :: Text
--- description ::Text
+-- description :: Text
 
-compileAsBool :: (MonadReader Env m, MonadError (CompilerError b) m, Show b)
-              => Value b
-              -> m (TransactionEval Bool)
-compileAsBool v@(Str _ _) = throwError (TypeError "string literal" TEString TEBool, getTopExtraValue v)
-compileAsBool (Nil _) = pure $ Constant False
-compileAsBool v@(ProperList3 (Sym "pair" _) _ _ _) = throwError (TypeError "pair constructor" TEBool TEPair, getTopExtraValue v)
-compileAsBool v@(Cons (Sym "pair" _) _ _) = throwError (Msg "pair takes exactly 2 parameters", getTopExtraValue v)
-compileAsBool (ProperList2 (Sym "fst" _) pSource _) = do
-  (p, _) <- compilePair pSource
-  snd <$> assertBoolFor "fst" p pSource
-compileAsBool v@(Cons (Sym "fst" _) _ _) = throwError (Msg "fst takes exactly one parameter", getTopExtraValue v)
-compileAsBool (ProperList2 (Sym "snd" _) qSource _) = do
-  (_, q) <- compilePair qSource
-  snd <$> assertBoolFor "snd" q qSource
-compileAsBool v@(Cons (Sym "snd" _) _ _) = throwError (Msg "snd takes exactly one parameter", getTopExtraValue v)
-compileAsBool (ProperList3 (Sym "contains" _) haystackSource needleSource _) = do
-  haystack <- compileAsText haystackSource
-  needle <- compileAsText needleSource
-  return $ haystack `ContainsCaseInsensitive` needle
-compileAsBool v@(Cons (Sym "contains" _) _ _) = throwError (Msg "contains takes exactly 2 parameters"
-                                                           , getTopExtraValue v)
-compileAsBool (ProperList1 (Sym "and" _) _) = pure $ Constant True
-compileAsBool (ProperList2 (Sym "and" _) x _) = compileAsBool x
-compileAsBool (Cons (Sym "and" _) xs _) = foldValueAsProperList "list of AND terms must be a proper list"
-                                                                step
-                                                                (Constant True)
-                                                                xs
-  where step v (Constant True) = compileAsBool v
-        step v (Constant False) = compileAsBool v >> pure (Constant False)
-        step v t = compileAsBool v >>= (`elimLeftConst` t)
-        elimLeftConst (Constant True) t = pure t
-        elimLeftConst (Constant False) _ = pure $ Constant False
-        elimLeftConst c t = pure $ And c t
-compileAsBool (ProperList1 (Sym "or" _) _) = pure $ Constant True
-compileAsBool (ProperList2 (Sym "or" _) x _) = compileAsBool x
-compileAsBool (Cons (Sym "or" _) xs _) = foldValueAsProperList "list of OR terms must be a proper list"
-                                                                step
-                                                                (Constant False)
-                                                                xs
-  where step v (Constant False) = compileAsBool v
-        step v (Constant True) = compileAsBool v >> pure (Constant True)
-        step v t = compileAsBool v >>= (`elimLeftConst` t)
-        elimLeftConst (Constant False) t = pure t
-        elimLeftConst (Constant True) _ = pure $ Constant True
-        elimLeftConst c t = pure $ Or c t
-compileAsBool v@(ProperList2' (Sym "cond" _) defSource xs _) = do
-  c <- compileCond defSource xs
-  snd <$> assertBoolFor "cond" c v
-compileAsBool v@(ProperList4 (Sym "lookup" _) _ _ _ _) =
-  throwError (TypeError "lookup always returns a string" TEBool TEString, getTopExtraValue v)
-compileAsBool v@(Cons (Sym "lookup" _) _ _) =
-  throwError (Msg "lookup takes exactly 3 parameters", getTopExtraValue v)
-compileAsBool v@(Sym s _) = getSym s v $ \got -> snd <$> assertBoolFor ("bool variable " <> s) got v
-compileAsBool v@(Cons (Sym s _) _ _) = throwError (Msg $ "unknown function " <> s, getTopExtraValue v)
-compileAsBool v = throwError (Msg "Unknown form in compileAsBool", getTopExtraValue v)
+compile :: (MonadReader (Env b) m, MonadError (CompilerError b) m)
+        => Value b
+        -> m (Compiled b)
+compile v@(Sym s _) = getSym s (getTopExtraValue v) pure
+compile v@(Str s _) = pure $ AsText (getTopExtraValue v) $ Constant $ T.pack s
+compile v@(Apply4 "lookup" d l k) = compileLookup d l k $ getTopExtraValue v
+compile v@(Apply "lookup" _) = invalidApply "lookup" "exactly 3" v
+compile (Apply2' "cond" d cs) = compileCond d cs
+compile v@(Apply "cond" _) = invalidApply "cond" "2 or more" v
+compile v@(Apply3 "contains" h n) =
+  AsBool (getTopExtraValue v) . uncurry ContainsCaseInsensitive <$> compileContains h n
+compile v@(Apply "contains" _) = invalidApply "contains" "exactly 2" v
+compile v@(Apply3 "pair" x y) = AsTextPair (getTopExtraValue v) <$> compilePair x y
+compile v@(Apply "pair" _) = invalidApply "pair" "exactly 2" v
+compile (Apply2 "fst" p) = compilePairAccess Fst p
+compile v@(Apply "fst" _) = invalidApply "fst" "exactly 1" v
+compile (Apply2 "snd" p) = compilePairAccess Snd p
+compile v@(Apply "snd" _) = invalidApply "snd" "exactly 1" v
+compile v@(Apply "and" bs) = AsBool (getTopExtraValue v) <$> compileBoolAndOrOp And "and" True bs
+compile v@(Apply "or" bs) = AsBool (getTopExtraValue v)  <$> compileBoolAndOrOp Or "or" False bs
+compile v@(Apply s _) = throwError (Msg $ "Unknown function " <> s
+                                   , getTopExtraValue v)
+compile v@(Nil _) = pure $ AsBool (getTopExtraValue v) $ Constant False
+compile v = throwError (Msg "I can't compile this", getTopExtraValue v)
 
-getSym :: (MonadReader Env m, MonadError (CompilerError z) m)
-       => String -> Value z -> (Compiled -> m a) -> m a
-getSym "t" _ f = f $ AsBool $ Constant True
-getSym "nil" _ f = f $ AsBool $ Constant False
-getSym "account" _ f = f $ AsText Account
-getSym "other-account" _ f = f $ AsText OtherAccount
-getSym "description" _ f = f $ AsText Description
+compileLookup :: (MonadError (CompilerError b) m, MonadReader (Env b) m)
+  => Value b
+  -> Value b
+  -> Value b
+  -> b
+  -> m (Compiled b)
+compileLookup defaultSource xs keySource topExtraValue = do
+    def <- compile defaultSource
+    xsList <- assertListOfListOf2 "lookup key/value pairs" xs
+    case xsList of
+      [] -> pure def
+      _ -> compileLookup1 xsList keySource topExtraValue def
+
+compileLookup1 :: (MonadError (CompilerError b) m, MonadReader (Env b) m)
+  => [(Value b, Value b)] -- ^ key value pair source
+  -> Value b -- ^ key source
+  -> b -- ^ error information of complete lookup form
+  -> Compiled b -- ^ Compiled default value
+  -> m (Compiled b)
+compileLookup1 xs keySource topExtraValue = \case
+  AsBool p d -> handleBool p d
+  AsText p d -> handleText p d
+  AsTextPair p pq -> handlePair p pq
+  where handleBool p d = traverse (bitraverse pure (asBool "lookup result")) xs
+                         >>= compileLookup2 d keySource (AsBool p) topExtraValue
+        handleText p d = traverse (bitraverse pure (asText "lookup result")) xs
+                         >>= compileLookup2 d keySource (AsText p) topExtraValue
+        handlePair p d = traverse (bitraverse pure (asTextPair "lookup result")) xs
+                         >>= compileLookup2 d keySource (AsTextPair p) topExtraValue
+
+compileLookup2 :: (MonadError (CompilerError b) m, MonadReader (Env b) m)
+  => TransactionEval r -- ^ compiled default value to return from lookup
+  -> Value b -- ^ uncompiled key to query
+  -> (TransactionEval r -> Compiled b) -- ^ wrap typed TransactionEval with matching data-level tag
+  -> b -- For error messages
+  -> [(Value b, TransactionEval r)] -- ^ uncompiled key paired with already compiled matching result
+  -> m (Compiled b)
+compileLookup2 d keySource wrap topExtraValue kSource = do
+    key <- compile keySource
+    case key of
+      AsBool _ k -> traverse (repack asBool) kSource
+                    >>= compileLookup3 d k wrap topExtraValue
+      AsText _ k -> traverse (repack asText) kSource
+                    >>= compileLookup3 d k wrap topExtraValue
+      AsTextPair {} -> throwError (Msg "key values of type pair not supported for lookup"
+                                  , getTopExtraValue keySource)
+  where repack asX (v, r) = do
+          c <- asX "lookup key" v
+          pure (c , r)
+
+compileLookup3 :: (MonadError (CompilerError b) m, Eq k)
+  => TransactionEval a
+  -> TransactionEval k
+  -> (TransactionEval a -> Compiled b) -- ^ wrap typed TransactionEval with matching data-level tag
+  -> b
+  -> [(TransactionEval k, TransactionEval a)]
+  -> m (Compiled b)
+compileLookup3 d k wrap b kvs = do
+    kvs' <- traverse isAllConstants kvs
+    pure $ wrap $ Select d (`lookup` kvs') k
+  where isAllConstants (Constant kc, Constant vc) = pure (kc, vc)
+        isAllConstants _ = throwError (Msg "Only handling constant keys/values at the moment", b)
+
+compileCond :: (MonadError (CompilerError b) m, MonadReader (Env b) m)
+  => Value b
+  -> Value b
+  -> m (Compiled b)
+compileCond defaultSource xs = do
+  def <- compile defaultSource
+  xsList <- assertListOfListOf2 "cond condition/result pairs" xs
+  case xsList of
+    [] -> pure def
+    _ -> compileCond1 xsList def
+
+compileCond1 :: (MonadError (CompilerError b) m, MonadReader (Env b) m)
+  => [(Value b, Value b)]
+  -> Compiled b
+  -> m (Compiled b)
+compileCond1 xs = \case
+  AsBool p b -> do
+    traverse compileClause xs >>= compileCond2 b (AsBool p) (getAsBool errMsg)
+  AsText p t -> do
+    traverse compileClause xs >>= compileCond2 t (AsText p) (getAsText errMsg)
+  AsTextPair p tt ->
+    traverse compileClause xs >>= compileCond2 tt (AsTextPair p) (getAsTextPair errMsg)
+  where errMsg = "result in a cond clause"
+        compileClause (cond, res) = do
+          condC <- asBool "condition inside a cond" cond
+          resC <- compile res
+          pure (condC, resC)
+
+compileCond2 :: (MonadError (CompilerError b) m, MonadReader (Env b) m)
+  => TransactionEval r
+  -> (TransactionEval r -> Compiled b)
+  -> (Compiled b -> Either (CompilerError b) (TransactionEval r))
+  -> [(TransactionEval Bool, Compiled b)]
+  -> m (Compiled b)
+compileCond2 def wrapResultType decomposeIntoResultType conditions =
+  compileCond3 decomposeIntoResultType conditions >>= compileCond4 def wrapResultType
+
+compileCond3 :: (MonadError (CompilerError b) m, MonadReader (Env b) m)
+  => (Compiled b -> Either (CompilerError b) (TransactionEval r))
+  -> [(TransactionEval Bool, Compiled b)]
+  -> m [(TransactionEval Bool, TransactionEval r)]
+compileCond3 decomposeIntoResultType = traverse decomposer
+  where decomposer (cond, cmpled) = (cond,) <$> liftEither (decomposeIntoResultType cmpled)
+
+compileCond4 :: Monad m
+  => TransactionEval r
+  -> (TransactionEval r -> Compiled b)
+  -> [(TransactionEval Bool, TransactionEval r)]
+  -> m (Compiled b)
+compileCond4 def wrapResultType xs = pure $ compileCondAssemble wrapResultType def xs
+
+compileCondAssemble ::
+  (TransactionEval r -> Compiled b)
+  -> TransactionEval r
+  -> [(TransactionEval Bool, TransactionEval r)]
+  -> Compiled b
+compileCondAssemble ctor d cs = ctor $ Cond d cs
+
+getAsBool :: String -> Compiled b -> Either (CompilerError b) (TransactionEval Bool)
+getAsBool _ (AsBool _ b) = pure b
+getAsBool err x = Left $ mkTypeError err TEBool x
+
+getAsText :: String -> Compiled b -> Either (CompilerError b) (TransactionEval T.Text)
+getAsText _ (AsText _ b) = pure b
+getAsText err x = Left $ mkTypeError err TEString x
+
+getAsTextPair :: String -> Compiled b -> Either (CompilerError b) (TransactionEval (T.Text, T.Text))
+getAsTextPair _ (AsTextPair _ b) = pure b
+getAsTextPair err x = Left $ mkTypeError err TEPair x
+
+asBool :: (MonadReader (Env b) m, MonadError (CompilerError b) m) => String -> Value b -> m (TransactionEval Bool)
+asBool err s = do
+  compiled <- compile s
+  snd <$> assertBoolFor err compiled
+
+asText :: (MonadReader (Env b) m, MonadError (CompilerError b) m) => String -> Value b -> m (TransactionEval T.Text)
+asText err s = do
+  compiled <- compile s
+  snd <$> assertTextFor err compiled
+
+asTextPair :: (MonadReader (Env b) m, MonadError (CompilerError b) m) => String -> Value b -> m (TransactionEval (T.Text, T.Text))
+asTextPair err s = do
+  compiled <- compile s
+  snd <$> assertTextPairFor err compiled
+
+compileBoolAndOrOp :: (MonadError (CompilerError b) m, MonadReader (Env b) m) =>
+  (TransactionEval Bool -> TransactionEval Bool -> TransactionEval Bool)
+  -> String
+  -> Bool
+  -> Value b
+  -> m (TransactionEval Bool)
+compileBoolAndOrOp op opName defaultValue =
+  foldValueAsProperList opName step (Constant defaultValue)
+  where step v o@(Constant b)
+          | b == defaultValue = asBool (opName <> " operand") v
+          | otherwise = asBool (opName <> " operand") v >> pure o
+        step v o = do
+          c <- asBool (opName <> " operand") v
+          case c of
+            Constant b | b == defaultValue -> pure o
+                       | otherwise -> pure c
+            _ -> pure $ op c o
+
+compileContains :: (MonadError (CompilerError b) m, MonadReader (Env b) m) =>
+  Value b -> Value b -> m (TransactionEval T.Text, TransactionEval T.Text)
+compileContains haystackSource needleSource =
+  (,) <$> asText "haystack" haystackSource <*> asText "needle" needleSource
+
+compilePair :: (MonadError (CompilerError b) m, MonadReader (Env b) m) =>
+  Value b -> Value b -> m (TransactionEval (T.Text, T.Text))
+compilePair fstSource sndSource =
+    mkPair <$> asText "pair: fst" fstSource <*> asText "pair: snd" sndSource
+  where mkPair (Constant p) (Constant q) = Constant (p, q)
+        mkPair x y = Pair x y
+
+compilePairAccess :: (MonadError (CompilerError b) m, MonadReader (Env b) m) =>
+  (TransactionEval (T.Text, T.Text) -> TransactionEval T.Text) -> Value b -> m (Compiled b)
+compilePairAccess extractor source = do
+  pair <- asTextPair "accessing a pair's component" source
+  pure $ AsText (getTopExtraValue source) $ extractor pair
+
+invalidApply :: (MonadError (CompilerError b) m) =>
+  String -> String -> Value b -> m a
+invalidApply s n v = throwError (Msg $ s <> " takes " <> n <> " parameters"
+                                , getTopExtraValue v)
+
+getSym :: (MonadReader (Env b) m, MonadError (CompilerError b) m)
+       => String -> b -> (Compiled b -> m a) -> m a
+getSym "t" p f = f $ AsBool p $ Constant True
+getSym "nil" p f = f $ AsBool p $ Constant False
+getSym "account" p f = f $ AsText p Account
+getSym "other-account" p f = f $ AsText p OtherAccount
+getSym "description" p f = f $ AsText p Description
 getSym s v f = do
   env <- ask
   case env s of
-    Nothing -> throwError (Msg $ "unknown symbol " <> s, getTopExtraValue v)
+    Nothing -> throwError (Msg $ "unknown symbol " <> s, v)
     Just got -> f got
 
-compileAsText :: (MonadReader Env m, MonadError (CompilerError z) m, Show z)
-              => Value z
-              -> m (TransactionEval T.Text)
-compileAsText v@Nil {} = throwError (TypeError "nil is not a string" TEBool TEString, getTopExtraValue v)
-compileAsText (Str s _) = pure $ Constant $ T.pack s
-compileAsText v@(Cons (Sym "contains" _) _ _) = throwError (TypeError "contains returns a bool" TEBool TEString
-                                                           , getTopExtraValue v)
-compileAsText v@(Cons (Sym "pair" _) _ _) = throwError (TypeError "pair constructor" TEPair TEString, getTopExtraValue v)
-compileAsText v@(Cons (Sym "and" _) _ _) = throwError (TypeError "and" TEBool TEString, getTopExtraValue v)
-compileAsText v@(Cons (Sym "or" _) _ _) = throwError (TypeError "or" TEBool TEString, getTopExtraValue v)
-compileAsText (ProperList2 (Sym "fst" _) pairSource _) = do
-  (p, _) <- compilePair pairSource
-  snd <$> assertTextFor "fst" p pairSource
-compileAsText (ProperList2 (Sym "snd" _) pairSource _) = do
-  (_, q) <- compilePair pairSource
-  snd <$> assertTextFor "snd" q pairSource
-compileAsText (ProperList4 (Sym "lookup" _)
-                           defaultValueSource
-                           (Nil _)
-                           _
-                           _) = compileAsText defaultValueSource
-compileAsText (ProperList4 (Sym "lookup" _)
-                           defaultValueSource
-                           listOfLists
-                           keySource
-                           _) = do
-    lookupTableSource <- toListOfPairs listOfLists
-    -- TODO: keys are always assumed to be of type String/Text
-    key <- compileAsText keySource
-    lookupTable <- traverse compileStrPair lookupTableSource
-    defaultValue <- compileAsText defaultValueSource
-    return $ Select defaultValue (`lookup` lookupTable) key
-  where toListOfPairs = foldValueAsProperList "Improper list of key/lookup values" step []
-        step (Nil _) [] = pure []
-        step (ProperList2 x y _) ps = pure $ (x, y):ps
-        step v _ = throwError (Msg "lookup expects a list of 2-element sublists"
-                              , getTopExtraValue v)
-        -- TODO: keys are always assumed to be of type String/Text
-        compileStrPair (Str x _, Str y _) = pure (T.pack x, T.pack y)
-        compileStrPair (Str _ _, yNonStr) = throwError (Msg "Expected literal string in lookup value"
-                                                       , getTopExtraValue yNonStr)
-        compileStrPair (xNonStr, Str _ _) = throwError (Msg "Expected literal string in lookup key"
-                                                       , getTopExtraValue xNonStr)
-        compileStrPair (xNonStr, _) = throwError (Msg "Expected literal string in lookup key+value"
-                                                 , getTopExtraValue xNonStr)
-compileAsText v@(ProperList2' (Sym "cond" _)
-                              defaultValueSource
-                              conditionsSource
-                              _) = do
-  c <- compileCond defaultValueSource conditionsSource
-  snd <$> assertTextFor "cond" c v
-compileAsText v@(Sym s _) = getSym s v $ \got -> snd <$> assertTextFor ("string variable " <> s) got v
-  -- do
-  -- env <- ask
-  -- case env s of
-  --   Nothing -> throwError (Msg $ "unknown symbol " <> s, getTopExtraValue v)
-  --   Just got -> snd <$> assertTextFor ("string variable " <> s) got v
-compileAsText v@(Cons (Sym s _) _ _) = throwError (Msg $ "unknown function " <> s, getTopExtraValue v)
-compileAsText v = throwError (Msg "Unhandled case", getTopExtraValue v)
+assertTextFor :: MonadError (CompilerError z) m => String -> Compiled z -> m (Compiled z, TransactionEval T.Text)
+assertTextFor _ c@(AsText _ p) = pure (c, p)
+assertTextFor s got = throwError $ mkTypeError s TEString got
 
--- compileAsPair :: (MonadReader Env m, MonadError (CompilerError z) m, Show z)
---               => TEType -- (Value z -> m (TransactionEval a))
---               -> TEType -- (Value z -> m (TransactionEval b))
---               -> Value z
---               -> m Compiled -- (TransactionEval (a, b))
--- compileAsPair cmpFst cmpSnd (ProperList3 (Sym "pair" _)
---                                          fstSource
---                                          sndSource
---                                          _) = do
---     first <- compile fstSource
---     void $ typeCheckForPairComponent cmpFst first fstSource
---     second <- compile sndSource
---     void $ typeCheckForPairComponent cmpSnd second sndSource
---     pure $ AsPair first second
--- compileAsPair _ _ v@(Cons (Sym "pair" _) _ _) = throwError (Msg "pair expects exactly 2 arguments", getTopExtraValue v)
--- compileAsPair f s v@(Sym n _) = do
---   env <- ask
---   case env n of
---     Nothing -> throwError (Msg $ "unknown symbol " <> n, getTopExtraValue v)
---     Just got -> do
---       (p, q) <- assertPairFor "pair" got v
---       void $ typeCheckForPairComponent f p v
---       void $ typeCheckForPairComponent s q v
---       pure got
--- compileAsPair _ _ v = throwError (TypeError "Expected a pair" TEPair TEUnknown, getTopExtraValue v)
+assertBoolFor :: MonadError (CompilerError z) m => String -> Compiled z -> m (Compiled z, TransactionEval Bool)
+assertBoolFor _ c@(AsBool _ p) = pure (c, p)
+assertBoolFor s got = throwError $ mkTypeError s TEBool got
 
-compilePair :: (MonadReader Env m, MonadError (CompilerError z) m, Show z)
-            => Value z
-            -> m (Compiled, Compiled)
-compilePair (ProperList3 (Sym "pair" _) fstSource sndSource _) = do
-    first <- compile fstSource
-    second <- compile sndSource
-    pure (first, second)
-compilePair v@(Cons (Sym "pair" _) _ _) = throwError (Msg "pair expects exactly 2 arguments", getTopExtraValue v)
-compilePair v@(Sym n _) = do
-  env <- ask
-  case env n of
-    Nothing -> throwError (Msg $ "unknown symbol " <> n, getTopExtraValue v)
-    Just got -> assertPairFor "pair" got v
-compilePair v = throwError (TypeError "Expected a pair" TEPair TEUnknown, getTopExtraValue v)
+assertTextPairFor :: MonadError (CompilerError z) m => String -> Compiled z -> m (Compiled z, TransactionEval (T.Text, T.Text))
+assertTextPairFor _ v@(AsTextPair _ q) = pure (v, q)
+assertTextPairFor s got = throwError $ mkTypeError s TEPair got
 
-assertTextFor :: MonadError (CompilerError z) m => String -> Compiled -> Value z -> m (Compiled, TransactionEval T.Text)
-assertTextFor _ c@(AsText p) _ = pure (c, p)
-assertTextFor s got v = throwError $ mkTypeError s TEString got v
-
-assertBoolFor :: MonadError (CompilerError z) m => String -> Compiled -> Value z -> m (Compiled, TransactionEval Bool)
-assertBoolFor _ c@(AsBool p) _ = pure (c, p)
-assertBoolFor s got v = throwError $ mkTypeError s TEBool got v
-
-assertPairFor :: MonadError (CompilerError z) m => String -> Compiled -> Value z -> m (Compiled, Compiled)
-assertPairFor _ (AsPair p q) _ = pure (p, q)
-assertPairFor s got v = throwError $ mkTypeError s TEPair got v
-
-mkTypeError :: String
-            -> TEType
-            -> Compiled
-            -> Value b
+-- | Create a type error to `throwError` in the `MonadError (CompilerError b) m` monad
+mkTypeError :: String -- ^ error message
+            -> TEType -- ^ desired type
+            -> Compiled b -- ^ compiled value that was actually seen
             -> CompilerError b
-mkTypeError s wanted got v = (TypeError s wanted $ compiledToTEType got
-                             , getTopExtraValue v)
-  where compiledToTEType AsText {} = TEString
-        compiledToTEType AsBool {} = TEBool
-        compiledToTEType AsPair {} = TEPair
-
--- typeCheckForPairComponent :: MonadError (CompilerError z) m => TEType -> Compiled -> Value z -> m Compiled
--- typeCheckForPairComponent TEString c v = do -- (fst <$>) . assertTextFor "pair component"
---   void $ assertTextFor "pair component" c v
---   pure c
--- typeCheckForPairComponent TEBool c v = do -- (fst <$>) . assertBoolFor "pair component"
---   void $ assertBoolFor "pair component" c v
---   pure c
--- typeCheckForPairComponent TEPair c v = do
---   void $ assertPairFor "pair component" c v
---   pure c
--- typeCheckForPairComponent t _ _ = error $ "Unsupported type " <> show t <> " in typeCheckForPairComponent"
-
-compileCond :: (MonadReader Env m, MonadError (CompilerError z) m, Show z)
-  => Value z -- ^ default value to return if none of the clauses match
-  -> Value z -- ^ proper list of (test result) 2-element sublists (test is always a bool)
-  -> m Compiled
-compileCond defaultValueSource conditionsSource = do
-    defaultValue <- compile defaultValueSource
-    case defaultValue of
-      AsText d -> do
-        conditions <- toListOfPairs compileAsText conditionsSource
-        pure $ AsText $ Cond d conditions
-      AsBool d -> do
-        conditions <- toListOfPairs compileAsBool conditionsSource
-        pure $ AsBool $ Cond d conditions
-      AsPair {} -> throwError $ mkTypeError "unsupported result type for cond" TEString defaultValue defaultValueSource
-  where toListOfPairs f = foldValueAsProperList "cond expects a list of conditions" (stepToListOfPairs_ f) []
-        -- assertSameType _ AsText {} v@(AsText {}) = pure v
-        -- assertSameType _ AsBool {} v@(AsBool {}) = pure v
-        -- assertSameType src (AsPair dp dq) v@(AsPair rp rq) = do
-        --   mapM_ (uncurry $ assertSameType src) [(dp, rp), (dq, rq)]
-        --   pure v
-        -- assertSameType src wanted got = throwError (TypeError "cond default/result type mismatch" (compiledToTEType wanted) $ compiledToTEType got, getTopExtraValue src)
-        -- compiledToTEType AsText {} = TEString
-        -- compiledToTEType AsBool {} = TEBool
-        -- compiledToTEType AsPair {} = TEPair
-
-stepToListOfPairs_ :: (MonadReader Env m, MonadError (CompilerError z) m, Show z)
-     => (Value z -> m (TransactionEval a))
-     -> Value z
-     -> [(TransactionEval Bool, TransactionEval a)]
-     -> m [(TransactionEval Bool, TransactionEval a)]
-stepToListOfPairs_ _ (Nil _) [] = pure []
-stepToListOfPairs_ compileResult (ProperList2 xSource ySource _) ps = do
-  x <- compileAsBool xSource
-  y <- compileResult ySource
-  pure $ (x, y):ps
-stepToListOfPairs_ _ v _ = throwError (Msg "Expected list of 2 elements for conditions"
-                                      , getTopExtraValue v)
-
--- assertTypeFor :: MonadError (CompilerError z) m => String -> TEType -> Compiled -> Value z -> m (Compiled, TransactionEval a)
--- assertTypeFor _ TEString c@(AsText p) _ = pure (c, p)
--- assertTypeFor _ TEBool c@(AsBool p) _ = pure (c, p)
--- assertTypeFor _ TEPair c@(AsPair p q) _ = pure (c, (p, q))
--- assertTypeFor s TEUnknown _ v = error "Can't assertTypeFor " <> s <> " TEUnknown" <> show (getTopExtraValue v)
--- assertTypeFor s wanted got v = throwError (TypeError s wanted $ compiledToTEType got, getTopExtraValue v)
---   where compiledToTEType AsText {} = TEString
---         compiledToTEType AsBool {} = TEBool
---         compiledToTEType AsPair {} = TEPair
+mkTypeError s wanted got = (TypeError s wanted teType, v)
+  where (v, teType) = compiledToTEType got
+        compiledToTEType (AsText b _) = (b, TEString)
+        compiledToTEType (AsBool b _) = (b, TEBool)
+        compiledToTEType (AsTextPair b _) = (b, TEPair)
