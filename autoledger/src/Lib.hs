@@ -2,6 +2,7 @@
 
 module Lib
   ( ITransaction (..),
+    Classifiers (..),
     Compiled (..),
     LedgerEntry (..),
     TransactionEval (..),
@@ -13,7 +14,7 @@ module Lib
     pattern NonBlankText,
     evalForTransaction,
     columnsToBelfius,
-    compile,
+    compileConfigFile,
     mkLedgerEntry,
     mkNonBlankText,
     parseAmountToCents,

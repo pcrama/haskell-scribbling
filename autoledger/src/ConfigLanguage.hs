@@ -3,27 +3,34 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
-module ConfigLanguage (
-  Compiled(..),
-  CompilerError,
-  CompilerErrorMessage(..),
-  ParsePosition,
-  ParsedValue,
-  TEType(..),
-  Value(..),
-  compile,
-  parseConfigFileText,
-  runValueParser
-  ) where
-import Control.Monad.Except (MonadError, throwError, liftEither)
-import Control.Monad.Reader (MonadReader, ask)
+{-# LANGUAGE GADTs #-}
+module ConfigLanguage
+  ( Classifiers (..),
+    Compiled (..),
+    CompilerError,
+    CompilerErrorMessage (..),
+    ParsePosition,
+    ParsedValue,
+    TEType (..),
+    Value (..),
+    compile,
+    compileConfigFile,
+    parseConfigFileText,
+    runValueParser,
+  )
+where
+import Control.Monad ((<=<))
+import Control.Monad.Except (MonadError, throwError, liftEither, runExceptT, ExceptT)
+import Control.Monad.Reader (MonadReader, ask, runReader, Reader)
+import Data.Bitraversable (bitraverse)
 import Data.Char (isDigit, isSpace, isLetter)
+import Data.Foldable (fold, foldlM)
 import Data.Functor (void)
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Text.Parsec
 
 import Transaction
-import Data.Bitraversable (bitraverse)
 
 -- | A `Value`, the type parameter `e` is for extra information (e.g. source
 -- location in a parsing context).
@@ -86,17 +93,14 @@ runValueParser = runParser parseValue ()
 
 parseConfigFileText :: SourceName -> T.Text -> Either ParseError [ParsedValue]
 parseConfigFileText = runParser implicitValueList ()
-  where implicitValueList = whitespace *> (parseValue `sepBy` whitespace1) <* eof
+  where implicitValueList = whitespace >> many (parseValue <* whitespace) <* eof
 
 whitespace :: Monad m => ValueParser m ()
 whitespace = void $ many $ satisfy isSpace
 
-whitespace1 :: Monad m => ValueParser m ()
-whitespace1 = void $ many1 $ satisfy isSpace
-
 parseListContent :: Monad m => ValueParser m ParsedValue
 parseListContent = foldr (\x y -> Cons x y $ getTopExtraValue x) (Nil dummyParsingExtraValue)
-  <$> (many (satisfy isSpace) *> many (parseValue <* many (satisfy isSpace)))
+  <$> (whitespace >> many (parseValue <* whitespace))
 
 -- Parse a string: no escaping character, no new lines
 parseStringContent :: Monad m => ValueParser m String
@@ -113,6 +117,83 @@ parseValue =
   <|> enrichWithParserState (`Str` dummyParsingExtraValue) (between (char '"') (char '"') parseStringContent)
   <|> enrichWithParserState (`Sym` dummyParsingExtraValue) parseSymbolName
   <|> enrichWithParserState id (between (char '(') (char ')') parseListContent)
+
+data Classifiers = Classifiers {
+  getAssetClassifier :: TransactionEval T.Text
+  , getLedgerTextClassifier :: TransactionEval T.Text
+  , getLedgerOtherAssetClassifier :: TransactionEval T.Text
+  }
+  deriving (Show)
+
+data ConfigFileCompilerState = ConfigFileCompilerState {
+  getEnv :: [(String, Compiled ParsePosition)]
+  , getAsset :: Maybe (TransactionEval T.Text)
+  , getLedgerText :: Maybe (TransactionEval T.Text)
+  , getLedgerOtherAsset :: Maybe (TransactionEval T.Text)
+  }
+
+
+pattern Setq :: String -> Value e -> Value e
+pattern Setq s p <- Cons (Sym "setq" _) (Cons (Sym s _) (Cons p (Nil _) _) _) _
+
+compileConfigFile :: MonadError (CompilerError ParsePosition) m
+  => ParsePosition
+  -> [ParsedValue]
+  -> m Classifiers
+compileConfigFile pos = getResult <=< foldlM compilerConfigFileStep startState
+  where startState = ConfigFileCompilerState {
+          getEnv = []
+          , getAsset = Nothing
+          , getLedgerText = Nothing
+          , getLedgerOtherAsset = Nothing
+          }
+        getResult ConfigFileCompilerState {
+          getAsset = Just a
+          , getLedgerText = Just t
+          , getLedgerOtherAsset = Just o } = pure Classifiers {
+          getAssetClassifier = a
+          , getLedgerTextClassifier = t
+          , getLedgerOtherAssetClassifier = o
+          }
+        getResult ConfigFileCompilerState {
+          getAsset = a
+          , getLedgerText = t
+          , getLedgerOtherAsset = o } = throwError (
+          Msg $ "Missing assignment to"
+            <> fromMaybe "internal error: not reached"
+                         (fold [putName "asset" a, putName "text" t, putName "other-asset" o])
+          , pos)
+        putName _ (Just _) = Nothing
+        putName s Nothing = Just $ " ledger-" <> s
+
+compilerConfigFileStep :: MonadError (CompilerError ParsePosition) m
+  => ConfigFileCompilerState -> ParsedValue -> m ConfigFileCompilerState
+compilerConfigFileStep s@ConfigFileCompilerState { getAsset = Nothing } (Setq "ledger-asset" v) = do
+  c <- withConfigFileEnv s (asText "ledger-asset") v
+  pure $ s { getAsset = Just c }
+compilerConfigFileStep ConfigFileCompilerState { getAsset = Just _ } v@(Setq "ledger-asset" _) =
+  throwError (Msg "ledger-asset is already set", getTopExtraValue v)
+compilerConfigFileStep s@ConfigFileCompilerState { getLedgerText = Nothing } (Setq "ledger-text" v) = do
+  c <- withConfigFileEnv s (asText "ledger-text") v
+  pure $ s { getLedgerText = Just c }
+compilerConfigFileStep ConfigFileCompilerState { getLedgerText = Just _ } v@(Setq "ledger-text" _) =
+  throwError (Msg "ledger-text is already set", getTopExtraValue v)
+compilerConfigFileStep s@ConfigFileCompilerState { getLedgerOtherAsset = Nothing } (Setq "ledger-other-asset" v) = do
+  c <- withConfigFileEnv s (asText "ledger-other-asset") v
+  pure $ s { getLedgerOtherAsset = Just c }
+compilerConfigFileStep ConfigFileCompilerState { getLedgerOtherAsset = Just _ } v@(Setq "ledger-other-asset" _) =
+  throwError (Msg "ledger-other-asset is already set", getTopExtraValue v)
+compilerConfigFileStep s@ConfigFileCompilerState { getEnv = xs } (Setq n v) = do
+  c <- withConfigFileEnv s compile v
+  pure $ s { getEnv = (n, c):xs }
+compilerConfigFileStep _ v = throwError (Msg "Only setq forms are allowed at top-level", getTopExtraValue v)
+
+withConfigFileEnv :: MonadError (CompilerError ParsePosition) m
+  => ConfigFileCompilerState -> (ParsedValue -> ExceptT (CompilerError ParsePosition) (Reader (Env ParsePosition)) a) -> ParsedValue -> m a
+withConfigFileEnv ConfigFileCompilerState { getEnv = xs } f v =
+  case runReader (runExceptT $ f v) (`lookup` xs) of
+    Left e -> throwError e
+    Right c -> pure c
 
 -- | Type specification for error messages
 data TEType = TEBool | TEString | TEPair | TEUnknown
