@@ -1,24 +1,26 @@
+{-# LANGUAGE TupleSections #-}
 module Main where
 
 import qualified Data.ByteString as BL
+import Data.Bifunctor (first, bimap)
 import Data.Char (isSpace)
-import Data.Monoid (mconcat)
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeLatin1, decodeUtf8')
 import qualified Data.Text.IO as TIO
 import Data.Time (toGregorian)
+import System.Environment (getArgs)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import qualified Lib
-  ( ITransaction (..),
+  ( Classifiers (..),
+    ITransaction (..),
     LedgerEntry (..),
-    TransactionEval (..),
     UnstructuredData (..),
     columnsToBelfius,
+    compileConfigFile,
     mkLedgerEntry,
     runUnstructuredDataParser,
-    runValueParser,
+    parseConfigFileText,
   )
-import System.Environment (getArgs)
 
 squeeze :: T.Text -> T.Text
 squeeze = T.unwords . T.words
@@ -28,31 +30,6 @@ newline = "\n"
 
 copyRowAsComment :: T.Text -> T.Text
 copyRowAsComment x = ";<-" <> x
-
-classifyAsset :: Lib.TransactionEval T.Text
-classifyAsset = Lib.Select "NotReached" lkp Lib.Account
-  where
-    lkp s = case s of
-      "BE12 3456 7890 1234" -> Just "Assets:BankAccount"
-      _ -> Just s
-
-classifyTransaction :: Lib.TransactionEval (T.Text, T.Text)
-classifyTransaction =
-  Lib.Cond
-    (Lib.Pair Lib.Description $ Lib.Constant "Expenses:")
-    [ ( Lib.Description `Lib.ContainsCaseInsensitive` Lib.Constant "titres service",
-        Lib.Pair Lib.Description $ Lib.Constant "Expenses:Services:Entretien:Nettoyage"
-      ),
-      ( Lib.Description `Lib.ContainsCaseInsensitive` Lib.Constant "pepiniere",
-        Lib.Pair Lib.Description $ Lib.Constant "Expenses:Jardin"
-      )
-    ]
-
-classifyLedgerText :: Lib.TransactionEval T.Text
-classifyLedgerText = Lib.Fst classifyTransaction
-
-classifyLedgerOtherAccount :: Lib.TransactionEval T.Text
-classifyLedgerOtherAccount = Lib.Snd classifyTransaction
 
 packShow :: Show b => b -> T.Text
 packShow = T.pack . show
@@ -97,22 +74,23 @@ renderDescription = squeeze . Lib.ledgerText
 
 renderTransaction ::
   (Show a, Lib.ITransaction r) =>
+  Lib.Classifiers ->
   (Int, [T.Text]) ->
   Either a r ->
   T.Text
-renderTransaction (lineNo, dataRow) (Left err) =
+renderTransaction _ (lineNo, dataRow) (Left err) =
   T.intercalate newline $
     [ copyRowAsComment $ T.intercalate ";" dataRow,
       "; error in line " <> T.pack (show lineNo)
     ]
       ++ map (T.pack . ("; " <>)) (lines $ show err)
       ++ [""]
-renderTransaction (_, dataRow) (Right transaction) =
+renderTransaction c (_, dataRow) (Right transaction) =
   renderLedgerEntry $
     Lib.mkLedgerEntry
-      classifyLedgerText
-      classifyAsset
-      classifyLedgerOtherAccount
+      (Lib.getLedgerTextClassifier c)
+      (Lib.getAssetClassifier c)
+      (Lib.getLedgerOtherAssetClassifier c)
       dataRow
       transaction
 
@@ -126,27 +104,54 @@ renderLedgerEntry le =
       -- Add trailing newline with [""]
       ++ [""]
 
+data AppArgs = AppArgs { classifiersFile :: String, inputFile :: String }
+
+defaultAppArgs :: AppArgs
+defaultAppArgs = AppArgs {
+  classifiersFile = "app-config.lisp"
+  , inputFile = "script-input.txt" }
+
+parseArgs :: [String] -> Either String AppArgs
+parseArgs xs@(('-':_):_) = go defaultAppArgs xs
+  where go a [] = Right a
+        go a ("-s":f:xs) = go (a { classifiersFile = f }) xs
+        go a ("--script":f:xs) = go (a { classifiersFile = f }) xs
+        go a ("-i":f:xs) = go (a { inputFile = f }) xs
+        go a ("--input":f:xs) = go (a { inputFile = f }) xs
+        go _ (e:_) = Left $ "Unkown command line arg: '" <> e <> "'"
+parseArgs [c, i] = pure AppArgs { classifiersFile = c, inputFile = i }
+parseArgs [] = pure defaultAppArgs
+parseArgs xs = Left $ "Can't parse command line args" <> foldMap (" " <>) xs
+
+doMain :: AppArgs -> IO ()
+doMain AppArgs { classifiersFile = clF , inputFile = inF } = do
+  script <- readAndDecode clF
+  bankData <- readAndDecode inF
+  case parseScript script >>= compileScript >>= parseBankData bankData of
+    Left e -> e
+    Right (classifiers, ud) ->
+      case Lib.udData ud of
+        [] -> print $ Lib.udColumnNames ud
+        d -> mapM_ (TIO.putStrLn . uncurry (renderTransaction classifiers)) (reverse $ zip d $ Lib.columnsToBelfius ud)
+  where readAndDecode f = do
+          bytes <- BL.readFile f
+          let (encoding, fileData) = case decodeUtf8' bytes of
+                Left _ -> ("latin1", decodeLatin1 bytes)
+                Right d -> ("utf8", d)
+          putStrLn $ f <> " uses " <> encoding <> "."
+          pure fileData
+        parseScript = first print . Lib.parseConfigFileText clF
+        compileScript = first print . Lib.compileConfigFile (clF, 0, 0)
+        parseBankData b c = bimap print (c,) $ Lib.runUnstructuredDataParser inF b
+
 main :: IO ()
 main = do
   setLocaleEncoding utf8
   args <- getArgs
-  mconcat $ flip map args $ \x -> do
-    putStrLn x
-    putStrLn . show $ Lib.runValueParser "name" $ T.pack x
-  -- let inputFile = case args of
-  --       [f] -> f
-  --       _ -> "script-input.txt"
-  -- bankDataBytes <- BL.readFile inputFile
-  -- let (encoding, bankData) = case decodeUtf8' bankDataBytes of
-  --       Left _ -> ("latin1", decodeLatin1 bankDataBytes)
-  --       Right d -> ("utf8", d)
-  -- putStrLn $ inputFile <> " uses " <> encoding <> "."
-  -- case Lib.runUnstructuredDataParser inputFile bankData of
-  --   Left e -> print e
-  --   Right ud -> do
-  --     case Lib.udData ud of
-  --       [] -> print $ Lib.udColumnNames ud
-  --       _ -> mapM_ (TIO.putStrLn . uncurry renderTransaction) (reverse $ zip (Lib.udData ud) $ Lib.columnsToBelfius ud)
+  case parseArgs args of
+    Left e -> putStrLn e
+    Right ci -> doMain ci
+
 -- Local Variables:
 -- compile-command: "(cd autoledger; cabal new-run exe:autoledger)"
 -- coding: utf-8

@@ -69,6 +69,11 @@ configLanguageSpecs = describe "src/ConfigLanguage" $ do
     testParser "()" id $ Just $ Nil ("()", 1, 1)
     testParser "nil" id $ Just $ Nil ("nil", 1, 1)
     testParser "abc" id $ Just $ Sym "abc" ("abc", 1, 1)
+    testParser "\"abc\"" id $ Just $ Str "abc" ("\"abc\"", 1, 1)
+    testParser "\"a\\\"bc\"" id $ Just $ Str "a\"bc" ("\"a\\\"bc\"", 1, 1)
+    testParser "\"a\\&b\"" dropExtra $ Just $ Str "ab" ()
+    testParser "\"a\\\n \\  b\"" dropExtra $ Just $ Str "a  b" ()
+    testParser "\"a\\n\\ \\  b\"" dropExtra $ Just $ Str "a\n  b" ()
     let s = "(a\n \"b\")" in
       testParser s id $ Just $ Cons (Sym "a" (s, 1, 2))
                                      (Cons (Str "b" (s, 2, 2)) (Nil ("dummy", 0, 0)) (s, 2, 2))

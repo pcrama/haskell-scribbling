@@ -114,9 +114,37 @@ parseSymbolName = (:) <$> satisfy isLetter <*> many (satisfy isSymbolChar)
 parseValue :: Monad m => ValueParser m ParsedValue
 parseValue =
   enrichWithParserState (const (Nil dummyParsingExtraValue)) (string "nil")
-  <|> enrichWithParserState (`Str` dummyParsingExtraValue) (between (char '"') (char '"') parseStringContent)
+  <|> enrichWithParserState (`Str` dummyParsingExtraValue) stringLiteral
   <|> enrichWithParserState (`Sym` dummyParsingExtraValue) parseSymbolName
   <|> enrichWithParserState id (between (char '(') (char ')') parseListContent)
+  where
+    -- following (and failing because of a type error)
+    -- https://codereview.stackexchange.com/a/105643, I looked at the source:
+    -- https://hackage.haskell.org/package/parsec2-1.0.1/docs/src/Text-ParserCombinators-Parsec-Token.html#TokenParser
+    stringLiteral =   do{ str <- between (char '"')
+                                         (char '"' <?> "end of string")
+                                         (many stringChar)
+                        ; return (foldr (maybe id (:)) "" str)
+                        }
+                      <?> "literal string"
+    stringChar      =   (Just <$> stringLetter)
+                    <|> stringEscape
+                    <?> "string character"
+    stringLetter    = satisfy (\c -> (c /= '"') && (c /= '\\') && (c > '\026'))
+    stringEscape    = do{ char '\\'
+                        ;     do{ escapeGap  ; return Nothing }
+                          <|> do{ escapeEmpty; return Nothing }
+                          <|> do{ Just <$> charEsc; }
+                        }
+    escapeEmpty     = char '&'
+    escapeGap       = do{ many1 space
+                        ; char '\\' <?> "end of string gap"
+                        }
+    charEsc         = choice (map parseEsc escMap)
+                    where
+                      parseEsc (c,code)     = do{ char c; return code }
+    -- escape code tables
+    escMap          = zip "abfnrtv\\\"\'" "\a\b\f\n\r\t\v\\\"\'"
 
 data Classifiers = Classifiers {
   getAssetClassifier :: TransactionEval T.Text
