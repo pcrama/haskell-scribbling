@@ -165,7 +165,8 @@ simplifyTransactionDescription x = dropAchatBancontact x
         dropVirementMobile = dropPrefix "VIREMENT BELFIUS MOBILE VERS " $ const False
         dropAchatParInternet = dropPrefix "ACHAT PAR INTERNET AVEC CARTE N°" cardNumber
         dropPaiementViaApp = dropPrefix "PAIEMENT VIA VOTRE APP MOBILE BANKING OU VOTRE         BANCONTACT-APP A " $ const False
-        dropPaiementMaestro = dropPrefix "PAIEMENT MAESTRO " cardNumber
+        dropPaiementMaestro = dropPrefix "PAIEMENT MAESTRO " dayMonth
+        dayMonth c = isDigit c || c == ' ' || c == '-' || c == '/'
         cardNumber c = isDigit c || c == ' ' || c == '-'
         patternRef = " REF. : "
         patternRefLen = T.length patternRef
