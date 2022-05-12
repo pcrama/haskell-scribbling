@@ -102,10 +102,6 @@ parseListContent :: Monad m => ValueParser m ParsedValue
 parseListContent = foldr (\x y -> Cons x y $ getTopExtraValue x) (Nil dummyParsingExtraValue)
   <$> (whitespace >> many (parseValue <* whitespace))
 
--- Parse a string: no escaping character, no new lines
-parseStringContent :: Monad m => ValueParser m String
-parseStringContent = many $ satisfy $ not . (`elem` ['\r', '\n', '"'])
-
 -- Parse a symbol: start with a letter, then any number of digits, dashes (-), letters or underscores (_)
 parseSymbolName :: Monad m => ValueParser m String
 parseSymbolName = (:) <$> satisfy isLetter <*> many (satisfy isSymbolChar)
@@ -131,18 +127,18 @@ parseValue =
                     <|> stringEscape
                     <?> "string character"
     stringLetter    = satisfy (\c -> (c /= '"') && (c /= '\\') && (c > '\026'))
-    stringEscape    = do{ char '\\'
-                        ;     do{ escapeGap  ; return Nothing }
-                          <|> do{ escapeEmpty; return Nothing }
+    stringEscape    = do{ void $ char '\\'
+                        ;     do{ void escapeGap  ; return Nothing }
+                          <|> do{ void escapeEmpty; return Nothing }
                           <|> do{ Just <$> charEsc; }
                         }
     escapeEmpty     = char '&'
-    escapeGap       = do{ many1 space
+    escapeGap       = do{ void $ many1 space
                         ; char '\\' <?> "end of string gap"
                         }
     charEsc         = choice (map parseEsc escMap)
                     where
-                      parseEsc (c,code)     = do{ char c; return code }
+                      parseEsc (c,code)     = do{ void $ char c; return code }
     -- escape code tables
     escMap          = zip "abfnrtv\\\"\'" "\a\b\f\n\r\t\v\\\"\'"
 
