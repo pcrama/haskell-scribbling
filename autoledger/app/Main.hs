@@ -149,7 +149,9 @@ main = do
   setLocaleEncoding utf8
   args <- getArgs
   case parseArgs args of
-    Left e -> putStrLn e
+    Left errorMessage -> foldMap putStrLn [
+      errorMessage
+      , "cabal new-run exe:autoledger -- [(-s | --script) app-config.lisp] [(-i | --input) script-input.txt]"]
     Right ci -> doMain ci
 
 -- Local Variables:
