@@ -112,7 +112,7 @@ defaultAppArgs = AppArgs {
   , inputFile = "script-input.txt" }
 
 parseArgs :: [String] -> Either String AppArgs
-parseArgs xs@(('-':_):_) = go defaultAppArgs xs
+parseArgs topXs@(('-':_):_) = go defaultAppArgs topXs
   where go a [] = Right a
         go a ("-s":f:xs) = go (a { classifiersFile = f }) xs
         go a ("--script":f:xs) = go (a { classifiersFile = f }) xs
