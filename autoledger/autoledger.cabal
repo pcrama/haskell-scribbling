@@ -54,6 +54,7 @@ executable autoledger
     build-depends:
         base >=4.11
       , bytestring
+      , containers
       , text
       , time
       , vector

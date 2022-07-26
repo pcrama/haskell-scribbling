@@ -4,6 +4,8 @@ module Main where
 import qualified Data.ByteString as BL
 import Data.Bifunctor (first, bimap)
 import Data.Char (isSpace)
+import Data.Set (Set)
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeLatin1, decodeUtf8')
 import qualified Data.Text.IO as TIO
@@ -28,8 +30,11 @@ squeeze = T.unwords . T.words
 newline :: T.Text
 newline = "\n"
 
+prefixForRowAsComment :: T.Text
+prefixForRowAsComment = ";<-"
+
 copyRowAsComment :: T.Text -> T.Text
-copyRowAsComment x = ";<-" <> x
+copyRowAsComment x = prefixForRowAsComment <> x
 
 packShow :: Show b => b -> T.Text
 packShow = T.pack . show
@@ -77,14 +82,13 @@ renderTransaction ::
   Lib.Classifiers ->
   (Int, [T.Text]) ->
   Either a r ->
-  T.Text
+  [T.Text]
 renderTransaction _ (lineNo, dataRow) (Left err) =
-  T.intercalate newline $
-    [ copyRowAsComment $ T.intercalate ";" dataRow,
-      "; error in line " <> T.pack (show lineNo)
-    ]
-      ++ map (T.pack . ("; " <>)) (lines $ show err)
-      ++ [""]
+  [ copyRowAsComment $ T.intercalate ";" dataRow,
+    "; error in line " <> T.pack (show lineNo)
+  ]
+  ++ map (T.pack . ("; " <>)) (lines $ show err)
+  ++ [""]
 renderTransaction c (_, dataRow) (Right transaction) =
   renderLedgerEntry $
     Lib.mkLedgerEntry
@@ -94,22 +98,27 @@ renderTransaction c (_, dataRow) (Right transaction) =
       dataRow
       transaction
 
-renderLedgerEntry :: Lib.LedgerEntry -> T.Text
+renderLedgerEntry :: Lib.LedgerEntry -> [T.Text]
 renderLedgerEntry le =
-  T.intercalate newline $
-    [ copyRowAsComment $ Lib.precedingComment le,
-      renderDay le <> " " <> renderDescription le
-    ]
-      ++ renderAccountUpdate le
-      -- Add trailing newline with [""]
-      ++ [""]
+  [ copyRowAsComment $ Lib.precedingComment le,
+    renderDay le <> " " <> renderDescription le
+  ]
+  ++ renderAccountUpdate le
+  -- Add trailing newline with [""]
+  ++ [""]
 
-data AppArgs = AppArgs { classifiersFile :: String, inputFile :: String }
+data AppArgs = AppArgs {
+  classifiersFile :: String
+  , inputFile :: String
+  , pastTransactionsFile :: Maybe String
+  }
 
 defaultAppArgs :: AppArgs
 defaultAppArgs = AppArgs {
   classifiersFile = "app-config.lisp"
-  , inputFile = "script-input.txt" }
+  , inputFile = "script-input.txt"
+  , pastTransactionsFile = Nothing
+  }
 
 parseArgs :: [String] -> Either String AppArgs
 parseArgs topXs@(('-':_):_) = go defaultAppArgs topXs
@@ -118,21 +127,34 @@ parseArgs topXs@(('-':_):_) = go defaultAppArgs topXs
         go a ("--script":f:xs) = go (a { classifiersFile = f }) xs
         go a ("-i":f:xs) = go (a { inputFile = f }) xs
         go a ("--input":f:xs) = go (a { inputFile = f }) xs
+        go a ("-p":f:xs) = go (a { pastTransactionsFile = Just f }) xs
+        go a ("--past":f:xs) = go (a { pastTransactionsFile = Just f }) xs
         go _ (e:_) = Left $ "Unkown command line arg: '" <> e <> "'"
-parseArgs [c, i] = pure AppArgs { classifiersFile = c, inputFile = i }
+parseArgs [c, i] = pure AppArgs { classifiersFile = c, inputFile = i, pastTransactionsFile = Nothing }
 parseArgs [] = pure defaultAppArgs
 parseArgs xs = Left $ "Can't parse command line args" <> foldMap (" " <>) xs
 
+extractPastRows :: [T.Text] -> Set T.Text
+extractPastRows = Set.fromList
+                . filter (prefixForRowAsComment `T.isPrefixOf`)
+
 doMain :: AppArgs -> IO ()
-doMain AppArgs { classifiersFile = clF , inputFile = inF } = do
+doMain AppArgs { classifiersFile = clF , inputFile = inF , pastTransactionsFile = mbPastF } = do
   script <- readAndDecode clF
   bankData <- readAndDecode inF
+  pastData <- case mbPastF of
+                Just pastF -> (extractPastRows . map T.strip . T.lines) <$> readAndDecode pastF
+                Nothing -> return Set.empty
   case parseScript script >>= compileScript >>= parseBankData bankData of
     Left e -> e
     Right (classifiers, ud) ->
       case Lib.udData ud of
         [] -> print $ Lib.udColumnNames ud
-        d -> mapM_ (TIO.putStrLn . uncurry (renderTransaction classifiers)) (reverse $ zip d $ Lib.columnsToBelfius ud)
+        d -> mapM_ TIO.putStrLn
+                 $ concat
+                 $ filter (isNotIn pastData)
+                 $ map (uncurry (renderTransaction classifiers))
+                       (reverse $ zip d $ Lib.columnsToBelfius ud)
   where readAndDecode f = do
           bytes <- BL.readFile f
           let (encoding, fileData) = case decodeUtf8' bytes of
@@ -143,6 +165,8 @@ doMain AppArgs { classifiersFile = clF , inputFile = inF } = do
         parseScript = first print . Lib.parseConfigFileText clF
         compileScript = first print . Lib.compileConfigFile (clF, 0, 0)
         parseBankData b c = bimap print (c,) $ Lib.runUnstructuredDataParser inF b
+        isNotIn p (firstLine:_) = not $ firstLine `Set.member` p
+        isNotIn _ [] = True
 
 main :: IO ()
 main = do
@@ -151,7 +175,9 @@ main = do
   case parseArgs args of
     Left errorMessage -> foldMap putStrLn [
       errorMessage
-      , "cabal new-run exe:autoledger -- [(-s | --script) app-config.lisp] [(-i | --input) script-input.txt]"]
+      , "cabal new-run exe:autoledger -- [(-s | --script) app-config.lisp]\
+                                       \ [(-i | --input) script-input.txt]\
+                                       \ [(-p | --past) ledger.ledger]"]
     Right ci -> doMain ci
 
 -- Local Variables:
