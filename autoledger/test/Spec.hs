@@ -30,7 +30,10 @@ testParseUnstructuredDataSingleRow = describe "parseUnstructuredDataSingleRow" $
   forM_ [("parses an empty row as a single empty column", "", Right [""])
         ,("parses a row without empty columns", "a;b;c", Right ["a", "b", "c"])
         ,("parses a row with an empty column in the middle", "a;;c", Right ["a", "", "c"])
-        ,("parses a row with an empty column at the end", "a;b;c;d;e;", Right ["a", "b", "c", "d", "e", ""])]
+        ,("parses a row with an empty column at the end", "a;b;c;d;e;", Right ["a", "b", "c", "d", "e", ""])
+        ,("parses a row with a semicolon in a value in the middle", "a;\"b;c\";d", Right ["a", "b;c", "d"])
+        ,("parses a row with a semicolon in a value in the beginning", "\"b;c\";d", Right ["b;c", "d"])
+        ,("parses a row with a semicolon in a value at the end", "a;\"b;c\"", Right ["a", "b;c"])]
     $ \(name, input, expected) ->
         parseWithEofAtEnd parseUnstructuredDataSingleRow
                           name

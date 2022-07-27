@@ -36,11 +36,16 @@ fieldSeparator = ';'
 newLines :: String
 newLines = "\r\n"
 
+doubleQuote :: Char
+doubleQuote = '"'
+
 ssvChar :: Char -> Bool
 ssvChar = not . (`elem` (fieldSeparator:newLines))
 
 ssvText, ssvText1 :: Monad m => UnstructuredParser m Text
-ssvText = T.pack <$> many (satisfy ssvChar)
+ssvText = T.pack <$> (
+  (char doubleQuote *> many (satisfy $ not . (`elem` (doubleQuote:newLines))) <* char doubleQuote)
+  <|> many (satisfy ssvChar))
 ssvText1 = T.pack <$> many1 (satisfy ssvChar)
 
 type UnstructuredParsingState = Maybe Int
