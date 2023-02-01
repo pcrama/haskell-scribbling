@@ -88,10 +88,12 @@ parseUnstructuredDataRows = do
     let rowLength = length row
     if rowLength == colCount
     then continueParsing line row
-    else let lastElt:butLast = reverse row in
-         if rowLength == colCount + 1 && T.null lastElt
-         then continueParsing line $ reverse butLast
-         else fail $ "Got " <> show rowLength <> " row elements, but expected " <> show colCount <> "."
+    else case reverse row of
+           lastElt:butLast ->
+             if rowLength == colCount + 1 && T.null lastElt
+             then continueParsing line $ reverse butLast
+             else fail $ "Got " <> show rowLength <> " row elements, but expected " <> show colCount <> "."
+           [] -> fail $ "Got an empty row, but expected " <> show colCount <> " columns."
   where continueParsing lineNumber row = do
           ((lineNumber, row):) <$> (endOfInput <|> endOfLineAndNextRow)
         endOfInput = eof >> pure []
