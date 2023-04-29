@@ -36,22 +36,30 @@ doCurl sessionCookie url = inproc "curl" ["--silent", "--location", "--cookie", 
 
 crawlUrl :: (Text -> Shell Line) -> Text -> IORef [Text] -> Shell Line
 crawlUrl getUrl url alreadySeenRef = do
-  line <- grep (has "<a ") $ getUrl url
-  let relNextAhtmlElements = L.filter ("rel=\"next\"" `T.isInfixOf`) $ T.splitOn "<a " $ lineToText line
-  case L.nub $ L.filter ("https://vaigo.me" `T.isPrefixOf`) $ concatMap (T.split (== '"')) relNextAhtmlElements of
-    [] -> select []
-    [nextUrl] -> do
-      alreadySeen <- liftIO $ readIORef alreadySeenRef
-      let decodedUrl = T.intercalate "&" $ T.splitOn "&amp;" nextUrl in
-        if decodedUrl `elem` alreadySeen
-        then do
-          -- liftIO $ putStrLn . T.unpack $ "Skipping " <> url <> ", already in " <> T.intercalate ", " alreadySeen
-          select [] -- fail "Nothing more to do"
-        else do
-          liftIO $ writeIORef alreadySeenRef $ decodedUrl:alreadySeen
-          -- liftIO $ putStrLn . T.unpack $ "recurse into " <> decodedUrl
-          select (textToLines decodedUrl) <|> crawlUrl getUrl decodedUrl alreadySeenRef
-    moreUrls -> error $ "More than one next URL: " <> show moreUrls
+    line <- T.strip . lineToText <$> getUrl url
+    case (htmlLinkElementPattern `T.isInfixOf` line && matchNextRel line, "<span>" `T.isInfixOf` line) of
+      (True, False) -> handleLink line
+      (False, True) -> select $ textToLines line
+      _ -> nop
+  where htmlLinkElementPattern = "<a "
+        matchNextRel = T.isInfixOf "rel=\"next\""
+        nop = select []
+        handleLink line =
+          let relNextAhtmlElements = L.filter matchNextRel $ T.splitOn htmlLinkElementPattern $ line in
+          case L.nub $ L.filter ("https://vaigo.me" `T.isPrefixOf`) $ concatMap (T.split (== '"')) relNextAhtmlElements of
+            [] -> nop
+            [nextUrl] -> do
+              alreadySeen <- liftIO $ readIORef alreadySeenRef
+              let decodedUrl = T.intercalate "&" $ T.splitOn "&amp;" nextUrl in
+                if decodedUrl `elem` alreadySeen
+                then do
+                  -- liftIO $ putStrLn . T.unpack $ "Skipping " <> url <> ", already in " <> T.intercalate ", " alreadySeen
+                  nop -- fail "Nothing more to do"
+                else do
+                  liftIO $ writeIORef alreadySeenRef $ decodedUrl:alreadySeen
+                  -- liftIO $ putStrLn . T.unpack $ "recurse into " <> decodedUrl
+                  crawlUrl getUrl decodedUrl alreadySeenRef
+            moreUrls -> error $ "More than one next URL: " <> show moreUrls
 
 -- Local Variables:
 -- mode: haskell-mode
