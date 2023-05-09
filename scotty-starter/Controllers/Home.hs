@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Controllers.Home
     ( home
@@ -14,7 +14,7 @@ import qualified Data.Text.Lazy as T
 import           Data.Time (DayOfMonth, MonthOfYear, Year, getCurrentTime, fromGregorian, gregorianMonthLength, toGregorian, utctDay)
 import           Lib.SimpleReading (loadReadings, ReadingMeter, SimpleReading(..), readingMeter)
 import           Views.Home (homeView, newReadingInputFormView, readingsView)
-import           Web.Scotty (ActionM, ScottyM, finish, get, html, json, next, param, post, raiseStatus, rescue, redirect, status, text)
+import           Web.Scotty (ActionM, ScottyM, get, param, post, raiseStatus, redirect)
 import           Network.HTTP.Types.Status
 import           Control.Monad.IO.Class (liftIO)
 

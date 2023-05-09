@@ -1,3 +1,4 @@
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Views.Home (homeView, newReadingInputFormView, readingsView) where
@@ -11,8 +12,8 @@ import           Text.Blaze.Html             (Html, toHtml, toValue)
 import           Text.Blaze.Html5            (a, body, button,
                                               dataAttribute, div, docTypeHtml,
                                               form, h1, head, input, label,
-                                              li, link, meta, p, script, style,
-                                              title, ul, (!), table, tbody, td, th, thead, tr)
+                                              li, link, meta, option, p, script, style,
+                                              title, ul, (!), select, table, tbody, td, th, thead, tr)
 import           Text.Blaze.Html5.Attributes (action, charset, class_, content, href,
                                               httpEquiv, for, id, media, method,
                                               name, placeholder, rel, src, type_, value)
@@ -85,7 +86,8 @@ newReadingInputFormView year month day = blaze $ layout "New Reading" $ do
         input `idname` "day" ! ivalue day ! type_ "number"
       div ! class_ "form-row" $ do
         label ! for "meter" $ "Meter"
-        input `idname` "meter" ! ivalue (show Pv2013) ! type_ "text"
+        select `idname` "meter" $ do
+          forM_ [minBound..maxBound] meterIdOption
       div ! class_ "form-row" $ do
         label ! for "value" $ "Value"
         input `idname` "value" ! value "0" ! type_ "number"  -- TODO: can't enter a float in my browser?
@@ -96,3 +98,9 @@ newReadingInputFormView year month day = blaze $ layout "New Reading" $ do
         input ! type_ "submit" ! value "Submit"
   where x `idname` s = x ! id s ! name s
         ivalue x = value . toValue $ x
+        meterName Pv2022 = "Panneaux placés en 2022"
+        meterName Pv2013 = "Panneaux placés en 2013"
+        meterName ElectricConsumption = "Compteur Électricité"
+        meterName GazConsumption = "Compteur Gaz"
+        meterName WaterConsumption = "Compteur Eau"
+        meterIdOption mi = option ! ivalue (show mi) $ meterName mi

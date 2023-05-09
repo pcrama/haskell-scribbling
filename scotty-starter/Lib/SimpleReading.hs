@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveGeneric #-}
+
 module Lib.SimpleReading
   ( SimpleReading(..)
   , ReadingMeter(..)
@@ -8,7 +10,7 @@ import           Data.Aeson (ToJSON)
 import           Data.Time (Day, fromGregorian)
 import           GHC.Generics
 
-data ReadingMeter = Pv2013 | Pv2022 | ElectricConsumption | GazConsumption | WaterConsumption deriving (Generic, Show, Eq, Bounded, Enum, Read)
+data ReadingMeter = Pv2022 | Pv2013 | ElectricConsumption | GazConsumption | WaterConsumption deriving (Generic, Show, Eq, Bounded, Enum, Read)
 
 instance ToJSON ReadingMeter
 
