@@ -1,22 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Views.Home (homeView) where
+module Views.Home (homeView, newReadingInputFormView, readingsView) where
 
 import           Client.CSS                  (layoutCss)
-import           Data.Monoid                 (mempty)
+import           Control.Monad               (forM_)
 import           Data.Text.Lazy              (toStrict)
+import           Data.Time                   (Year, MonthOfYear, DayOfMonth)
 import           Prelude                     hiding (div, head, id)
-import           Text.Blaze.Html             (Html, toHtml)
-import           Text.Blaze.Html5            (Html, a, body, button,
+import           Text.Blaze.Html             (Html, toHtml, toValue)
+import           Text.Blaze.Html5            (a, body, button,
                                               dataAttribute, div, docTypeHtml,
-                                              form, h1, h2, head, input, li,
-                                              link, meta, p, script, style,
-                                              title, ul, (!))
-import           Text.Blaze.Html5.Attributes (charset, class_, content, href,
-                                              httpEquiv, id, media, name,
-                                              placeholder, rel, src, type_)
+                                              form, h1, head, input, label,
+                                              li, link, meta, p, script, style,
+                                              title, ul, (!), table, tbody, td, th, thead, tr)
+import           Text.Blaze.Html5.Attributes (action, charset, class_, content, href,
+                                              httpEquiv, for, id, media, method,
+                                              name, placeholder, rel, src, type_, value)
 import           Views.Utils                 (blaze, pet)
 import           Web.Scotty                  (ActionM)
+import           Lib.SimpleReading           (SimpleReading(..), ReadingMeter(..))
 
 layout :: Html -> Html -> Html
 layout t b = docTypeHtml $ do
@@ -58,5 +60,39 @@ navBar = div ! class_ "navbar navbar-default navbar-static-top" $ div ! class_ "
              li $ a ! href "#contact" $ "Contact"
 
 
+readingsView :: [SimpleReading] -> ActionM ()
+readingsView readings = blaze $ layout "Readings" $ do
+  div ! class_ "container" $ do
+    readingsTable readings
+  where readingsTable [] = "No meter readings yet"
+        readingsTable rs = table $ do
+          thead $ tr $ th "When" >> th "What" >> th "How much"
+          tbody $ do
+            forM_ rs $ \SimpleReading { readingTime, readingMeter, readingValue } -> tr $ do
+              th (toHtml $ show readingTime) >> td (toHtml $ show readingMeter) >> td (toHtml $ show readingValue)
 
 
+newReadingInputFormView :: Year -> MonthOfYear -> DayOfMonth -> ActionM ()
+newReadingInputFormView year month day = blaze $ layout "New Reading" $ do
+  div ! class_ "container" $ do
+    form ! method "POST" ! action "/readings/" $ do
+      div ! class_ "form-row" $ do
+        label ! for "year" $ "Year"
+        input `idname` "year" ! ivalue year ! type_ "number"
+        label ! for "month" $ "Month"
+        input `idname` "month" ! ivalue month ! type_ "number"
+        label ! for "day" $ "Day"
+        input `idname` "day" ! ivalue day ! type_ "number"
+      div ! class_ "form-row" $ do
+        label ! for "meter" $ "Meter"
+        input `idname` "meter" ! ivalue (show Pv2013) ! type_ "text"
+      div ! class_ "form-row" $ do
+        label ! for "value" $ "Value"
+        input `idname` "value" ! value "0" ! type_ "number"  -- TODO: can't enter a float in my browser?
+      div ! class_ "form-row" $ do
+        label ! for "comment" $ "Comment"
+        input `idname` "comment" ! placeholder "Type anything you want here, it will be ignored"
+      div ! class_ "form-row" $ do
+        input ! type_ "submit" ! value "Submit"
+  where x `idname` s = x ! id s ! name s
+        ivalue x = value . toValue $ x
