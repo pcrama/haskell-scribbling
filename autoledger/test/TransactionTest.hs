@@ -46,8 +46,3 @@ transactionSpecs = describe "src/Transaction" $ do
     it "Select (not found)" $ evalForTransaction (Select (Constant '?') (const Nothing) (Constant ())) dummyTransaction `shouldBe` '?'
     it "Select (found)" $ evalForTransaction (Select (Constant '?') (const $ Just '!') (Constant ())) dummyTransaction `shouldBe` '!'
     it "Account" $ evalForTransaction Account dummyTransaction `shouldBe` _account dummyTransaction
-
--- Local Variables:
--- compile-command: "([ -r autoledger.cabal ] || cd ..; cabal new-test)"
--- coding: utf-8
--- End:

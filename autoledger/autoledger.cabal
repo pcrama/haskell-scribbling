@@ -76,7 +76,7 @@ test-suite test
     -- Other library packages from which modules are imported.
     build-depends:       base >=4.11
                        , parsec
-                       , hspec >=2.7 && <2.8
+                       , hspec >=2.7 && <2.10
                        , mtl
                        , text
                        , time
@@ -94,6 +94,5 @@ test-suite test
     default-language:    Haskell2010
 
 -- Local Variables:
--- compile-command: "cabal new-test"
 -- comment-start: "--"
 -- End:

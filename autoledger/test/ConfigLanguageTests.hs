@@ -268,8 +268,3 @@ configLanguageSpecs = describe "src/ConfigLanguage" $ do
           go "Cast for patient 000202" "doctor" "Expenses:Health:MsB"
           go "Blood test for patient 680923" "doctor" "Expenses:Health"
           go "pizza vesuvio" "restaurant" "Expenses:Food"
-          
--- Local Variables:
--- compile-command: "([ -r autoledger.cabal ] || cd ..; cabal new-test)"
--- coding: utf-8
--- End:

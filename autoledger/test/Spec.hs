@@ -163,8 +163,3 @@ main = hspec $ do
     testParseAmountToCents
   transactionSpecs
   configLanguageSpecs
-
--- Local Variables:
--- compile-command: "([ -r autoledger.cabal ] || cd ..; cabal new-test)"
--- coding: utf-8
--- End:
