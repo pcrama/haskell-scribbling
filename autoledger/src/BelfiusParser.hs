@@ -252,9 +252,7 @@ mkNonBlankInt t setter
 getBelfiusIdentifyingComment :: BelfiusTransaction -> Text
 getBelfiusIdentifyingComment bt = (_account bt
                                    <> ";" <> belfiusRenderGregorian (_accountingDate bt)
-                                   <> ";" <> maybe "" packShow (_extractNumber bt)
-                                   <> ";" <> maybe "" packShow (_transactionNumber bt)
-                                   <> ";" <> renderNonBlankText (_otherAccount bt)
+                                   <> ";;;" <> renderNonBlankText (_otherAccount bt)
                                    <> ";" <> renderNonBlankText (_otherName bt)
                                    <> ";" <> renderNonBlankText (_otherStreetAndNumber bt)
                                    <> ";" <> renderNonBlankText (_otherCity bt)
