@@ -109,6 +109,7 @@ configLanguageSpecs = describe "src/ConfigLanguage" $ do
                                               _otherName = Nothing,
                                               _amountCents = 0,
                                               _date = fromGregorian 2022 3 30,
+                                              _identifyingComment = "This is a test",
                                               _currency = "EUR" }
   let itIsOk = it "compiles correctly" $ True `shouldBe` True
   let shouldBeDiff c = it "Is the expected compilation result" $

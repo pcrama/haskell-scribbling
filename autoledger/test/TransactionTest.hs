@@ -17,6 +17,7 @@ data Transaction = Transaction {
   , _description :: Maybe NonBlankText
   , _amountCents :: Int
   , _currency :: T.Text
+  , _identifyingComment :: T.Text
   } deriving (Show, Eq)
 
 instance ITransaction Transaction where
@@ -27,6 +28,7 @@ instance ITransaction Transaction where
   description = _description
   amountCents = _amountCents
   currency = _currency
+  identifyingComment = _identifyingComment
 
 dummyTransaction :: Transaction
 dummyTransaction = Transaction {
@@ -37,6 +39,7 @@ dummyTransaction = Transaction {
   , _description = mkNonBlankText "description"
   , _amountCents = 1
   , _currency = "EUR"
+  , _identifyingComment = "Dummy identifying comment"
   }
 
 transactionSpecs :: SpecWith ()

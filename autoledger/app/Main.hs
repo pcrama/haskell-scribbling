@@ -20,12 +20,12 @@ import qualified Lib
     columnsToBelfius,
     compileConfigFile,
     mkLedgerEntry,
-    runUnstructuredDataParser,
+    packShow,
+    packShow0Pad,
     parseConfigFileText,
+    runUnstructuredDataParser,
+    squeeze,
   )
-
-squeeze :: T.Text -> T.Text
-squeeze = T.unwords . T.words
 
 newline :: T.Text
 newline = "\n"
@@ -35,17 +35,6 @@ prefixForRowAsComment = ";<-"
 
 copyRowAsComment :: T.Text -> T.Text
 copyRowAsComment x = prefixForRowAsComment <> x
-
-packShow :: Show b => b -> T.Text
-packShow = T.pack . show
-
-packShow0Pad :: (Show b, Integral b) => Int -> b -> T.Text
-packShow0Pad digits x =
-  let shown = show x
-      extraZeros = digits - length shown
-   in if extraZeros > 0
-        then T.replicate extraZeros "0" <> T.pack shown
-        else T.pack shown
 
 renderAccountUpdate :: Lib.LedgerEntry -> [T.Text]
 renderAccountUpdate ledgerEntry =
@@ -57,7 +46,7 @@ renderAccountUpdate ledgerEntry =
       left = prefix <> account
       (units, cents) = abs amountCents `divMod` 100
       sign = if amountCents < 0 then "-" else mempty
-      renderedAmount = sign <> packShow units <> "." <> packShow0Pad 2 cents
+      renderedAmount = sign <> Lib.packShow units <> "." <> Lib.packShow0Pad 2 cents
       extraSpaces = max 2 $ target - T.length left - T.length renderedAmount
       currencySymbol = case currency of
         "EUR" -> "€"
@@ -70,12 +59,12 @@ renderAccountUpdate ledgerEntry =
    in (left <> T.replicate extraSpaces " " <> renderedAmount <> " " <> currencySymbol) : secondLine
 
 renderDay :: Lib.LedgerEntry -> T.Text
-renderDay t = packShow year <> "/" <> packShow0Pad 2 month <> "/" <> packShow0Pad 2 date
+renderDay t = Lib.packShow year <> "/" <> Lib.packShow0Pad 2 month <> "/" <> Lib.packShow0Pad 2 date
   where
     (year, month, date) = toGregorian $ Lib.ledgerDate t
 
 renderDescription :: Lib.LedgerEntry -> T.Text
-renderDescription = squeeze . Lib.ledgerText
+renderDescription = Lib.squeeze . Lib.ledgerText
 
 renderTransaction ::
   (Show a, Lib.ITransaction r) =>
@@ -89,13 +78,12 @@ renderTransaction _ (lineNo, dataRow) (Left err) =
   ]
   ++ map (T.pack . ("; " <>)) (lines $ show err)
   ++ [""]
-renderTransaction c (_, dataRow) (Right transaction) =
+renderTransaction c _ (Right transaction) =
   renderLedgerEntry $
     Lib.mkLedgerEntry
       (Lib.getLedgerTextClassifier c)
       (Lib.getAssetClassifier c)
       (Lib.getLedgerOtherAssetClassifier c)
-      dataRow
       transaction
 
 renderLedgerEntry :: Lib.LedgerEntry -> [T.Text]

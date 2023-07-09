@@ -12,8 +12,9 @@ import           Text.Parsec (
 
 import Lib
 
-import TransactionTest
+import BelfiusParserTests
 import ConfigLanguageTests
+import TransactionTest
 
 parseWithEofAtEnd :: (Show a, Eq a)
                   => UnstructuredParser Identity a
@@ -163,3 +164,4 @@ main = hspec $ do
     testParseAmountToCents
   transactionSpecs
   configLanguageSpecs
+  belfiusParserSpecs

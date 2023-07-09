@@ -4,6 +4,8 @@ module BelfiusParser (
   , UnstructuredData(..)
   , UnstructuredHeader(..)
   , columnsToBelfius
+  , packShow
+  , packShow0Pad
   , parseAmountToCents
   , parseUnstructuredData
   , parseUnstructuredDataRows
@@ -17,7 +19,7 @@ import Data.Char (digitToInt, isDigit, isSpace)
 import Data.Functor (void)
 import Data.List (foldl')
 import Data.Text (Text)
-import Data.Time.Calendar (Day, fromGregorian, fromGregorianValid)
+import Data.Time.Calendar (Day, fromGregorian, fromGregorianValid, toGregorian)
 import Text.Parsec
 import Text.Read (readMaybe)
 
@@ -149,6 +151,7 @@ instance ITransaction BelfiusTransaction where
   description = getBelfiusDescription
   amountCents = _amountCents
   currency = _currency
+  identifyingComment = getBelfiusIdentifyingComment
 
 getBelfiusDescription :: BelfiusTransaction -> Maybe NonBlankText
 getBelfiusDescription BelfiusTransaction { _communication = Nothing, _transactionDescription = mbT@(Just _) } =
@@ -160,7 +163,8 @@ getBelfiusDescription BelfiusTransaction { _communication = mbC@(Just (NonBlankT
 getBelfiusDescription BelfiusTransaction { _communication = Nothing, _transactionDescription = Nothing } = Nothing
 
 simplifyTransactionDescription :: NonBlankText -> Maybe NonBlankText
-simplifyTransactionDescription x = dropAchatBancontact x
+simplifyTransactionDescription x = squeezeBlanks x
+  >>= dropAchatBancontact
   >>= dropAchatContactLess
   >>= dropVirementMobile
   >>= dropAchatParInternet
@@ -171,7 +175,7 @@ simplifyTransactionDescription x = dropAchatBancontact x
         dropAchatContactLess = dropPrefix "ACHAT BANCONTACT CONTACTLESS AVEC CARTE N°" cardNumber
         dropVirementMobile = dropPrefix "VIREMENT BELFIUS MOBILE VERS " $ const False
         dropAchatParInternet = dropPrefix "ACHAT PAR INTERNET AVEC CARTE N°" cardNumber
-        dropPaiementViaApp = dropPrefix "PAIEMENT VIA VOTRE APP MOBILE BANKING OU VOTRE         BANCONTACT-APP A " $ const False
+        dropPaiementViaApp = dropPrefix "PAIEMENT VIA VOTRE APP MOBILE BANKING OU VOTRE BANCONTACT-APP A " $ const False
         dropPaiementMaestro = dropPrefix "PAIEMENT MAESTRO " dayMonth
         dayMonth c = isDigit c || c == ' ' || c == '-' || c == '/'
         cardNumber c = isDigit c || c == ' ' || c == '-'
@@ -191,6 +195,7 @@ simplifyTransactionDescription x = dropAchatBancontact x
         dropPrefix pfx extra nb@(NonBlankText y) = case T.stripPrefix pfx y of
           Just rest -> mkNonBlankText $ T.dropWhile extra rest
           Nothing -> Just nb
+        squeezeBlanks (NonBlankText y) = mkNonBlankText $ squeeze y
 
 parseUnsignedInt :: Monad m => ParsecT Text () m Int
 parseUnsignedInt = digitListToInt <$> many1 (satisfy isDigit)
@@ -243,6 +248,47 @@ mkNonBlankInt t setter
   | otherwise = maybe (Left $ ColumnParsingError $ "Can't parse '" <> t <> "' into a number.")
                       (Right . setter . Just)
                     $ readMaybe $ T.unpack t
+
+getBelfiusIdentifyingComment :: BelfiusTransaction -> Text
+getBelfiusIdentifyingComment bt = (_account bt
+                                   <> ";" <> belfiusRenderGregorian (_accountingDate bt)
+                                   <> ";" <> maybe "" packShow (_extractNumber bt)
+                                   <> ";" <> maybe "" packShow (_transactionNumber bt)
+                                   <> ";" <> renderNonBlankText (_otherAccount bt)
+                                   <> ";" <> renderNonBlankText (_otherName bt)
+                                   <> ";" <> renderNonBlankText (_otherStreetAndNumber bt)
+                                   <> ";" <> renderNonBlankText (_otherCity bt)
+                                   <> ";" <> renderNonBlankText (_transactionDescription bt)
+                                   <> ";" <> belfiusRenderGregorian (_valueDate bt)
+                                   <> ";" <> belfiusRenderAmount (_amountCents bt)
+                                   <> ";" <> _currency bt
+                                   <> ";" <> _bankIdentificationCode bt
+                                   <> ";" <> _countryCode bt
+                                   <> ";" <> renderNonBlankText (_communication bt))
+
+packShow :: Show b => b -> T.Text
+packShow = T.pack . show
+
+packShow0Pad :: (Show b, Integral b) => Int -> b -> T.Text
+packShow0Pad digits x =
+  let shown = show x
+      extraZeros = digits - length shown
+   in if extraZeros > 0
+        then T.replicate extraZeros "0" <> T.pack shown
+        else T.pack shown
+
+belfiusRenderAmount :: Int -> T.Text
+belfiusRenderAmount amount = sign <> packShow units <> "," <> packShow0Pad 2 cents
+  where (units, cents) = abs amount `divMod` 100
+        sign = if amount < 0 then "-" else T.empty
+
+belfiusRenderGregorian :: Day -> T.Text
+belfiusRenderGregorian t = packShow0Pad 2 dt <> "/" <> packShow0Pad 2 mn <> "/" <> packShow yr
+  where (yr, mn, dt) = toGregorian t
+
+renderNonBlankText :: Maybe NonBlankText -> T.Text
+renderNonBlankText Nothing = ""
+renderNonBlankText (Just (NonBlankText t)) = t
 
 -- Date de comptabilisation
 pickAccountingDate :: Filler Text BelfiusTransaction
@@ -310,9 +356,7 @@ makePicking ::
 makePicking lkp defaultRecord columnNames = case traverse selectPicker columnNames of
     Left unknownName -> const . Left $ UnknownColumnHeader unknownName
     Right fillers -> \cols -> picking fillers cols defaultRecord
-  where selectPicker h = case lkp h of
-          Nothing -> Left h
-          Just f -> Right $ f . T.unwords . T.words
+  where selectPicker h = maybe (Left h) Right $ lkp h
 
 makeBelfiusPicking ::
   -- | column names

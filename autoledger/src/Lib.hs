@@ -17,6 +17,8 @@ module Lib
     compileConfigFile,
     mkLedgerEntry,
     mkNonBlankText,
+    packShow,
+    packShow0Pad,
     parseAmountToCents,
     parseConfigFileText,
     parseUnstructuredData,
@@ -25,6 +27,7 @@ module Lib
     parseUnstructuredHeaderLine,
     parseUnstructuredHeaders,
     runUnstructuredDataParser,
+    squeeze,
   )
 where
 

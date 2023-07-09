@@ -10,6 +10,7 @@ module Transaction
     evalForTransaction,
     mkNonBlankText,
     mkLedgerEntry,
+    squeeze,
   )
 where
 
@@ -26,6 +27,10 @@ class ITransaction a where
   description :: a -> Maybe NonBlankText
   amountCents :: a -> Int
   currency :: a -> T.Text
+  identifyingComment :: a -> T.Text
+
+squeeze :: T.Text -> T.Text
+squeeze = T.unwords . T.words
 
 newtype NonBlankText = NonBlankText' {getNonBlankText :: T.Text}
   deriving (Show, Eq)
@@ -126,15 +131,13 @@ mkLedgerEntry ::
   -- | Program to extract the `ledgerOtherAccount` from an `ITransaction` instance.
   -- Blank values are interpreted as `Nothing`.
   TransactionEval T.Text ->
-  -- | The raw data from the input file
-  [T.Text] ->
   -- | The transaction to be transformed into a `LedgerEntry`.
   t ->
   -- A `LedgerEntry` representing the transaction.
   LedgerEntry
-mkLedgerEntry textProg accountProg otherProg dataRow t =
+mkLedgerEntry textProg accountProg otherProg t =
   LedgerEntry
-    { precedingComment = T.intercalate (T.pack ";") dataRow,
+    { precedingComment = identifyingComment t,
       ledgerDate = date t,
       ledgerText = evalForTransaction textProg t,
       ledgerAccount = evalForTransaction accountProg t,
