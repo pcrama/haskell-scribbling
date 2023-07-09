@@ -40,7 +40,7 @@ belfiusParserSpecs = describe "src/BelfiusParser" $ do
           it "date" $ date exampleDataWithout3 `shouldBe` fromGregorian 2023 6 21
           it "otherAccount" $ otherAccount exampleDataWithout3 `shouldBe` mkNonBlankText "777-7777777-77"
           it "otherName" $ otherName exampleDataWithout3 `shouldBe` mkNonBlankText "BANKSYS"
-          it "description" $ description exampleDataWithout3 `shouldBe` mkNonBlankText "ARGENT RECU VIA VOTRE APP MOBILE BANKING OU VOTRE BANCONTACT-APP LE 20/06 SUR VOTRE CARTE BANCAIRE."
+          it "description" $ description exampleDataWithout3 `shouldBe` mkNonBlankText "Argent reçu le 20/06 via votre app"
           it "amountCents" $ amountCents exampleDataWithout3 `shouldBe` 1160
           it "currency" $ currency exampleDataWithout3 `shouldBe` "EUR"
           it "identifyingComment" $ identifyingComment exampleDataWithout3 `shouldBe`

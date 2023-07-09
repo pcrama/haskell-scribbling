@@ -169,12 +169,21 @@ simplifyTransactionDescription x = squeezeBlanks x
   >>= dropVirementMobile
   >>= dropAchatParInternet
   >>= dropPaiementViaApp
+  >>= shortenArgentRecu
   >>= dropPaiementMaestro
   >>= dropRefVal
   where dropAchatBancontact = dropPrefix "ACHAT BANCONTACT AVEC CARTE N°" cardNumber
         dropAchatContactLess = dropPrefix "ACHAT BANCONTACT CONTACTLESS AVEC CARTE N°" cardNumber
         dropVirementMobile = dropPrefix "VIREMENT BELFIUS MOBILE VERS " $ const False
         dropAchatParInternet = dropPrefix "ACHAT PAR INTERNET AVEC CARTE N°" cardNumber
+        argentRecuPrefix = "ARGENT RECU VIA VOTRE APP MOBILE BANKING OU VOTRE BANCONTACT-APP LE"
+        votreCarteBancairePattern = "SUR VOTRE CARTE BANCAIRE."
+        shortenArgentRecu nb@(NonBlankText y)
+          | argentRecuPrefix `T.isPrefixOf` y = let (before, after) = T.breakOn votreCarteBancairePattern y in
+              if T.null after
+              then return nb
+              else mkNonBlankText $ "Argent reçu le" <> T.drop (T.length argentRecuPrefix) before <> "via votre app" <> T.drop (T.length votreCarteBancairePattern) after
+          | otherwise = return nb
         dropPaiementViaApp = dropPrefix "PAIEMENT VIA VOTRE APP MOBILE BANKING OU VOTRE BANCONTACT-APP A " $ const False
         dropPaiementMaestro = dropPrefix "PAIEMENT MAESTRO " dayMonth
         dayMonth c = isDigit c || c == ' ' || c == '-' || c == '/'
