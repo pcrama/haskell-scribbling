@@ -12,6 +12,7 @@ import           Text.Parsec (
 
 import Lib
 
+import ArgentaParserTests
 import BelfiusParserTests
 import ConfigLanguageTests
 import TransactionTest
@@ -164,4 +165,5 @@ main = hspec $ do
     testParseAmountToCents
   transactionSpecs
   configLanguageSpecs
+  argentaParserSpecs
   belfiusParserSpecs

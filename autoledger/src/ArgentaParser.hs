@@ -2,7 +2,6 @@ module ArgentaParser (
   UnstructuredParser
   , UnstructuredParsingState
   , UnstructuredData(..)
-  , UnstructuredHeader(..)
   , columnsToArgenta
   , packShow
   , packShow0Pad
@@ -10,30 +9,21 @@ module ArgentaParser (
   , parseUnstructuredData
   , parseUnstructuredDataRows
   , parseUnstructuredDataSingleRow
-  , parseUnstructuredHeaderLine
-  , parseUnstructuredHeaders
   , runUnstructuredDataParser
   ) where
 import qualified Data.Text as T
 import Data.Char (digitToInt, isDigit, isSpace)
 import Data.Functor (void)
 import Data.List (foldl')
+import Data.Monoid (First(..), getFirst)
 import Data.Text (Text)
 import Data.Time.Calendar (Day, fromGregorian, fromGregorianValid, toGregorian)
 import Text.Parsec
-import Text.Read (readMaybe)
 
 import Transaction
 
-data UnstructuredHeader = UnstructuredHeader {
-      uhLine :: Int
-    , uhKey :: Text
-    , uhValue :: Text
-    }
-  deriving (Show, Eq)
-
 fieldSeparator :: Char
-fieldSeparator = ';'
+fieldSeparator = ','
 
 newLines :: String
 newLines = "\r\n"
@@ -44,11 +34,10 @@ doubleQuote = '"'
 ssvChar :: Char -> Bool
 ssvChar = not . (`elem` (fieldSeparator:newLines))
 
-ssvText, ssvText1 :: Monad m => UnstructuredParser m Text
+ssvText :: Monad m => UnstructuredParser m Text
 ssvText = T.pack <$> (
   (char doubleQuote *> many (satisfy $ not . (`elem` (doubleQuote:newLines))) <* char doubleQuote)
   <|> many (satisfy ssvChar))
-ssvText1 = T.pack <$> many1 (satisfy ssvChar)
 
 type UnstructuredParsingState = Maybe Int
 type UnstructuredParser m a = ParsecT Text UnstructuredParsingState m a
@@ -61,23 +50,6 @@ modifyColumnCount = ($)
 
 eol :: Monad m => UnstructuredParser m ()
 eol = void endOfLine
-
-parseUnstructuredHeaderLine :: Monad m => UnstructuredParser m UnstructuredHeader
-parseUnstructuredHeaderLine = do
-    spaces
-    key <- ssvText1
-    _ <- char fieldSeparator
-    position <- getPosition
-    value <- ssvText
-    return $ UnstructuredHeader {
-        uhLine = sourceLine position
-      , uhKey = T.stripEnd key
-      , uhValue = T.strip value
-      }
-
-parseUnstructuredHeaders :: Monad m => UnstructuredParser m [UnstructuredHeader]
-parseUnstructuredHeaders =
-    manyTill (parseUnstructuredHeaderLine <* eol) (char fieldSeparator >> eol)
 
 parseUnstructuredDataSingleRow :: Monad m => UnstructuredParser m [Text]
 parseUnstructuredDataSingleRow = sepBy1 ssvText (char fieldSeparator)
@@ -102,21 +74,19 @@ parseUnstructuredDataRows = do
         endOfLineAndNextRow = eol >> (endOfInput <|> parseUnstructuredDataRows)
 
 data UnstructuredData = UnstructuredData {
-      udHeaders :: [UnstructuredHeader]
-    , udColumnNames :: [Text]
+    udColumnNames :: [Text]
     , udData :: [(Int, [Text])] }
   deriving (Show, Eq)
 
 parseUnstructuredData :: Monad m => UnstructuredParser m UnstructuredData
 parseUnstructuredData = do
-  headers <- parseUnstructuredHeaders
   columnNames <- parseUnstructuredDataSingleRow
   eol
   modifyState (modifyColumnCount $ const $ Just $ length columnNames)
   rows <- parseUnstructuredDataRows
   spaces
   eof
-  pure $ UnstructuredData { udHeaders = headers, udColumnNames = columnNames, udData = rows }
+  pure $ UnstructuredData { udColumnNames = columnNames, udData = rows }
 
 runUnstructuredDataParser :: SourceName
                           -> Text
@@ -125,21 +95,17 @@ runUnstructuredDataParser = runParser parseUnstructuredData Nothing
 
 data ArgentaTransaction = ArgentaTransaction
   {
-    _account :: Text -- Compte
-  , _accountingDate :: Day -- Date de comptabilisation
-  , _extractNumber :: Maybe Int -- Numéro d'extrait
-  , _transactionNumber :: Maybe Int -- Numéro de transaction
-  , _otherAccount :: Maybe NonBlankText -- Compte contrepartie
-  , _otherName :: Maybe NonBlankText -- Nom contrepartie contient
-  , _otherStreetAndNumber :: Maybe NonBlankText -- Rue et numéro
-  , _otherCity :: Maybe NonBlankText -- Code postal et localité
-  , _transactionDescription :: Maybe NonBlankText -- Transaction
-  , _valueDate :: Day -- Date valeur
-  , _amountCents :: Int -- Montant
-  , _currency :: Text -- Devise
-  , _bankIdentificationCode :: Text -- BIC
-  , _countryCode :: Text -- Code pays
-  , _communication :: Maybe NonBlankText -- Communications
+    _account :: Text -- Rekening, Compte?
+  , _accountingDate :: Day -- Boekdatum, Date de comptabilisation?
+  , _valueDate :: Day -- Valutadatum, Date valeur?
+  , _reference :: NonBlankText -- Referentie, Numéro d'extrait?
+  , _transactionDescription :: Maybe NonBlankText -- Beschrijving, Transaction?
+  , _amountCents :: Int -- Bedrag, Montant?
+  , _currency :: Text -- Munt, Devise?
+  , _transactionDate :: Day -- Verrichtingsdatum, ?
+  , _otherAccount :: Maybe NonBlankText -- Rekening tegenpartij, Compte contrepartie?
+  , _otherName :: Maybe NonBlankText -- Naam tegenpartij, Nom contrepartie contient?
+  , _communication :: Maybe NonBlankText -- Mededeling, Communications?
   }
   deriving (Show, Eq)
 
@@ -156,11 +122,14 @@ instance ITransaction ArgentaTransaction where
 getArgentaDescription :: ArgentaTransaction -> Maybe NonBlankText
 getArgentaDescription ArgentaTransaction { _communication = Nothing, _transactionDescription = mbT@(Just _) } =
   mbT >>= simplifyTransactionDescription
-getArgentaDescription ArgentaTransaction { _communication = mbC@(Just (NonBlankText c)), _transactionDescription = mbT }
-  | isStructuredCommunication c = mbT >>= simplifyTransactionDescription
+getArgentaDescription ArgentaTransaction { _communication = mbC@(Just (NonBlankText c)), _transactionDescription = mbT, _otherName = mbO }
+  | isStructuredCommunication c = getFirst $
+      First (mbT >>= simplifyTransactionDescription)
+      <> First (joinNonBlankTextWith " " <$> mbO <*> mkNonBlankText c)
   | otherwise = mbC >>= simplifyTransactionDescription
   where isStructuredCommunication = T.all (\h -> isDigit h || h == '+' || h == '/') 
-getArgentaDescription ArgentaTransaction { _communication = Nothing, _transactionDescription = Nothing } = Nothing
+getArgentaDescription ArgentaTransaction { _communication = Nothing, _transactionDescription = Nothing, _otherName = Just on } = pure on
+getArgentaDescription ArgentaTransaction { _communication = Nothing, _transactionDescription = Nothing, _otherName = Nothing } = Just uninitializedNonBlankText
 
 simplifyTransactionDescription :: NonBlankText -> Maybe NonBlankText
 simplifyTransactionDescription x = squeezeBlanks x
@@ -207,12 +176,16 @@ simplifyTransactionDescription x = squeezeBlanks x
         squeezeBlanks (NonBlankText y) = mkNonBlankText $ squeeze y
 
 parseUnsignedInt :: Monad m => ParsecT Text () m Int
-parseUnsignedInt = digitListToInt <$> many1 (satisfy isDigit)
-  where digitListToInt = foldl' (\val dig -> val * 10 + digitToInt dig) 0
+parseUnsignedInt = digitListToInt <$> many1 (satisfy isSeparatorOrDigit)
+  where digitListToInt = foldl' acc 0
+        acc val '.' = val
+        acc val dig = val * 10 + digitToInt dig
+        isSeparatorOrDigit '.' = True
+        isSeparatorOrDigit x = isDigit x
 
 parseFractionalPart :: Monad m => ParsecT Text () m Int
 parseFractionalPart = do
-    void $ char '.' <|> char ','
+    void $ char ','
     combine <$> parseDigit <*> option 0 parseDigit
   where combine c1 c2 = 10 * c1 + c2
         parseDigit = digitToInt <$> satisfy isDigit
@@ -251,27 +224,18 @@ columnsToArgenta UnstructuredData { udColumnNames = columnNames, udData = dataRo
 
 type Filler i r = i -> r -> Either (UnstructuredDataToRecordError Text) r
 
-mkNonBlankInt :: Text -> (Maybe Int -> a) -> FailableToRecord a
-mkNonBlankInt t setter
-  | T.all isSpace t = Right $ setter Nothing
-  | otherwise = maybe (Left $ ColumnParsingError $ "Can't parse '" <> t <> "' into a number.")
-                      (Right . setter . Just)
-                    $ readMaybe $ T.unpack t
-
 getArgentaIdentifyingComment :: ArgentaTransaction -> Text
-getArgentaIdentifyingComment bt = (_account bt
-                                   <> ";" <> argentaRenderGregorian (_accountingDate bt)
-                                   <> ";;;" <> renderNonBlankText (_otherAccount bt)
-                                   <> ";" <> renderNonBlankText (_otherName bt)
-                                   <> ";" <> renderNonBlankText (_otherStreetAndNumber bt)
-                                   <> ";" <> renderNonBlankText (_otherCity bt)
-                                   <> ";" <> renderNonBlankText (_transactionDescription bt)
-                                   <> ";" <> argentaRenderGregorian (_valueDate bt)
-                                   <> ";" <> argentaRenderAmount (_amountCents bt)
-                                   <> ";" <> _currency bt
-                                   <> ";" <> _bankIdentificationCode bt
-                                   <> ";" <> _countryCode bt
-                                   <> ";" <> renderNonBlankText (_communication bt))
+getArgentaIdentifyingComment at = (_account at
+                                   <> ";" <> argentaRenderGregorian (_accountingDate at)
+                                   <> ";" <> argentaRenderGregorian (_valueDate at)
+                                   <> ";" <> let NonBlankText s = _reference at in s
+                                   <> ";" <> renderNonBlankText (_transactionDescription at)
+                                   <> ";" <> argentaRenderAmount (_amountCents at)
+                                   <> ";" <> _currency at
+                                   <> ";" <> argentaRenderGregorian (_transactionDate at)
+                                   <> ";" <> renderNonBlankText (_otherAccount at)
+                                   <> ";" <> renderNonBlankText (_otherName at)
+                                   <> ";" <> renderNonBlankText (_communication at))
 
 packShow :: Show b => b -> T.Text
 packShow = T.pack . show
@@ -297,40 +261,38 @@ renderNonBlankText :: Maybe NonBlankText -> T.Text
 renderNonBlankText Nothing = ""
 renderNonBlankText (Just (NonBlankText t)) = t
 
--- Date de comptabilisation
+-- Boekdatum, Date de comptabilisation?
 pickAccountingDate :: Filler Text ArgentaTransaction
 pickAccountingDate x r = case runParser (parseDate <* eof) () "pickAccountingDate" x of
   Left e -> Left $ ColumnParsingError $ "Unable to parse '" <> x <> "' to a date: " <> T.pack (show e)
   Right day -> pure $ r { _accountingDate = day }
--- Date valeur
+-- Valutadatum, Date valeur?
 pickValueDate :: Filler Text ArgentaTransaction
 pickValueDate x r = case runParser (parseDate <* eof) () "pickValueDate" x of
   Left e -> Left $ ColumnParsingError $ "Unable to parse '" <> x <> "' to a date: " <> T.pack (show e)
   Right day -> pure $ r { _valueDate = day }
--- Compte
+-- Verrichtingsdatum, ?
+pickTransactionDate :: Filler Text ArgentaTransaction
+pickTransactionDate x r = case runParser (parseDate <* eof) () "pickTransactionDate" x of
+  Left e -> Left $ ColumnParsingError $ "Unable to parse '" <> x <> "' to a date: " <> T.pack (show e)
+  Right day -> pure $ r { _transactionDate = day }
+-- Rekening, Compte?
 pickAccount :: Filler Text ArgentaTransaction
 pickAccount x r = pure $ r { _account = x }
--- Numéro d'extrait
-pickExtractNumber :: Filler Text ArgentaTransaction
-pickExtractNumber x r = mkNonBlankInt x $ \mbi -> r { _extractNumber = mbi }
--- Numéro de transaction
-pickTransactionNumber :: Filler Text ArgentaTransaction
-pickTransactionNumber x r = mkNonBlankInt x $ \mbi -> r { _transactionNumber = mbi }
--- Compte contrepartie
-pickOtherAccount :: Filler Text ArgentaTransaction
-pickOtherAccount x r = pure $ r { _otherAccount = mkNonBlankText x }
--- Nom contrepartie contient
-pickOtherName :: Filler Text ArgentaTransaction
-pickOtherName x r = pure $ r { _otherName = mkNonBlankText x }
--- Rue et numéro
-pickOtherStreetAndNumber :: Filler Text ArgentaTransaction
-pickOtherStreetAndNumber x r = pure $ r { _otherStreetAndNumber = mkNonBlankText x }
--- Code postal et localité
-pickOtherCity :: Filler Text ArgentaTransaction
-pickOtherCity x r = pure $ r { _otherCity = mkNonBlankText x }
--- Transaction
+-- Referentie, ?
+pickReference :: Filler Text ArgentaTransaction
+pickReference x r = case mkNonBlankText x of
+  Just nbt -> pure $ r { _reference = nbt }
+  Nothing -> Left $ ColumnParsingError "Reference should not be blank"
+-- Beschrijving, Transaction?
 pickTransactionDescription :: Filler Text ArgentaTransaction
 pickTransactionDescription x r = pure $ r { _transactionDescription = mkNonBlankText x }
+-- Rekening tegenpartij, Compte contrepartie?
+pickOtherAccount :: Filler Text ArgentaTransaction
+pickOtherAccount x r = pure $ r { _otherAccount = mkNonBlankText x }
+-- Naam tegenpartij, Nom contrepartie contient?
+pickOtherName :: Filler Text ArgentaTransaction
+pickOtherName x r = pure $ r { _otherName = mkNonBlankText x }
 -- Montant
 pickAmountCents :: Filler Text ArgentaTransaction
 pickAmountCents x r = case runParser (parseAmountToCents <* eof) () "pickAmountCents" x of
@@ -339,12 +301,6 @@ pickAmountCents x r = case runParser (parseAmountToCents <* eof) () "pickAmountC
 -- Devise
 pickCurrency :: Filler Text ArgentaTransaction
 pickCurrency x r = pure $ r { _currency = x }
--- BIC
-pickBankIdentificationCode :: Filler Text ArgentaTransaction
-pickBankIdentificationCode x r = pure $ r { _bankIdentificationCode = x }
--- Code pays
-pickCountryCode :: Filler Text ArgentaTransaction
-pickCountryCode x r = pure $ r { _countryCode = x }
 -- Communications
 pickCommunication :: Filler Text ArgentaTransaction
 pickCommunication x r = pure $ r { _communication = mkNonBlankText x }
@@ -371,38 +327,32 @@ makeArgentaPicking ::
   -- | function mapping a data row to a `ArgentaTransaction`
   ([Text] -> FailableToRecord ArgentaTransaction)
 makeArgentaPicking = makePicking bilingualLookup $ ArgentaTransaction {
-  _account = T.empty
+    _account = mempty
   , _accountingDate = fromGregorian 1970 1 1
-  , _extractNumber = Nothing
-  , _transactionNumber = Nothing
+  , _valueDate = fromGregorian 1970 1 1
+  , _reference = uninitializedNonBlankText
+  , _transactionDescription = Nothing
+  , _amountCents = 0
+  , _currency = mempty
+  , _transactionDate = fromGregorian 1970 1 1
   , _otherAccount = Nothing
   , _otherName = Nothing
-  , _otherStreetAndNumber = Nothing
-  , _otherCity = Nothing
-  , _transactionDescription = Nothing
-  , _valueDate = fromGregorian 1970 1 1
-  , _amountCents = 0
-  , _currency = T.empty
-  , _bankIdentificationCode = T.empty
-  , _countryCode = T.empty
   , _communication = Nothing
   }
   where bilingualLookup :: T.Text -> Maybe (Filler T.Text ArgentaTransaction)
         bilingualLookup s =
           foldr (\(fr, nl, res) other -> if s == fr || s == nl then Just res else other)
                 Nothing
-                [("Communications", "Mededelingen", pickCommunication),
-                 ("Compte", "Rekening", pickAccount),
-                 ("Date de comptabilisation", "Boekingsdatum", pickAccountingDate),
-                 ("Numéro d'extrait", "Rekeninguittrekselnummer", pickExtractNumber),
-                 ("Numéro de transaction", "Transactienummer", pickTransactionNumber),
-                 ("Compte contrepartie", "Rekening tegenpartij", pickOtherAccount),
-                 ("Nom contrepartie contient", "Naam tegenpartij bevat", pickOtherName),
-                 ("Rue et numéro", "Straat en nummer", pickOtherStreetAndNumber),
-                 ("Code postal et localité", "Postcode en plaats", pickOtherCity),
-                 ("Transaction", "Transactie", pickTransactionDescription),
-                 ("Date valeur", "Valutadatum", pickValueDate),
-                 ("Montant", "Bedrag", pickAmountCents),
-                 ("Devise", "Devies", pickCurrency),
-                 ("BIC", "BIC", pickBankIdentificationCode),
-                 ("Code pays", "Landcode", pickCountryCode)]
+                [
+                  ("Compte?", "Rekening", pickAccount)
+                , ("Date de comptabilisation?", "Boekdatum", pickAccountingDate)
+                , ("Date valeur?", "Valutadatum", pickValueDate)
+                , ("Numéro d'extrait?", "Referentie", pickReference)
+                , ("Transaction?", "Beschrijving", pickTransactionDescription)
+                , ("Montant?", "Bedrag", pickAmountCents)
+                , ("Devise?", "Munt", pickCurrency)
+                , ("?", "Verrichtingsdatum", pickTransactionDate)
+                , ("Compte contrepartie?", "Rekening tegenpartij", pickOtherAccount)
+                , ("Nom contrepartie contient?", "Naam tegenpartij", pickOtherName)
+                , ("Communications?", "Mededeling", pickCommunication)
+                ]

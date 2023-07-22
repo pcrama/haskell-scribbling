@@ -8,9 +8,11 @@ module Transaction
     pattern NonBlankText,
     TransactionEval (..),
     evalForTransaction,
+    joinNonBlankTextWith,
     mkNonBlankText,
     mkLedgerEntry,
     squeeze,
+    uninitializedNonBlankText,
   )
 where
 
@@ -44,6 +46,15 @@ mkNonBlankText :: T.Text -> Maybe NonBlankText
 mkNonBlankText t
   | T.all isSpace t = Nothing
   | otherwise = Just $ NonBlankText' t
+
+uninitializedNonBlankText :: NonBlankText
+uninitializedNonBlankText = NonBlankText' {getNonBlankText = "?uninitialized?"}
+
+instance Semigroup NonBlankText where
+  NonBlankText' a <> NonBlankText' b = NonBlankText' $ a <> b
+
+joinNonBlankTextWith :: T.Text -> NonBlankText -> NonBlankText -> NonBlankText
+joinNonBlankTextWith sep (NonBlankText a) (NonBlankText b) = NonBlankText' $ a <> sep <> b
 
 data TransactionEval a where
   Constant :: a -> TransactionEval a
