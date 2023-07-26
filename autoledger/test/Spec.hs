@@ -2,7 +2,7 @@ module Main where
 
 import Control.Monad (forM_)
 import Data.Functor.Identity (Identity)
--- import qualified Data.Text as T
+import qualified Data.ByteString.Lazy as L
 import           Data.Text (Text, unpack)
 import           Test.Hspec
 import           Text.Parsec (
@@ -155,15 +155,17 @@ testParseAmountToCents = describe "parseAmountToCents" $ do
              $ runParser parseAmountToCents () "amountCents" input `shouldBe` Right expected
 
 main :: IO ()
-main = hspec $ do
-  describe "Unstructured parsing (examples from playing in REPL)" $ do
-    testParseUnstructuredDataSingleRow
-    testParseUnstructuredDataRows
-    testParseUnstructuredHeaderLine
-    testParseUnstructuredHeaders
-    testParseUnstructuredData
-    testParseAmountToCents
-  transactionSpecs
-  configLanguageSpecs
-  argentaParserSpecs
-  belfiusParserSpecs
+main = do
+  xlsxBs <- L.readFile "/home/userland/Downloads/output.xlsx"
+  hspec $ do
+    describe "Unstructured parsing (examples from playing in REPL)" $ do
+      testParseUnstructuredDataSingleRow
+      testParseUnstructuredDataRows
+      testParseUnstructuredHeaderLine
+      testParseUnstructuredHeaders
+      testParseUnstructuredData
+      testParseAmountToCents
+    transactionSpecs
+    configLanguageSpecs
+    argentaParserSpecs xlsxBs
+    belfiusParserSpecs

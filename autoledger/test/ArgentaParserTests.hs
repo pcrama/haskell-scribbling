@@ -2,6 +2,10 @@ module ArgentaParserTests (
   argentaParserSpecs,
   ) where
 
+import           Codec.Xlsx
+import           Control.Lens
+import           Control.Monad (forM_)
+import qualified Data.ByteString.Lazy as L
 import qualified Data.Text as T
 import           Data.Time.Calendar (fromGregorian)
 import           Test.Hspec
@@ -9,8 +13,8 @@ import           Text.Parsec (runParser)
 
 import           Lib
 
-argentaParserSpecs :: SpecWith ()
-argentaParserSpecs = describe "src/ArgentaParser" $ do
+argentaParserSpecs :: L.ByteString -> SpecWith ()
+argentaParserSpecs xlsxBs = describe "src/ArgentaParser" $ do
   describe "low-level parsing functions" $ do
     it "2x2 matrix" $
       Lib.runArgentaUnstructuredDataParser "2x2 matrix" "h1,h2\nv1,\"1,2\"" `shouldBe` Right (Lib.mkArgentaUnstructuredData ["h1","h2"] [(2,["v1","1,2"])])
@@ -97,6 +101,13 @@ argentaParserSpecs = describe "src/ArgentaParser" $ do
           it "identifyingComment" $ identifyingComment exampleData5 `shouldBe`
             "BE12 3456 3456 3456;27/06/2023;27/06/2023;XYZXYZ;;1239999,99;EUR;27/06/2023;BE98 9898 9898 9898;DUPOND - Dupont;Transfert"
       x -> it "columnsToArgenta failed" $ x `shouldBe` []
+  describe "parses .xlsx files" $ do
+    let xlsx = toXlsx xlsxBs
+    forM_ [(1, 1, "H1"), (1, 2, "H2"), (2, 1, "v1"), (2, 2, "2,3")] $ \(row, col, val) ->
+      it ("row=" <> show row <> ", col=" <> show col) $ do
+        let value = xlsx ^? ixSheet "Sheet 1" .
+                    ixCellRC (row, col) . cellValue . _Just
+        value `shouldBe` Just (CellText val)
 
 exampleInput :: T.Text
 exampleInput = "Rekening,Boekdatum,Valutadatum,Referentie,Beschrijving,Bedrag,Munt,Verrichtingsdatum,Rekening tegenpartij,Naam tegenpartij,Mededeling\n\
