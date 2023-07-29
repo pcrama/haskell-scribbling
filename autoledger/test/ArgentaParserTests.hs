@@ -108,6 +108,7 @@ argentaParserSpecs xlsxBs = describe "src/ArgentaParser" $ do
         let value = xlsx ^? ixSheet "Sheet 1" .
                     ixCellRC (row, col) . cellValue . _Just
         value `shouldBe` Just (CellText val)
+    it "extracts UnstructuredData" $ parseXlsxBS xlsxBs `shouldBe` (Right $ mkArgentaUnstructuredData ["H1", "H2"] [(2,["v1", "2,3"])])
 
 exampleInput :: T.Text
 exampleInput = "Rekening,Boekdatum,Valutadatum,Referentie,Beschrijving,Bedrag,Munt,Verrichtingsdatum,Rekening tegenpartij,Naam tegenpartij,Mededeling\n\

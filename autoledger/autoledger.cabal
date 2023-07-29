@@ -42,6 +42,8 @@ library
                     , mtl >= 2
                     -- xlsx requires this: sudo apt install pkg-config libexpat-dev libbz2-dev
                     , xlsx >= 1.1
+                    , bytestring
+                    , lens
 
     ghc-options:      -Wall
     hs-source-dirs:   src

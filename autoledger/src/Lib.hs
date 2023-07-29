@@ -29,6 +29,7 @@ module Lib
     parseUnstructuredDataSingleRow,
     parseUnstructuredHeaderLine,
     parseUnstructuredHeaders,
+    Argenta.parseXlsxBS,
     runArgentaUnstructuredDataParser,
     runUnstructuredDataParser,
     squeeze,

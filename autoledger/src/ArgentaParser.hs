@@ -9,9 +9,13 @@ module ArgentaParser (
   , parseUnstructuredData
   , parseUnstructuredDataRows
   , parseUnstructuredDataSingleRow
+  , parseXlsxBS
   , runUnstructuredDataParser
   ) where
+import Codec.Xlsx (Cell, CellValue(..), ColumnIndex(..), RowIndex(..), cellValue, toRows, toXlsxEither, wsCells, xlSheets)
+import Control.Lens ((^.))
 import qualified Data.Text as T
+import qualified Data.ByteString.Lazy as L
 import Data.Char (digitToInt, isDigit, isSpace)
 import Data.Functor (void)
 import Data.List (foldl')
@@ -22,6 +26,37 @@ import Text.Parsec
 
 import Transaction
 
+parseXlsxBS :: L.ByteString -> Either String UnstructuredData
+parseXlsxBS bs = do
+  xlsx <- mapError show $ toXlsxEither bs
+  ws <-  getSingleWorksheet xlsx
+  let cells = toRows $ ws ^. wsCells
+  (headers, dataCells) <- splitHeaderAndData cells
+  dataRows <- traverse extractDataRowTexts dataCells
+  pure $ UnstructuredData {udColumnNames = headers, udData = dataRows}
+  where getSingleWorksheet x =
+          case x ^. xlSheets of
+            [(_, worksheet)] -> pure worksheet
+            [] -> Left "No worksheets in input file"
+            _ -> Left "Too many worksheets in input file"
+        splitHeaderAndData ((RowIndex 1, headerRow):dataRows) = do
+          headers <- sequence $ zipWith (matchColumnIndexAndExtractCellText "Header row") [ColumnIndex 1..] headerRow
+          pure (headers, dataRows)
+        splitHeaderAndData (rowIdx:_) = Left $ "Wanted a header row at index 1, not " <> show rowIdx
+        splitHeaderAndData [] = Left "Empty worksheet"
+        tuple car cdr = (car, cdr)
+        extractDataRowTexts :: (RowIndex, [(ColumnIndex, Cell)]) -> Either String (Int, [Text])
+        extractDataRowTexts (RowIndex rowIdx, cells) =
+          tuple rowIdx <$> (sequence $ zipWith (matchColumnIndexAndExtractCellText $ "Sheet row " <> show rowIdx) [ColumnIndex 1..] cells)
+        matchColumnIndexAndExtractCellText :: String -> ColumnIndex -> (ColumnIndex, Cell) -> Either String T.Text
+        matchColumnIndexAndExtractCellText errPrefix xpCi (obsCi, cell)
+          | xpCi == obsCi = case cell ^. cellValue of
+              Just (CellText t) -> pure t
+              Just c -> Left $ errPrefix <> ": wanted a text cell for " <> show obsCi <> ", got " <> show c
+              Nothing -> Left $ errPrefix <> ": wanted Just a text cell for " <> show obsCi <> ", got Nothing"
+          | otherwise = Left $ errPrefix <> ": out of order columns or sparse row, got " <> show obsCi <> ", wanted " <> show xpCi
+        mapError f (Left x) = Left $ f x
+        mapError _ (Right x) = pure x
 fieldSeparator :: Char
 fieldSeparator = ','
 
