@@ -4,8 +4,6 @@ module BelfiusParser (
   , UnstructuredData(..)
   , UnstructuredHeader(..)
   , columnsToBelfius
-  , packShow
-  , packShow0Pad
   , parseAmountToCents
   , parseUnstructuredData
   , parseUnstructuredDataRows
@@ -236,20 +234,9 @@ parseDate = do
   year <- parseUnsignedInt
   maybe (fail "Invalid date") pure $ fromGregorianValid (fromIntegral year) month day
 
-data UnstructuredDataToRecordError a =
-  MoreDataColumnsThanHeaderColumns
-  | MoreHeaderColumnsThanDataColumns
-  | UnknownColumnHeader Text
-  | ColumnParsingError a
-  deriving (Show, Eq)
-
-type FailableToRecord a = Either (UnstructuredDataToRecordError Text) a
-
 columnsToBelfius :: UnstructuredData -> [FailableToRecord BelfiusTransaction]
 columnsToBelfius UnstructuredData { udColumnNames = columnNames, udData = dataRows } =
   map (makeBelfiusPicking columnNames . snd) dataRows
-
-type Filler i r = i -> r -> Either (UnstructuredDataToRecordError Text) r
 
 mkNonBlankInt :: Text -> (Maybe Int -> a) -> FailableToRecord a
 mkNonBlankInt t setter
@@ -272,17 +259,6 @@ getBelfiusIdentifyingComment bt = (_account bt
                                    <> ";" <> _bankIdentificationCode bt
                                    <> ";" <> _countryCode bt
                                    <> ";" <> renderNonBlankText (_communication bt))
-
-packShow :: Show b => b -> T.Text
-packShow = T.pack . show
-
-packShow0Pad :: (Show b, Integral b) => Int -> b -> T.Text
-packShow0Pad digits x =
-  let shown = show x
-      extraZeros = digits - length shown
-   in if extraZeros > 0
-        then T.replicate extraZeros "0" <> T.pack shown
-        else T.pack shown
 
 belfiusRenderAmount :: Int -> T.Text
 belfiusRenderAmount amount = sign <> packShow units <> "," <> packShow0Pad 2 cents

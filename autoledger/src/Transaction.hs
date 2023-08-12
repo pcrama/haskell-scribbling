@@ -3,14 +3,19 @@
 
 module Transaction
   ( ITransaction (..),
+    FailableToRecord,
+    Filler,
     LedgerEntry(..),
     NonBlankText,
     pattern NonBlankText,
     TransactionEval (..),
+    UnstructuredDataToRecordError(..),
     evalForTransaction,
     joinNonBlankTextWith,
     mkNonBlankText,
     mkLedgerEntry,
+    packShow,
+    packShow0Pad,
     squeeze,
     uninitializedNonBlankText,
   )
@@ -158,3 +163,25 @@ mkLedgerEntry textProg accountProg otherProg t =
         let other = evalForTransaction otherProg t
          in if T.all isSpace other then Nothing else Just other
     }
+
+data UnstructuredDataToRecordError a =
+  MoreDataColumnsThanHeaderColumns
+  | MoreHeaderColumnsThanDataColumns
+  | UnknownColumnHeader T.Text
+  | ColumnParsingError a
+  deriving (Show, Eq)
+
+type FailableToRecord a = Either (UnstructuredDataToRecordError T.Text) a
+
+type Filler i r = i -> r -> FailableToRecord r
+
+packShow :: Show b => b -> T.Text
+packShow = T.pack . show
+
+packShow0Pad :: (Show b, Integral b) => Int -> b -> T.Text
+packShow0Pad digits x =
+  let shown = show x
+      extraZeros = digits - length shown
+   in if extraZeros > 0
+        then T.replicate extraZeros "0" <> T.pack shown
+        else T.pack shown

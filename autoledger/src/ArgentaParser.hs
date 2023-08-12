@@ -3,8 +3,6 @@ module ArgentaParser (
   , UnstructuredParsingState
   , UnstructuredData(..)
   , columnsToArgenta
-  , packShow
-  , packShow0Pad
   , parseAmountToCents
   , parseUnstructuredData
   , parseUnstructuredDataRows
@@ -244,20 +242,9 @@ parseDate = do
   year <- parseUnsignedInt
   maybe (fail "Invalid date") pure $ fromGregorianValid (fromIntegral year) month day
 
-data UnstructuredDataToRecordError a =
-  MoreDataColumnsThanHeaderColumns
-  | MoreHeaderColumnsThanDataColumns
-  | UnknownColumnHeader Text
-  | ColumnParsingError a
-  deriving (Show, Eq)
-
-type FailableToRecord a = Either (UnstructuredDataToRecordError Text) a
-
 columnsToArgenta :: UnstructuredData -> [FailableToRecord ArgentaTransaction]
 columnsToArgenta UnstructuredData { udColumnNames = columnNames, udData = dataRows } =
   map (makeArgentaPicking columnNames . snd) dataRows
-
-type Filler i r = i -> r -> Either (UnstructuredDataToRecordError Text) r
 
 getArgentaIdentifyingComment :: ArgentaTransaction -> Text
 getArgentaIdentifyingComment at = (_account at
@@ -271,17 +258,6 @@ getArgentaIdentifyingComment at = (_account at
                                    <> ";" <> renderNonBlankText (_otherAccount at)
                                    <> ";" <> renderNonBlankText (_otherName at)
                                    <> ";" <> renderNonBlankText (_communication at))
-
-packShow :: Show b => b -> T.Text
-packShow = T.pack . show
-
-packShow0Pad :: (Show b, Integral b) => Int -> b -> T.Text
-packShow0Pad digits x =
-  let shown = show x
-      extraZeros = digits - length shown
-   in if extraZeros > 0
-        then T.replicate extraZeros "0" <> T.pack shown
-        else T.pack shown
 
 argentaRenderAmount :: Int -> T.Text
 argentaRenderAmount amount = sign <> packShow units <> "," <> packShow0Pad 2 cents
