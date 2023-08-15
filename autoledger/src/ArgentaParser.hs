@@ -1,130 +1,46 @@
 module ArgentaParser (
-  UnstructuredParser
-  , UnstructuredParsingState
-  , UnstructuredData(..)
+    UnstructuredData(..)
   , columnsToArgenta
-  , parseAmountToCents
-  , parseUnstructuredData
-  , parseUnstructuredDataRows
-  , parseUnstructuredDataSingleRow
-  , parseXlsxBS
-  , runUnstructuredDataParser
+  , parseAmountToCents -- for testing purposes
+  , parseXlsxRows
   ) where
-import Codec.Xlsx (Cell, CellValue(..), ColumnIndex(..), RowIndex(..), cellValue, toRows, toXlsxEither, wsCells, xlSheets)
+import Codec.Xlsx (Cell(..), CellValue(..), RowIndex(..), DateBase(..), cellValue, dateFromNumber)
+import Codec.Xlsx.Parser.Stream (Row(..))
 import Control.Lens ((^.))
 import qualified Data.Text as T
-import qualified Data.ByteString.Lazy as L
 import Data.Char (digitToInt, isDigit, isSpace)
 import Data.Functor (void)
+import qualified Data.IntMap.Strict as IntMap
 import Data.List (foldl')
 import Data.Monoid (First(..), getFirst)
 import Data.Text (Text)
-import Data.Time.Calendar (Day, fromGregorian, fromGregorianValid, toGregorian)
+import Data.Time.Clock (UTCTime(..))
+import Data.Time.Calendar (Day(..), fromGregorian, toGregorian)
 import Text.Parsec
 
 import Transaction
 
-parseXlsxBS :: L.ByteString -> Either String UnstructuredData
-parseXlsxBS bs = do
-  xlsx <- mapError show $ toXlsxEither bs
-  ws <-  getSingleWorksheet xlsx
-  let cells = toRows $ ws ^. wsCells
-  (headers, dataCells) <- splitHeaderAndData cells
-  dataRows <- traverse extractDataRowTexts dataCells
+parseXlsxRows :: [Row] -> Either String UnstructuredData
+parseXlsxRows ((MkRow {_ri_row_index = RowIndex 1, _ri_cell_row = headerRow}):dataRows) = do
+  headers <- collectOnlyCellText "Header row" (flip IntMap.lookup headerRow) 1 []
   pure $ UnstructuredData {udColumnNames = headers, udData = dataRows}
-  where getSingleWorksheet x =
-          case x ^. xlSheets of
-            [(_, worksheet)] -> pure worksheet
-            [] -> Left "No worksheets in input file"
-            _ -> Left "Too many worksheets in input file"
-        splitHeaderAndData ((RowIndex 1, headerRow):dataRows) = do
-          headers <- sequence $ zipWith (matchColumnIndexAndExtractCellText "Header row") [ColumnIndex 1..] headerRow
-          pure (headers, dataRows)
-        splitHeaderAndData (rowIdx:_) = Left $ "Wanted a header row at index 1, not " <> show rowIdx
-        splitHeaderAndData [] = Left "Empty worksheet"
-        tuple car cdr = (car, cdr)
-        extractDataRowTexts :: (RowIndex, [(ColumnIndex, Cell)]) -> Either String (Int, [Text])
-        extractDataRowTexts (RowIndex rowIdx, cells) =
-          tuple rowIdx <$> (sequence $ zipWith (matchColumnIndexAndExtractCellText $ "Sheet row " <> show rowIdx) [ColumnIndex 1..] cells)
-        matchColumnIndexAndExtractCellText :: String -> ColumnIndex -> (ColumnIndex, Cell) -> Either String T.Text
-        matchColumnIndexAndExtractCellText errPrefix xpCi (obsCi, cell)
-          | xpCi == obsCi = case cell ^. cellValue of
-              Just (CellText t) -> pure t
-              Just c -> Left $ errPrefix <> ": wanted a text cell for " <> show obsCi <> ", got " <> show c
-              Nothing -> Left $ errPrefix <> ": wanted Just a text cell for " <> show obsCi <> ", got Nothing"
-          | otherwise = Left $ errPrefix <> ": out of order columns or sparse row, got " <> show obsCi <> ", wanted " <> show xpCi
-        mapError f (Left x) = Left $ f x
-        mapError _ (Right x) = pure x
-fieldSeparator :: Char
-fieldSeparator = ','
-
-newLines :: String
-newLines = "\r\n"
-
-doubleQuote :: Char
-doubleQuote = '"'
-
-ssvChar :: Char -> Bool
-ssvChar = not . (`elem` (fieldSeparator:newLines))
-
-ssvText :: Monad m => UnstructuredParser m Text
-ssvText = T.pack <$> (
-  (char doubleQuote *> many (satisfy $ not . (`elem` (doubleQuote:newLines))) <* char doubleQuote)
-  <|> many (satisfy ssvChar))
-
-type UnstructuredParsingState = Maybe Int
-type UnstructuredParser m a = ParsecT Text UnstructuredParsingState m a
-
-getColumnCount :: UnstructuredParsingState -> Maybe Int
-getColumnCount = id
-
-modifyColumnCount :: (Maybe Int -> Maybe Int) -> UnstructuredParsingState -> UnstructuredParsingState
-modifyColumnCount = ($)
-
-eol :: Monad m => UnstructuredParser m ()
-eol = void endOfLine
-
-parseUnstructuredDataSingleRow :: Monad m => UnstructuredParser m [Text]
-parseUnstructuredDataSingleRow = sepBy1 ssvText (char fieldSeparator)
-
-parseUnstructuredDataRows :: Monad m => UnstructuredParser m [(Int, [Text])]
-parseUnstructuredDataRows = do
-    Just colCount <- getColumnCount <$> getState
-    line <- sourceLine <$> getPosition
-    row <- parseUnstructuredDataSingleRow
-    let rowLength = length row
-    if rowLength == colCount
-    then continueParsing line row
-    else case reverse row of
-           lastElt:butLast ->
-             if rowLength == colCount + 1 && T.null lastElt
-             then continueParsing line $ reverse butLast
-             else fail $ "Got " <> show rowLength <> " row elements, but expected " <> show colCount <> "."
-           [] -> fail $ "Got an empty row, but expected " <> show colCount <> " columns."
-  where continueParsing lineNumber row = do
-          ((lineNumber, row):) <$> (endOfInput <|> endOfLineAndNextRow)
-        endOfInput = eof >> pure []
-        endOfLineAndNextRow = eol >> (endOfInput <|> parseUnstructuredDataRows)
+  where collectOnlyCellText :: String -> (Int -> Maybe Cell) -> Int -> [T.Text] -> Either String [T.Text]
+        collectOnlyCellText errPrefix lookupCell currentCol reverseAcc =
+          case lookupCell currentCol >>= (^. cellValue) of
+            Just (CellText t) -> let nextCol = currentCol + 1
+                                     nextAcc = t:reverseAcc in
+                                   nextCol `seq` nextAcc `seq` collectOnlyCellText errPrefix lookupCell nextCol nextAcc
+            Just c -> Left $ errPrefix <> ": wanted a text cell for " <> show currentCol <> ", got " <> show c
+            Nothing -> pure $ reverse reverseAcc
+parseXlsxRows _ = Left "Error: no data in first row?"
 
 data UnstructuredData = UnstructuredData {
     udColumnNames :: [Text]
-    , udData :: [(Int, [Text])] }
-  deriving (Show, Eq)
+    , udData :: [Row] }
+  deriving (Show)
 
-parseUnstructuredData :: Monad m => UnstructuredParser m UnstructuredData
-parseUnstructuredData = do
-  columnNames <- parseUnstructuredDataSingleRow
-  eol
-  modifyState (modifyColumnCount $ const $ Just $ length columnNames)
-  rows <- parseUnstructuredDataRows
-  spaces
-  eof
-  pure $ UnstructuredData { udColumnNames = columnNames, udData = rows }
-
-runUnstructuredDataParser :: SourceName
-                          -> Text
-                          -> Either ParseError UnstructuredData
-runUnstructuredDataParser = runParser parseUnstructuredData Nothing
+instance IUnstructuredData UnstructuredData where
+  getRawRows = map (\row -> (unRowIndex $ _ri_row_index row, [T.pack $ show row])) . udData
 
 data ArgentaTransaction = ArgentaTransaction
   {
@@ -233,18 +149,9 @@ parseAmountToCents = toCents <$> signParser <*> parseUnsignedInt <*> optionMaybe
             Just _ -> (-1)
             Nothing -> 1
 
-parseDate :: Monad m => ParsecT Text () m Day
-parseDate = do
-  day <- parseUnsignedInt
-  void $ char '-' <|> char '/'
-  month <- parseUnsignedInt
-  void $ char '-' <|> char '/'
-  year <- parseUnsignedInt
-  maybe (fail "Invalid date") pure $ fromGregorianValid (fromIntegral year) month day
-
 columnsToArgenta :: UnstructuredData -> [FailableToRecord ArgentaTransaction]
 columnsToArgenta UnstructuredData { udColumnNames = columnNames, udData = dataRows } =
-  map (makeArgentaPicking columnNames . snd) dataRows
+  map (makeArgentaPicking columnNames) dataRows
 
 getArgentaIdentifyingComment :: ArgentaTransaction -> Text
 getArgentaIdentifyingComment at = (_account at
@@ -272,49 +179,74 @@ renderNonBlankText :: Maybe NonBlankText -> T.Text
 renderNonBlankText Nothing = ""
 renderNonBlankText (Just (NonBlankText t)) = t
 
+pickCellText :: Maybe T.Text -- ^ whether a (and which) default text can be substituted for Cell=Nothing or a Cell whose _cellValue=Nothing
+              -> Filler T.Text a -- ^ a filler taking a cell text, to be transformed into a ...
+              -> Filler (Maybe Cell) a -- ^ ... filler accepting a Cell (or Nothing) with runtime type checking
+pickCellText Nothing _ Nothing _ = Left $ ColumnParsingError "Wanted a CellText, got nothing"
+pickCellText (Just t) f Nothing r = f t r
+pickCellText (Just t) f (Just (Cell { _cellValue = Nothing })) r = f t r
+pickCellText _ f (Just (Cell { _cellValue = Just (CellText t) })) r = f t r
+pickCellText _ _ (Just cell) _ = Left $ ColumnParsingError $ "Wanted a CellText, got a " <> (T.pack $ show cell)
+
+pickCellDate :: Filler Day a -> Filler (Maybe Cell) a
+pickCellDate _ Nothing _ = Left $ ColumnParsingError "Wanted a cell for a date, got nothing"
+pickCellDate f (Just (Cell { _cellStyle = Just 2, _cellValue = Just (CellDouble d)})) r =
+  let defaultDateBase = DateBase1900 -- TODO: detect whether we have DateBase1900 or DateBase1904
+      utcTime = dateFromNumber defaultDateBase d in
+    f (utctDay utcTime) r
+pickCellDate _ (Just cell) _ = Left $ ColumnParsingError $ "Wanted a date, got " <> (T.pack $ show cell)
+
 -- Boekdatum, Date de comptabilisation?
-pickAccountingDate :: Filler Text ArgentaTransaction
-pickAccountingDate x r = case runParser (parseDate <* eof) () "pickAccountingDate" x of
-  Left e -> Left $ ColumnParsingError $ "Unable to parse '" <> x <> "' to a date: " <> T.pack (show e)
-  Right day -> pure $ r { _accountingDate = day }
+pickAccountingDate :: Filler (Maybe Cell) ArgentaTransaction
+pickAccountingDate = pickCellDate pick
+  where pick x r = pure $ r { _accountingDate = x }
 -- Valutadatum, Date valeur?
-pickValueDate :: Filler Text ArgentaTransaction
-pickValueDate x r = case runParser (parseDate <* eof) () "pickValueDate" x of
-  Left e -> Left $ ColumnParsingError $ "Unable to parse '" <> x <> "' to a date: " <> T.pack (show e)
-  Right day -> pure $ r { _valueDate = day }
+pickValueDate :: Filler (Maybe Cell) ArgentaTransaction
+pickValueDate = pickCellDate pick
+  where pick x r = pure $ r { _valueDate = x }
 -- Verrichtingsdatum, ?
-pickTransactionDate :: Filler Text ArgentaTransaction
-pickTransactionDate x r = case runParser (parseDate <* eof) () "pickTransactionDate" x of
-  Left e -> Left $ ColumnParsingError $ "Unable to parse '" <> x <> "' to a date: " <> T.pack (show e)
-  Right day -> pure $ r { _transactionDate = day }
+pickTransactionDate :: Filler (Maybe Cell) ArgentaTransaction
+pickTransactionDate = pickCellDate pick
+  where pick x r = pure $ r { _transactionDate = x }
 -- Rekening, Compte?
-pickAccount :: Filler Text ArgentaTransaction
-pickAccount x r = pure $ r { _account = x }
+pickAccount :: Filler (Maybe Cell) ArgentaTransaction
+pickAccount = pickCellText Nothing pick
+  where pick x r = pure $ r { _account = x }
+
 -- Referentie, ?
-pickReference :: Filler Text ArgentaTransaction
-pickReference x r = case mkNonBlankText x of
-  Just nbt -> pure $ r { _reference = nbt }
-  Nothing -> Left $ ColumnParsingError "Reference should not be blank"
+pickReference :: Filler (Maybe Cell) ArgentaTransaction
+pickReference = pickCellText Nothing pick
+  where pick x r = case mkNonBlankText x of
+          Just nbt -> pure $ r { _reference = nbt }
+          Nothing -> Left $ ColumnParsingError "Reference should not be blank"
 -- Beschrijving, Transaction?
-pickTransactionDescription :: Filler Text ArgentaTransaction
-pickTransactionDescription x r = pure $ r { _transactionDescription = mkNonBlankText x }
+pickTransactionDescription :: Filler (Maybe Cell) ArgentaTransaction
+pickTransactionDescription = pickCellText (Just "") pick
+  where pick x r = pure $ r { _transactionDescription = mkNonBlankText x }
 -- Rekening tegenpartij, Compte contrepartie?
-pickOtherAccount :: Filler Text ArgentaTransaction
-pickOtherAccount x r = pure $ r { _otherAccount = mkNonBlankText x }
+pickOtherAccount :: Filler (Maybe Cell) ArgentaTransaction
+pickOtherAccount = pickCellText (Just "") pick
+  where pick x r = pure $ r { _otherAccount = mkNonBlankText x }
 -- Naam tegenpartij, Nom contrepartie contient?
-pickOtherName :: Filler Text ArgentaTransaction
-pickOtherName x r = pure $ r { _otherName = mkNonBlankText x }
+pickOtherName :: Filler (Maybe Cell) ArgentaTransaction
+pickOtherName = pickCellText (Just "") pick
+  where pick x r = pure $ r { _otherName = mkNonBlankText x }
 -- Montant
-pickAmountCents :: Filler Text ArgentaTransaction
-pickAmountCents x r = case runParser (parseAmountToCents <* eof) () "pickAmountCents" x of
+pickAmountCents :: Filler (Maybe Cell) ArgentaTransaction
+pickAmountCents Nothing _= Left $ ColumnParsingError $ "Unable to parse empty cell to an amount"
+pickAmountCents (Just (Cell { _cellStyle = Just 1, _cellValue = Just (CellDouble d)})) r = pure $ r { _amountCents = round $ d * 100.0 }
+pickAmountCents (Just (Cell { _cellValue = Just (CellText x)})) r = case runParser (parseAmountToCents <* eof) () "pickAmountCents" x of
   Left e -> Left $ ColumnParsingError $ "Unable to parse '" <> x <> "' to an amount: " <> T.pack (show e)
   Right cents -> pure $ r { _amountCents = cents }
+pickAmountCents (Just cell) _ = Left $ ColumnParsingError $ "Unable to parse '" <> (T.pack $ show cell) <> "' to an amount."
 -- Devise
-pickCurrency :: Filler Text ArgentaTransaction
-pickCurrency x r = pure $ r { _currency = x }
+pickCurrency :: Filler (Maybe Cell) ArgentaTransaction
+pickCurrency = pickCellText (Just "") pick
+  where pick x r = pure $ r { _currency = x }
 -- Communications
-pickCommunication :: Filler Text ArgentaTransaction
-pickCommunication x r = pure $ r { _communication = mkNonBlankText x }
+pickCommunication :: Filler (Maybe Cell) ArgentaTransaction
+pickCommunication = pickCellText (Just "") pick
+  where pick x r = pure $ r { _communication = mkNonBlankText x }
 
 picking :: [Filler i r] -> Filler [i] r
 picking [] [] r = pure r
@@ -323,20 +255,22 @@ picking (_:_) [] _ = Left MoreHeaderColumnsThanDataColumns
 picking (f:fs) (x:xs) r = f x r >>= picking fs xs
 
 makePicking ::
-  (Text -> Maybe (Filler Text r)) -- ^ lookup a filler for a given column name
+  (Text -> Maybe (Filler (Maybe Cell) r)) -- ^ lookup a filler for a given column name
   -> r -- ^ default record to be filled
   -> [Text] -- ^ column names
-  -> ([Text] -> FailableToRecord r) -- ^ function mapping a data row to a filled record
+  -> (Row -> FailableToRecord r) -- ^ function mapping a data row to a filled record
 makePicking lkp defaultRecord columnNames = case traverse selectPicker columnNames of
     Left unknownName -> const . Left $ UnknownColumnHeader unknownName
-    Right fillers -> \cols -> picking fillers cols defaultRecord
+    Right fillers -> let columnLookups = map IntMap.lookup [1..length columnNames] in
+                       \row -> let cellRow = _ri_cell_row row in
+                         picking fillers (map ($ cellRow) columnLookups) defaultRecord
   where selectPicker h = maybe (Left h) Right $ lkp h
 
 makeArgentaPicking ::
   -- | column names
   [Text] ->
   -- | function mapping a data row to a `ArgentaTransaction`
-  ([Text] -> FailableToRecord ArgentaTransaction)
+  (Row -> FailableToRecord ArgentaTransaction)
 makeArgentaPicking = makePicking bilingualLookup $ ArgentaTransaction {
     _account = mempty
   , _accountingDate = fromGregorian 1970 1 1
@@ -350,7 +284,7 @@ makeArgentaPicking = makePicking bilingualLookup $ ArgentaTransaction {
   , _otherName = Nothing
   , _communication = Nothing
   }
-  where bilingualLookup :: T.Text -> Maybe (Filler T.Text ArgentaTransaction)
+  where bilingualLookup :: T.Text -> Maybe (Filler (Maybe Cell) ArgentaTransaction)
         bilingualLookup s =
           foldr (\(fr, nl, res) other -> if s == fr || s == nl then Just res else other)
                 Nothing

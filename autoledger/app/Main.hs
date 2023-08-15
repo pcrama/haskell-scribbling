@@ -1,8 +1,9 @@
 {-# LANGUAGE TupleSections #-}
 module Main where
 
+import Control.Lens (toListOf, traversed)
 import qualified Data.ByteString as BL
-import Data.Bifunctor (first, bimap)
+import Data.Bifunctor (first)
 import Data.Char (isSpace)
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -12,17 +13,20 @@ import qualified Data.Text.IO as TIO
 import Data.Time (toGregorian)
 import System.Environment (getArgs)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
+import qualified Codec.Xlsx.Parser.Stream as XL
 import qualified Lib
   ( Classifiers (..),
     ITransaction (..),
+    IUnstructuredData (..),
     LedgerEntry (..),
-    UnstructuredData (..),
+    columnsToArgenta,
     columnsToBelfius,
     compileConfigFile,
     mkLedgerEntry,
     packShow,
     packShow0Pad,
     parseConfigFileText,
+    parseXlsxRows,
     runUnstructuredDataParser,
     squeeze,
   )
@@ -128,33 +132,66 @@ extractPastRows = Set.fromList
 
 doMain :: AppArgs -> IO ()
 doMain AppArgs { classifiersFile = clF , inputFile = inF , pastTransactionsFile = mbPastF } = do
-  script <- readAndDecode clF
-  bankData <- readAndDecode inF
+  script <- readAndDecodeText clF
+  bankData <- readAndDecodeEitherXlsxOrText inF
   pastData <- case mbPastF of
-                Just pastF -> (extractPastRows . map T.strip . T.lines) <$> readAndDecode pastF
+                Just pastF -> (extractPastRows . map T.strip . T.lines) <$> readAndDecodeText pastF
                 Nothing -> return Set.empty
   case parseScript script >>= compileScript >>= parseBankData bankData of
     Left e -> e
-    Right (classifiers, ud) ->
-      case Lib.udData ud of
-        [] -> print $ Lib.udColumnNames ud
-        d -> mapM_ TIO.putStrLn
-                 $ concat
-                 $ filter (isNotIn pastData)
-                 $ map (uncurry (renderTransaction classifiers))
-                       (reverse $ zip d $ Lib.columnsToBelfius ud)
-  where readAndDecode f = do
-          bytes <- BL.readFile f
-          let (encoding, fileData) = case decodeUtf8' bytes of
-                Left _ -> ("latin1", decodeLatin1 bytes)
-                Right d -> ("utf8", d)
-          putStrLn $ f <> " uses " <> encoding <> "."
-          pure fileData
-        parseScript = first print . Lib.parseConfigFileText clF
+    Right rendered ->
+      mapM_ TIO.putStrLn
+          $ concat
+          $ filter (isNotIn pastData) rendered
+  where parseScript = first print . Lib.parseConfigFileText clF
         compileScript = first print . Lib.compileConfigFile (clF, 0, 0)
-        parseBankData b c = bimap print (c,) $ Lib.runUnstructuredDataParser inF b
+        parseBankData (Left rows) = parseArgentaBankData inF rows
+        parseBankData (Right text) = parseBelfiusBankData inF text
         isNotIn p (firstLine:_) = not $ firstLine `Set.member` p
         isNotIn _ [] = True
+
+readAndDecodeEitherXlsxOrText :: String -> IO (Either [XL.Row] T.Text)
+readAndDecodeEitherXlsxOrText f = do
+  bytes <- BL.readFile f
+  case BL.take 4 bytes of
+    -- Xlsx magic number = ZIP file magic numbers = file starts with "PK\x03\x04"
+    "PK\ETX\EOT" -> Left <$> decodeXlsxToRows f
+    _ -> Right <$> decodeToText f bytes
+
+decodeXlsxToRows :: String -> IO [XL.Row]
+decodeXlsxToRows inF = fmap (toListOf $ traversed . XL.si_row)
+                          $ XL.runXlsxM inF $ XL.collectItems $ XL.makeIndex 1 -- 1st sheet
+
+readAndDecodeText :: String -> IO T.Text
+readAndDecodeText f = BL.readFile f >>= decodeToText f
+
+decodeToText :: String -> BL.ByteString -> IO T.Text
+decodeToText f bytes = do
+  let (encoding, fileData) = case decodeUtf8' bytes of
+        Left _ -> ("latin1", decodeLatin1 bytes)
+        Right d -> ("utf8", d)
+  putStrLn $ f <> " uses " <> encoding <> "."
+  pure fileData
+
+parseBelfiusBankData :: String  -- ^ bank data's file name (for error messages)
+                     -> T.Text  -- ^ bank data read from inF
+                     -> Lib.Classifiers -- ^ functions to map transactions to output text
+                     -> Either (IO ()) [[T.Text]] -- ^ Either IO action to report the error or the list of transction descriptions
+parseBelfiusBankData inF b c = case Lib.runUnstructuredDataParser inF b of
+  Left errorAction -> Left $ print errorAction
+  Right belfiusData -> Right <$> map (uncurry $ renderTransaction c)
+                                   $ reverse $ zip (Lib.getRawRows belfiusData)
+                                                 $ Lib.columnsToBelfius belfiusData
+
+parseArgentaBankData :: String -- ^ bank data's file name (for error messages)
+                     -> [XL.Row]  -- ^ bank data read from inF
+                     -> Lib.Classifiers -- ^ functions to map transactions to output text
+                     -> Either (IO ()) [[T.Text]] -- ^ Either IO action to report the error or the list of transction descriptions
+parseArgentaBankData inF rows classifiers = case Lib.parseXlsxRows rows of
+    Left errMsg -> Left . print $ inF <> ": " <> errMsg
+    Right argentaData -> Right <$> map (uncurry $ renderTransaction classifiers)
+                                     $ reverse $ zip (Lib.getRawRows argentaData)
+                                                   $ Lib.columnsToArgenta argentaData
 
 main :: IO ()
 main = do

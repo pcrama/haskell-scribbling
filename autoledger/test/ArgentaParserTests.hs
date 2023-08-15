@@ -2,33 +2,24 @@ module ArgentaParserTests (
   argentaParserSpecs,
   ) where
 
-import           Codec.Xlsx
-import           Control.Lens
-import           Control.Monad (forM_)
-import qualified Data.ByteString.Lazy as L
+import           Codec.Xlsx (Cell(..), CellValue(..), RowIndex(..))
+import           Codec.Xlsx.Parser.Stream
 import qualified Data.Text as T
 import           Data.Time.Calendar (fromGregorian)
+import qualified Data.IntMap.Strict as IntMap
 import           Test.Hspec
 import           Text.Parsec (runParser)
 
 import           Lib
+import qualified ArgentaParser as Argenta
 
-argentaParserSpecs :: L.ByteString -> SpecWith ()
-argentaParserSpecs xlsxBs = describe "src/ArgentaParser" $ do
+argentaParserSpecs :: SpecWith ()
+argentaParserSpecs = describe "src/ArgentaParser" $ do
   describe "low-level parsing functions" $ do
-    it "2x2 matrix" $
-      Lib.runArgentaUnstructuredDataParser "2x2 matrix" "h1,h2\nv1,\"1,2\"" `shouldBe` Right (Lib.mkArgentaUnstructuredData ["h1","h2"] [(2,["v1","1,2"])])
-    let isLeft x = case x of
-          Left _ -> True
-          Right _ -> False
-    it "fails if there are too many headers" $
-      isLeft (Lib.runArgentaUnstructuredDataParser "too many headers" "h1,h2\nv1") `shouldBe` True
-    it "fails if there aren't enough headers" $
-      isLeft (Lib.runArgentaUnstructuredDataParser "insufficient headers" "h1\nv1,v2") `shouldBe` True
     describe "parses amounts with 1000-separator" $ do
       let testParser input expected =
             it (T.unpack input)
-             $ runParser parseArgentaAmountToCents () "amountCents" input `shouldBe` Right expected
+             $ runParser Argenta.parseAmountToCents () "amountCents" input `shouldBe` Right expected
       testParser "0,00" 0
       testParser "0,01" 1
       testParser "0,13" 13
@@ -45,10 +36,14 @@ argentaParserSpecs xlsxBs = describe "src/ArgentaParser" $ do
       testParser "-12.345,67" (-1234567)
       testParser "-3.212.345,67" (-321234567)
   describe "works for examples" $ do
-    let exampleUnstructuredData = mkArgentaUnstructuredData exampleUnstructuredDataHeaders exampleUnstructuredDataRows
-    it "parses CSV into UnstructuredData" $
-      Lib.runArgentaUnstructuredDataParser "exampleInputWithout" exampleInput `shouldBe` Right exampleUnstructuredData
-    case columnsToArgenta exampleUnstructuredData of
+    describe "parses xlsx into UnstructuredData" $ do
+      let unstructured = Lib.parseXlsxRows exampleInput
+      it "gets column names" $ Argenta.udColumnNames <$> unstructured `shouldBe` (Right exampleUnstructuredDataHeaders)
+      let expectedDataRowCount = length exampleInput - 1
+      it ("gets " <> show expectedDataRowCount <> " data rows") $
+        (length . Argenta.udData) <$> unstructured `shouldBe` (Right expectedDataRowCount)
+    case columnsToArgenta $ Argenta.UnstructuredData { Argenta.udColumnNames = exampleUnstructuredDataHeaders
+                                                     , Argenta.udData = tail exampleInput } of
       [Right exampleData1, Right exampleData2, Right exampleData3, Right exampleData4, Right exampleData5] -> do
         describe "example 1" $ do
           it "account" $ account exampleData1 `shouldBe` "BE12 3456 3456 3456"
@@ -101,23 +96,99 @@ argentaParserSpecs xlsxBs = describe "src/ArgentaParser" $ do
           it "identifyingComment" $ identifyingComment exampleData5 `shouldBe`
             "BE12 3456 3456 3456;27/06/2023;27/06/2023;XYZXYZ;;1239999,99;EUR;27/06/2023;BE98 9898 9898 9898;DUPOND - Dupont;Transfert"
       x -> it "columnsToArgenta failed" $ x `shouldBe` []
-  describe "parses .xlsx files" $ do
-    let xlsx = toXlsx xlsxBs
-    forM_ [(1, 1, "H1"), (1, 2, "H2"), (2, 1, "v1"), (2, 2, "2,3")] $ \(row, col, val) ->
-      it ("row=" <> show row <> ", col=" <> show col) $ do
-        let value = xlsx ^? ixSheet "Sheet 1" .
-                    ixCellRC (row, col) . cellValue . _Just
-        value `shouldBe` Just (CellText val)
-    it "extracts UnstructuredData" $ parseXlsxBS xlsxBs `shouldBe` (Right $ mkArgentaUnstructuredData ["H1", "H2"] [(2,["v1", "2,3"])])
 
-exampleInput :: T.Text
-exampleInput = "Rekening,Boekdatum,Valutadatum,Referentie,Beschrijving,Bedrag,Munt,Verrichtingsdatum,Rekening tegenpartij,Naam tegenpartij,Mededeling\n\
-               \BE12 3456 3456 3456,17-07-2023,17-07-2023,MAGAGM,,\"-42,06\",EUR,17-07-2023,,MAGASIN MG 99 PAR PARIS,\n\
-               \BE12 3456 3456 3456,17-07-2023,17-07-2023,0NCNC0,,\"-21,50\",EUR,17-07-2023,BE54 0000 0000 0000,SARL BARAK,SARL BARAK 14-07-2023 14:00 SAAS FEE FR 123456*******4321\n\
-               \BE12 3456 3456 3456,17-07-2023,17-07-2023,GSRSRG,,\"-201,00\",EUR,17-07-2023,BE55 0055 0055 0055,Abc Def Ghi,+++123/456/78901+++\n\
-               \BE12 3456 3456 3456,28-06-2023,28-06-2023,ABCDEF,,\"1.020,03\",EUR,28-06-2023,BE09 1011 1213 1415,EMPLOYER,salary\n\
-               \BE12 3456 3456 3456,27-06-2023,27-06-2023,XYZXYZ,,\"1.239.999,99\",EUR,27-06-2023,BE98 9898 9898 9898,DUPOND - Dupont,Transfert\n\
-               \"
+nothingCell :: Cell
+nothingCell = Cell {_cellStyle = Nothing, _cellValue = Nothing, _cellComment = Nothing, _cellFormula = Nothing}
+
+textCell :: T.Text -> Cell
+textCell txt = Cell {_cellStyle = Nothing, _cellValue = Just (CellText txt), _cellComment = Nothing, _cellFormula = Nothing}
+
+doubleCell :: Double -> Cell
+doubleCell dbl = Cell {_cellStyle = Just 1, _cellValue = Just (CellDouble dbl), _cellComment = Nothing, _cellFormula = Nothing} 
+
+dateCell :: Double -> Cell
+dateCell dbl = Cell {_cellStyle = Just 2, _cellValue = Just (CellDouble dbl), _cellComment = Nothing, _cellFormula = Nothing} 
+
+makeRow :: Int -> [(Int, Cell)] -> Row
+makeRow row cells = MkRow {_ri_row_index = RowIndex row
+                          , _ri_cell_row = IntMap.fromList cells}
+  
+exampleInput :: [Row]
+exampleInput =
+    [makeRow 1 $ zip [1..]
+                     [textCell "Rekening"
+                     ,textCell "Boekdatum"
+                     ,textCell "Valutadatum"
+                     ,textCell "Referentie"
+                     ,textCell "Beschrijving"
+                     ,textCell "Bedrag"
+                     ,textCell "Munt"
+                     ,textCell "Verrichtingsdatum"
+                     ,textCell "Rekening tegenpartij"
+                     ,textCell "Naam tegenpartij"
+                     ,textCell "Mededeling"]
+    ,makeRow 2 $ filter isNotEmptyTextCell
+               $ zip [1..]
+                     [textCell "BE12 3456 3456 3456"
+                     ,dateCell 45124.0 -- 2023-07-17
+                     ,dateCell 45124.0 -- 2023-07-17
+                     ,textCell "MAGAGM"
+                     ,textCell ""
+                     ,doubleCell (-42.06)
+                     ,textCell "EUR"
+                     ,dateCell 45124.0 -- 2023-07-17
+                     ,textCell ""
+                     ,textCell "MAGASIN MG 99 PAR PARIS"
+                     ,textCell ""]
+    ,makeRow 3 $ zip [1..]
+                     [textCell "BE12 3456 3456 3456"
+                     ,dateCell 45124.0 -- 17-07-2023
+                     ,dateCell 45124.0 -- 17-07-2023
+                     ,textCell "0NCNC0"
+                     ,nothingCell -- textCell ""
+                     ,doubleCell (-21.50)
+                     ,textCell "EUR"
+                     ,dateCell 45124.0 -- 17-07-2023
+                     ,textCell "BE54 0000 0000 0000"
+                     ,textCell "SARL BARAK"
+                     ,textCell "SARL BARAK 14-07-2023 14:00 SAAS FEE FR 123456*******4321"]
+    ,makeRow 4 $ zip [1..]
+                     [textCell "BE12 3456 3456 3456"
+                     ,dateCell 45124.0 -- 17-07-2023
+                     ,dateCell 45124.0 -- 17-07-2023
+                     ,textCell "GSRSRG"
+                     ,textCell ""
+                     ,textCell "-201,00" -- doubleCell (-201.00)
+                     ,textCell "EUR"
+                     ,dateCell 45124.0 -- 17-07-2023
+                     ,textCell "BE55 0055 0055 0055"
+                     ,textCell "Abc Def Ghi"
+                     ,textCell "+++123/456/78901+++"]
+    ,makeRow 5 $ filter isNotEmptyTextCell
+               $ zip [1..]
+                     [textCell "BE12 3456 3456 3456"
+                     ,dateCell 45105.0 -- 28-06-2023
+                     ,dateCell 45105.0 -- 28-06-2023
+                     ,textCell "ABCDEF"
+                     ,textCell ""
+                     ,doubleCell 1020.03
+                     ,textCell "EUR"
+                     ,dateCell 45105.0 -- 28-06-2023
+                     ,textCell "BE09 1011 1213 1415"
+                     ,textCell "EMPLOYER"
+                     ,textCell "salary"]
+    ,makeRow 6 $ zip [1..]
+                     [textCell "BE12 3456 3456 3456"
+                     ,dateCell 45104.0 -- 27-06-2023
+                     ,dateCell 45104.0 -- 27-06-2023
+                     ,textCell "XYZXYZ"
+                     ,textCell "      "
+                     ,doubleCell 1239999.99
+                     ,textCell "EUR"
+                     ,dateCell 45104.0 -- 27-06-2023
+                     ,textCell "BE98 9898 9898 9898"
+                     ,textCell "DUPOND - Dupont"
+                     ,textCell "Transfert"]]
 
 exampleUnstructuredDataHeaders :: [T.Text]
 exampleUnstructuredDataHeaders = [
@@ -134,10 +205,6 @@ exampleUnstructuredDataHeaders = [
   , "Mededeling"
   ]
 
-exampleUnstructuredDataRows :: [(Int, [T.Text])]
-exampleUnstructuredDataRows = [
-  (2, ["BE12 3456 3456 3456", "17-07-2023", "17-07-2023", "MAGAGM", "", "-42,06", "EUR", "17-07-2023", "", "MAGASIN MG 99 PAR PARIS", ""])
-  , (3, ["BE12 3456 3456 3456", "17-07-2023", "17-07-2023", "0NCNC0", "", "-21,50", "EUR", "17-07-2023", "BE54 0000 0000 0000", "SARL BARAK", "SARL BARAK 14-07-2023 14:00 SAAS FEE FR 123456*******4321"])
-  , (4, ["BE12 3456 3456 3456", "17-07-2023", "17-07-2023", "GSRSRG", "", "-201,00", "EUR", "17-07-2023", "BE55 0055 0055 0055", "Abc Def Ghi", "+++123/456/78901+++"])
-  , (5, ["BE12 3456 3456 3456", "28-06-2023", "28-06-2023", "ABCDEF", "", "1.020,03", "EUR", "28-06-2023", "BE09 1011 1213 1415", "EMPLOYER", "salary"])
-  , (6, ["BE12 3456 3456 3456", "27-06-2023", "27-06-2023", "XYZXYZ", "", "1.239.999,99", "EUR", "27-06-2023", "BE98 9898 9898 9898", "DUPOND - Dupont", "Transfert"])]
+isNotEmptyTextCell :: (Int, Cell) -> Bool
+isNotEmptyTextCell (_, Cell {_cellValue = Just (CellText txt)}) = not $ T.null txt
+isNotEmptyTextCell (_, _) = True

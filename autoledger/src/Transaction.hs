@@ -3,6 +3,7 @@
 
 module Transaction
   ( ITransaction (..),
+    IUnstructuredData (..),
     FailableToRecord,
     Filler,
     LedgerEntry(..),
@@ -174,6 +175,9 @@ data UnstructuredDataToRecordError a =
 type FailableToRecord a = Either (UnstructuredDataToRecordError T.Text) a
 
 type Filler i r = i -> r -> FailableToRecord r
+
+class IUnstructuredData a where
+  getRawRows :: a -> [(Int, [T.Text])]
 
 packShow :: Show b => b -> T.Text
 packShow = T.pack . show

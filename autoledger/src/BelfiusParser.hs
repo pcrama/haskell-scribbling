@@ -105,6 +105,9 @@ data UnstructuredData = UnstructuredData {
     , udData :: [(Int, [Text])] }
   deriving (Show, Eq)
 
+instance IUnstructuredData UnstructuredData where
+  getRawRows = udData
+
 parseUnstructuredData :: Monad m => UnstructuredParser m UnstructuredData
 parseUnstructuredData = do
   headers <- parseUnstructuredHeaders
