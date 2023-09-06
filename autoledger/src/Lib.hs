@@ -15,6 +15,7 @@ module Lib
     NonBlankText,
     pattern NonBlankText,
     evalForTransaction,
+    Argenta.argentaReference,
     Argenta.columnsToArgenta,
     columnsToBelfius,
     compileConfigFile,
@@ -32,6 +33,7 @@ module Lib
     Argenta.parseXlsxRows,
     runUnstructuredDataParser,
     squeeze,
+    uninitializedNonBlankText,
   )
 where
 

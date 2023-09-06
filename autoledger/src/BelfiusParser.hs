@@ -17,7 +17,7 @@ import Data.Char (digitToInt, isDigit, isSpace)
 import Data.Functor (void)
 import Data.List (foldl')
 import Data.Text (Text)
-import Data.Time.Calendar (Day, fromGregorian, fromGregorianValid, toGregorian)
+import Data.Time.Calendar (Day, fromGregorian, fromGregorianValid)
 import Text.Parsec
 import Text.Read (readMaybe)
 
@@ -250,31 +250,18 @@ mkNonBlankInt t setter
 
 getBelfiusIdentifyingComment :: BelfiusTransaction -> Text
 getBelfiusIdentifyingComment bt = (_account bt
-                                   <> ";" <> belfiusRenderGregorian (_accountingDate bt)
+                                   <> ";" <> renderGregorian (_accountingDate bt)
                                    <> ";;;" <> renderNonBlankText (_otherAccount bt)
                                    <> ";" <> renderNonBlankText (_otherName bt)
                                    <> ";" <> renderNonBlankText (_otherStreetAndNumber bt)
                                    <> ";" <> renderNonBlankText (_otherCity bt)
                                    <> ";" <> renderNonBlankText (_transactionDescription bt)
-                                   <> ";" <> belfiusRenderGregorian (_valueDate bt)
-                                   <> ";" <> belfiusRenderAmount (_amountCents bt)
+                                   <> ";" <> renderGregorian (_valueDate bt)
+                                   <> ";" <> renderAmount (_amountCents bt)
                                    <> ";" <> _currency bt
                                    <> ";" <> _bankIdentificationCode bt
                                    <> ";" <> _countryCode bt
                                    <> ";" <> renderNonBlankText (_communication bt))
-
-belfiusRenderAmount :: Int -> T.Text
-belfiusRenderAmount amount = sign <> packShow units <> "," <> packShow0Pad 2 cents
-  where (units, cents) = abs amount `divMod` 100
-        sign = if amount < 0 then "-" else T.empty
-
-belfiusRenderGregorian :: Day -> T.Text
-belfiusRenderGregorian t = packShow0Pad 2 dt <> "/" <> packShow0Pad 2 mn <> "/" <> packShow yr
-  where (yr, mn, dt) = toGregorian t
-
-renderNonBlankText :: Maybe NonBlankText -> T.Text
-renderNonBlankText Nothing = ""
-renderNonBlankText (Just (NonBlankText t)) = t
 
 -- Date de comptabilisation
 pickAccountingDate :: Filler Text BelfiusTransaction

@@ -17,6 +17,9 @@ module Transaction
     mkLedgerEntry,
     packShow,
     packShow0Pad,
+    renderAmount,
+    renderGregorian,
+    renderNonBlankText,
     squeeze,
     uninitializedNonBlankText,
   )
@@ -25,7 +28,7 @@ where
 import Control.Monad.Reader (MonadReader, asks, runReader)
 import Data.Char (isSpace)
 import qualified Data.Text as T
-import Data.Time.Calendar (Day)
+import Data.Time.Calendar (Day, toGregorian)
 
 class ITransaction a where
   account :: a -> T.Text
@@ -61,6 +64,10 @@ instance Semigroup NonBlankText where
 
 joinNonBlankTextWith :: T.Text -> NonBlankText -> NonBlankText -> NonBlankText
 joinNonBlankTextWith sep (NonBlankText a) (NonBlankText b) = NonBlankText' $ a <> sep <> b
+
+renderNonBlankText :: Maybe NonBlankText -> T.Text
+renderNonBlankText Nothing = ""
+renderNonBlankText (Just (NonBlankText t)) = t
 
 data TransactionEval a where
   Constant :: a -> TransactionEval a
@@ -189,3 +196,12 @@ packShow0Pad digits x =
    in if extraZeros > 0
         then T.replicate extraZeros "0" <> T.pack shown
         else T.pack shown
+
+renderAmount :: Int -> T.Text
+renderAmount amount = sign <> packShow units <> "," <> packShow0Pad 2 cents
+  where (units, cents) = abs amount `divMod` 100
+        sign = if amount < 0 then "-" else T.empty
+
+renderGregorian :: Day -> T.Text
+renderGregorian t = packShow0Pad 2 dt <> "/" <> packShow0Pad 2 mn <> "/" <> packShow yr
+  where (yr, mn, dt) = toGregorian t

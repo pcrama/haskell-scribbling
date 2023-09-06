@@ -35,6 +35,33 @@ argentaParserSpecs = describe "src/ArgentaParser" $ do
       testParser "-1.234,56" (-123456)
       testParser "-12.345,67" (-1234567)
       testParser "-3.212.345,67" (-321234567)
+  describe "getArgentaDescription" $ do
+    let testDesc comm tran otherNam otherAcc expected = it (show (comm, tran, otherNam, otherAcc)) $
+          (Argenta.getArgentaDescription
+           $ Argenta.ArgentaTransaction {
+              Argenta._account = mempty
+              , Argenta._accountingDate = fromGregorian 1970 1 1
+              , Argenta._valueDate = fromGregorian 1970 1 1
+              , Argenta._reference = uninitializedNonBlankText
+              , Argenta._amountCents = 0
+              , Argenta._currency = mempty
+              , Argenta._transactionDate = fromGregorian 1970 1 1
+              , Argenta._otherAccount = mkNonBlankText otherAcc
+              , Argenta._communication = mkNonBlankText comm
+              , Argenta._otherName = mkNonBlankText otherNam
+              , Argenta._transactionDescription = mkNonBlankText tran
+              }
+          ) `shouldBe` mkNonBlankText expected
+    testDesc "BOUCHERIE  SANZOS 31-08-2023 13:00  LIBIN BE  123456*******7890" "Betaling Maestro" " Boucherie Sanzos" "" "BOUCHERIE SANZOS 31-08-2023 13:00 LIBIN BE 123456*******7890"
+    testDesc "I   P" "Doorlopende betalingsopdracht" " DUPONT " "" "I P DUPONT"
+    testDesc "" "Doorlopende   betalingsopdracht" "" "" "Doorlopende betalingsopdracht"
+    testDesc "" "Doorlopende   betalingsopdracht" "" "BE 123456*******7890" "BE 123456*******7890"
+    testDesc "+++123/4567/98765+++" "Doorlopende betalingsopdracht" "B  A " "" "B A +++123/4567/98765+++"
+    testDesc "+++123/4567/98765+++" "Doorlopende betalingsopdracht" "B  A " "BE 123456*******7890" "B A +++123/4567/98765+++"
+    testDesc "/A/  W/S  00/20" "Inkomende overschrijving" "" "BE  123456*******7890" "/A/ W/S 00/20 BE 123456*******7890"
+    testDesc "Dupont,  Martin,  trombone" "Uitgaande overschrijving" "Ecole Muzikk" "" "Dupont, Martin, trombone Ecole Muzikk"
+    testDesc "Dupont,  Chloe,  harpe" "Uitgaande instantoverschrijving" "Ecole Muzikk" "" "Dupont, Chloe, harpe Ecole Muzikk"
+    testDesc "" "Betaling Bancontact" "1000PATTES S.A.          LIBIN" "" "1000PATTES S.A. LIBIN"
   describe "works for examples" $ do
     describe "parses xlsx into UnstructuredData" $ do
       let unstructured = Lib.parseXlsxRows exampleInput
@@ -74,13 +101,13 @@ argentaParserSpecs = describe "src/ArgentaParser" $ do
           it "amountCents" $ amountCents exampleData3 `shouldBe` -20100
           it "currency" $ currency exampleData3 `shouldBe` "EUR"
           it "identifyingComment" $ identifyingComment exampleData3 `shouldBe`
-            "BE12 3456 3456 3456;17/07/2023;17/07/2023;GSRSRG;;-201,00;EUR;17/07/2023;BE55 0055 0055 0055;Abc Def Ghi;+++123/456/78901+++"
+            "BE12 3456 3456 3456;17/07/2023;17/07/2023;GSRSRG;Betaling Maestro;-201,00;EUR;17/07/2023;BE55 0055 0055 0055;Abc Def Ghi;+++123/456/78901+++"
         describe "example 4" $ do
           it "account" $ account exampleData4 `shouldBe` "BE12 3456 3456 3456"
           it "date" $ date exampleData4 `shouldBe` fromGregorian 2023 6 28
           it "otherAccount" $ otherAccount exampleData4 `shouldBe` mkNonBlankText "BE09 1011 1213 1415"
           it "otherName" $ otherName exampleData4 `shouldBe` mkNonBlankText "EMPLOYER"
-          it "description" $ description exampleData4 `shouldBe` mkNonBlankText "salary"
+          it "description" $ description exampleData4 `shouldBe` mkNonBlankText "salary EMPLOYER"
           it "amountCents" $ amountCents exampleData4 `shouldBe` 102003
           it "currency" $ currency exampleData4 `shouldBe` "EUR"
           it "identifyingComment" $ identifyingComment exampleData4 `shouldBe`
@@ -90,7 +117,7 @@ argentaParserSpecs = describe "src/ArgentaParser" $ do
           it "date" $ date exampleData5 `shouldBe` fromGregorian 2023 6 27
           it "otherAccount" $ otherAccount exampleData5 `shouldBe` mkNonBlankText "BE98 9898 9898 9898"
           it "otherName" $ otherName exampleData5 `shouldBe` mkNonBlankText "DUPOND - Dupont"
-          it "description" $ description exampleData5 `shouldBe` mkNonBlankText "Transfert"
+          it "description" $ description exampleData5 `shouldBe` mkNonBlankText "Transfert DUPOND - Dupont"
           it "amountCents" $ amountCents exampleData5 `shouldBe` 123999999
           it "currency" $ currency exampleData5 `shouldBe` "EUR"
           it "identifyingComment" $ identifyingComment exampleData5 `shouldBe`
@@ -157,7 +184,7 @@ exampleInput =
                      ,dateCell 45124.0 -- 17-07-2023
                      ,dateCell 45124.0 -- 17-07-2023
                      ,textCell "GSRSRG"
-                     ,textCell ""
+                     ,textCell "Betaling Maestro"
                      ,textCell "-201,00" -- doubleCell (-201.00)
                      ,textCell "EUR"
                      ,dateCell 45124.0 -- 17-07-2023

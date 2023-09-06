@@ -19,6 +19,7 @@ import qualified Lib
     ITransaction (..),
     IUnstructuredData (..),
     LedgerEntry (..),
+    argentaReference,
     columnsToArgenta,
     columnsToBelfius,
     compileConfigFile,
@@ -135,20 +136,17 @@ doMain AppArgs { classifiersFile = clF , inputFile = inF , pastTransactionsFile 
   script <- readAndDecodeText clF
   bankData <- readAndDecodeEitherXlsxOrText inF
   pastData <- case mbPastF of
-                Just pastF -> (extractPastRows . map T.strip . T.lines) <$> readAndDecodeText pastF
-                Nothing -> return Set.empty
-  case parseScript script >>= compileScript >>= parseBankData bankData of
+                Just pastF -> (map T.strip . T.lines) <$> readAndDecodeText pastF
+                Nothing -> return []
+  case parseScript script >>= compileScript >>= parseBankData pastData bankData of
     Left e -> e
     Right rendered ->
       mapM_ TIO.putStrLn
-          $ concat
-          $ filter (isNotIn pastData) rendered
+          $ concat rendered
   where parseScript = first print . Lib.parseConfigFileText clF
         compileScript = first print . Lib.compileConfigFile (clF, 0, 0)
-        parseBankData (Left rows) = parseArgentaBankData inF rows
-        parseBankData (Right text) = parseBelfiusBankData inF text
-        isNotIn p (firstLine:_) = not $ firstLine `Set.member` p
-        isNotIn _ [] = True
+        parseBankData prev (Left rows) = parseArgentaBankData inF prev rows
+        parseBankData prev (Right text) = parseBelfiusBankData inF prev text
 
 readAndDecodeEitherXlsxOrText :: String -> IO (Either [XL.Row] T.Text)
 readAndDecodeEitherXlsxOrText f = do
@@ -174,24 +172,41 @@ decodeToText f bytes = do
   pure fileData
 
 parseBelfiusBankData :: String  -- ^ bank data's file name (for error messages)
+                     -> [T.Text] -- ^ existing ledger file lines
                      -> T.Text  -- ^ bank data read from inF
                      -> Lib.Classifiers -- ^ functions to map transactions to output text
-                     -> Either (IO ()) [[T.Text]] -- ^ Either IO action to report the error or the list of transction descriptions
-parseBelfiusBankData inF b c = case Lib.runUnstructuredDataParser inF b of
-  Left errorAction -> Left $ print errorAction
-  Right belfiusData -> Right <$> map (uncurry $ renderTransaction c)
-                                   $ reverse $ zip (Lib.getRawRows belfiusData)
-                                                 $ Lib.columnsToBelfius belfiusData
+                     -> Either (IO ()) [[T.Text]] -- ^ Either IO action to report the error or the list of transaction descriptions
+parseBelfiusBankData inF pastLines b c = case Lib.runUnstructuredDataParser inF b of
+    Left errorAction -> Left $ print errorAction
+    Right belfiusData -> Right <$> filter isNotAlreadyThere
+                                        $ map (uncurry $ renderTransaction c)
+                                        $ reverse $ zip (Lib.getRawRows belfiusData)
+                                                      $ Lib.columnsToBelfius belfiusData
+  where pastData = extractPastRows pastLines
+        isNotAlreadyThere (firstLine:_) = not $ firstLine `Set.member` pastData
+        isNotAlreadyThere [] = True
 
 parseArgentaBankData :: String -- ^ bank data's file name (for error messages)
+                     -> [T.Text] -- ^ existing ledger file lines
                      -> [XL.Row]  -- ^ bank data read from inF
                      -> Lib.Classifiers -- ^ functions to map transactions to output text
-                     -> Either (IO ()) [[T.Text]] -- ^ Either IO action to report the error or the list of transction descriptions
-parseArgentaBankData inF rows classifiers = case Lib.parseXlsxRows rows of
+                     -> Either (IO ()) [[T.Text]] -- ^ Either IO action to report the error or the list of transaction descriptions
+parseArgentaBankData inF pastLines rows classifiers = case Lib.parseXlsxRows rows of
     Left errMsg -> Left . print $ inF <> ": " <> errMsg
     Right argentaData -> Right <$> map (uncurry $ renderTransaction classifiers)
-                                     $ reverse $ zip (Lib.getRawRows argentaData)
-                                                   $ Lib.columnsToArgenta argentaData
+                                     $ reverse
+                                     $ filter isNotAlreadyThere
+                                     $ zip (Lib.getRawRows argentaData)
+                                         $ Lib.columnsToArgenta argentaData
+  where pastData = Set.fromList
+                 $ filter (not . T.null)
+                 $ map extractUniqueID
+                 $ filter (prefixForRowAsComment `T.isPrefixOf`) pastLines
+        extractUniqueID = safeFifth . T.splitOn ";"
+        safeFifth (_:_:_:_:x:_) = x
+        safeFifth _ = mempty
+        isNotAlreadyThere (_, Right ad) = not $ (Lib.argentaReference ad) `Set.member` pastData
+        isNotAlreadyThere (_, Left _) = True -- let errors percolate up
 
 main :: IO ()
 main = do

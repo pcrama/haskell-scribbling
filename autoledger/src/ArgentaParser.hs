@@ -1,6 +1,9 @@
 module ArgentaParser (
     UnstructuredData(..)
+  , ArgentaTransaction(..) -- for testing purposes
+  , argentaReference
   , columnsToArgenta
+  , getArgentaDescription -- for testing purposes
   , parseAmountToCents -- for testing purposes
   , parseXlsxRows
   ) where
@@ -8,14 +11,14 @@ import Codec.Xlsx (Cell(..), CellValue(..), RowIndex(..), DateBase(..), cellValu
 import Codec.Xlsx.Parser.Stream (Row(..))
 import Control.Lens ((^.))
 import qualified Data.Text as T
-import Data.Char (digitToInt, isDigit, isSpace)
+import Data.Char (digitToInt, isDigit)
 import Data.Functor (void)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List (foldl')
 import Data.Monoid (First(..), getFirst)
 import Data.Text (Text)
 import Data.Time.Clock (UTCTime(..))
-import Data.Time.Calendar (Day(..), fromGregorian, toGregorian)
+import Data.Time.Calendar (Day(..), fromGregorian)
 import Text.Parsec
 
 import Transaction
@@ -68,61 +71,31 @@ instance ITransaction ArgentaTransaction where
   currency = _currency
   identifyingComment = getArgentaIdentifyingComment
 
-getArgentaDescription :: ArgentaTransaction -> Maybe NonBlankText
-getArgentaDescription ArgentaTransaction { _communication = Nothing, _transactionDescription = mbT@(Just _) } =
-  mbT >>= simplifyTransactionDescription
-getArgentaDescription ArgentaTransaction { _communication = mbC@(Just (NonBlankText c)), _transactionDescription = mbT, _otherName = mbO }
-  | isStructuredCommunication c = getFirst $
-      First (mbT >>= simplifyTransactionDescription)
-      <> First (joinNonBlankTextWith " " <$> mbO <*> mkNonBlankText c)
-  | otherwise = mbC >>= simplifyTransactionDescription
-  where isStructuredCommunication = T.all (\h -> isDigit h || h == '+' || h == '/') 
-getArgentaDescription ArgentaTransaction { _communication = Nothing, _transactionDescription = Nothing, _otherName = Just on } = pure on
-getArgentaDescription ArgentaTransaction { _communication = Nothing, _transactionDescription = Nothing, _otherName = Nothing } = Just uninitializedNonBlankText
+argentaReference :: ArgentaTransaction -> T.Text
+argentaReference (ArgentaTransaction { _reference = NonBlankText nb }) = nb
 
-simplifyTransactionDescription :: NonBlankText -> Maybe NonBlankText
-simplifyTransactionDescription x = squeezeBlanks x
-  >>= dropAchatBancontact
-  >>= dropAchatContactLess
-  >>= dropVirementMobile
-  >>= dropAchatParInternet
-  >>= dropPaiementViaApp
-  >>= shortenArgentRecu
-  >>= dropPaiementMaestro
-  >>= dropRefVal
-  where dropAchatBancontact = dropPrefix "ACHAT BANCONTACT AVEC CARTE N°" cardNumber
-        dropAchatContactLess = dropPrefix "ACHAT BANCONTACT CONTACTLESS AVEC CARTE N°" cardNumber
-        dropVirementMobile = dropPrefix "VIREMENT ARGENTA MOBILE VERS " $ const False
-        dropAchatParInternet = dropPrefix "ACHAT PAR INTERNET AVEC CARTE N°" cardNumber
-        argentRecuPrefix = "ARGENT RECU VIA VOTRE APP MOBILE BANKING OU VOTRE BANCONTACT-APP LE"
-        votreCarteBancairePattern = "SUR VOTRE CARTE BANCAIRE."
-        shortenArgentRecu nb@(NonBlankText y)
-          | argentRecuPrefix `T.isPrefixOf` y = let (before, after) = T.breakOn votreCarteBancairePattern y in
-              if T.null after
-              then return nb
-              else mkNonBlankText $ "Argent reçu le" <> T.drop (T.length argentRecuPrefix) before <> "via votre app" <> T.drop (T.length votreCarteBancairePattern) after
-          | otherwise = return nb
-        dropPaiementViaApp = dropPrefix "PAIEMENT VIA VOTRE APP MOBILE BANKING OU VOTRE BANCONTACT-APP A " $ const False
-        dropPaiementMaestro = dropPrefix "PAIEMENT MAESTRO " dayMonth
-        dayMonth c = isDigit c || c == ' ' || c == '-' || c == '/'
-        cardNumber c = isDigit c || c == ' ' || c == '-'
-        patternRef = " REF. : "
-        patternRefLen = T.length patternRef
-        patternVal = " VAL. "
-        patternValLen = T.length patternVal
-        dropRefVal nb@(NonBlankText y) = let (prefix, s) = T.breakOn patternRef y in
-          if T.null s
-          then Just nb
-          else let (t, suffix) = T.breakOn patternVal $ T.drop patternRefLen s in
-                 case (T.null suffix,
-                       not (T.any isSpace t)
-                       && T.all cardNumber (T.drop patternValLen suffix)) of
-                   (False, True) -> mkNonBlankText prefix
-                   _ -> Just nb
-        dropPrefix pfx extra nb@(NonBlankText y) = case T.stripPrefix pfx y of
-          Just rest -> mkNonBlankText $ T.dropWhile extra rest
-          Nothing -> Just nb
-        squeezeBlanks (NonBlankText y) = mkNonBlankText $ squeeze y
+getArgentaDescription :: ArgentaTransaction -> Maybe NonBlankText
+getArgentaDescription ArgentaTransaction { _communication = Just (NonBlankText c), _otherName = on, _otherAccount = oa } =
+  let sqComm = squeeze c
+      mbOther = getFirst $ First on <> First oa
+      isStructuredCommunication = T.all (\h -> isDigit h || h == '+' || h == '/') sqComm
+  in case mbOther of
+    Nothing -> simplifyTransactionDescription sqComm
+    Just (NonBlankText other) ->
+      let sqOther = squeeze other
+      in case (isStructuredCommunication, T.toLower sqOther `T.isInfixOf` T.toLower sqComm) of
+        (True, _) -> simplifyTransactionDescription $ sqOther <> " " <> sqComm
+        (False, True) -> simplifyTransactionDescription sqComm
+        (False, False) -> simplifyTransactionDescription $ sqComm <> " " <> sqOther
+getArgentaDescription ArgentaTransaction { _communication = Nothing, _transactionDescription = Just (NonBlankText td), _otherName = Nothing, _otherAccount = Nothing } =
+  simplifyTransactionDescription td
+getArgentaDescription ArgentaTransaction { _communication = Nothing, _otherName = Nothing, _transactionDescription = Nothing, _otherAccount = Nothing } =
+  pure uninitializedNonBlankText
+getArgentaDescription ArgentaTransaction { _communication = Nothing, _otherName = Just (NonBlankText on) } = simplifyTransactionDescription on
+getArgentaDescription ArgentaTransaction { _communication = Nothing, _otherAccount = Just (NonBlankText oa) } = simplifyTransactionDescription oa
+
+simplifyTransactionDescription :: T.Text -> Maybe NonBlankText
+simplifyTransactionDescription = mkNonBlankText . squeeze
 
 parseUnsignedInt :: Monad m => ParsecT Text () m Int
 parseUnsignedInt = digitListToInt <$> many1 (satisfy isSeparatorOrDigit)
@@ -155,29 +128,16 @@ columnsToArgenta UnstructuredData { udColumnNames = columnNames, udData = dataRo
 
 getArgentaIdentifyingComment :: ArgentaTransaction -> Text
 getArgentaIdentifyingComment at = (_account at
-                                   <> ";" <> argentaRenderGregorian (_accountingDate at)
-                                   <> ";" <> argentaRenderGregorian (_valueDate at)
+                                   <> ";" <> renderGregorian (_accountingDate at)
+                                   <> ";" <> renderGregorian (_valueDate at)
                                    <> ";" <> let NonBlankText s = _reference at in s
                                    <> ";" <> renderNonBlankText (_transactionDescription at)
-                                   <> ";" <> argentaRenderAmount (_amountCents at)
+                                   <> ";" <> renderAmount (_amountCents at)
                                    <> ";" <> _currency at
-                                   <> ";" <> argentaRenderGregorian (_transactionDate at)
+                                   <> ";" <> renderGregorian (_transactionDate at)
                                    <> ";" <> renderNonBlankText (_otherAccount at)
                                    <> ";" <> renderNonBlankText (_otherName at)
                                    <> ";" <> renderNonBlankText (_communication at))
-
-argentaRenderAmount :: Int -> T.Text
-argentaRenderAmount amount = sign <> packShow units <> "," <> packShow0Pad 2 cents
-  where (units, cents) = abs amount `divMod` 100
-        sign = if amount < 0 then "-" else T.empty
-
-argentaRenderGregorian :: Day -> T.Text
-argentaRenderGregorian t = packShow0Pad 2 dt <> "/" <> packShow0Pad 2 mn <> "/" <> packShow yr
-  where (yr, mn, dt) = toGregorian t
-
-renderNonBlankText :: Maybe NonBlankText -> T.Text
-renderNonBlankText Nothing = ""
-renderNonBlankText (Just (NonBlankText t)) = t
 
 pickCellText :: Maybe T.Text -- ^ whether a (and which) default text can be substituted for Cell=Nothing or a Cell whose _cellValue=Nothing
               -> Filler T.Text a -- ^ a filler taking a cell text, to be transformed into a ...
