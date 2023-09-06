@@ -274,6 +274,7 @@ type Env z = String -> Maybe (Compiled z)
 -- (or <bool1>...) :: Bool
 -- account :: Text
 -- other-account :: Text
+-- other-name :: Text
 -- description :: Text
 
 compile :: (MonadReader (Env b) m, MonadError (CompilerError b) m)
@@ -496,6 +497,7 @@ getSym "t" p f = f $ AsBool p $ Constant True
 getSym "nil" p f = f $ AsBool p $ Constant False
 getSym "account" p f = f $ AsText p Account
 getSym "other-account" p f = f $ AsText p OtherAccount
+getSym "other-name" p f = f $ AsText p OtherName
 getSym "description" p f = f $ AsText p Description
 getSym s v f = do
   env <- ask

@@ -81,6 +81,7 @@ data TransactionEval a where
   Or :: TransactionEval Bool -> TransactionEval Bool -> TransactionEval Bool
   Account :: TransactionEval T.Text
   OtherAccount :: TransactionEval T.Text -- `Nothing` becomes `T.empty`.
+  OtherName :: TransactionEval T.Text -- `Nothing` becomes `T.empty`.
   Description :: TransactionEval T.Text
 
 instance Show a => Show (TransactionEval a) where
@@ -95,6 +96,7 @@ instance Show a => Show (TransactionEval a) where
   show (Or x y) = "(Or "<> show x <> " " <> show y <> ")"
   show Account = "account"
   show OtherAccount = "other-account"
+  show OtherName = "other-name"
   show Description = "description"
 
 eval :: (ITransaction t, MonadReader t m) => TransactionEval a -> m a
@@ -127,6 +129,11 @@ eval Account = asks account
 eval OtherAccount = do
   oa <- asks otherAccount
   return $ case oa of
+             Just (NonBlankText x) -> x
+             Nothing -> T.empty
+eval OtherName = do
+  on <- asks otherName
+  return $ case on of
              Just (NonBlankText x) -> x
              Nothing -> T.empty
 eval Description = do

@@ -102,15 +102,15 @@ configLanguageSpecs = describe "src/ConfigLanguage" $ do
        <$> parseConfigFileText "test 1" "(define a ())\n(define b \"c\")")
       `shouldBe` Right [vList [vSym "define", vSym "a", vNil]
                        , vList [vSym "define", vSym "b", vStr "c"]]
-  let ev cp a o d = evalForTransaction cp $ Transaction {
-                                              _account = a,
-                                              _otherAccount = mkNonBlankText o,
-                                              _description = mkNonBlankText d,
-                                              _otherName = Nothing,
-                                              _amountCents = 0,
-                                              _date = fromGregorian 2022 3 30,
-                                              _identifyingComment = "This is a test",
-                                              _currency = "EUR" }
+  let ev cp a o d n = evalForTransaction cp $ Transaction {
+                                                _account = a,
+                                                _otherAccount = mkNonBlankText o,
+                                                _description = mkNonBlankText d,
+                                                _otherName = mkNonBlankText n,
+                                                _amountCents = 0,
+                                                _date = fromGregorian 2022 3 30,
+                                                _identifyingComment = "This is a test",
+                                                _currency = "EUR" }
   let itIsOk = it "compiles correctly" $ True `shouldBe` True
   let shouldBeDiff c = it "Is the expected compilation result" $
         ("Unexpected compilation result: " <> show c) `shouldBe` "different"
@@ -144,28 +144,28 @@ configLanguageSpecs = describe "src/ConfigLanguage" $ do
       c -> shouldBeDiff c
     doTest "(lookup test-pair ((\"a\" (pair \"s\" \"t\"))) account)" $ \case
       Right (AsTextPair _ cp) -> context "compiled code works" $ do
-        it "ex1" $ ev cp "a" "?" "?" `shouldBe` ("s", "t")
-        it "ex2" $ ev cp "b" "?" "?" `shouldBe` ("1st", "2nd")
+        it "ex1" $ ev cp "a" "?" "?" "?" `shouldBe` ("s", "t")
+        it "ex2" $ ev cp "b" "?" "?" "?" `shouldBe` ("1st", "2nd")
       c -> shouldBeDiff c
   describe "compile (bool)" $ do
     doTest "(and (contains account \"a\") (contains description \"d\"))" $ \case
       Right (AsBool _ cp) -> context "compiled code works" $ do
-        it "a, d -> True" $ ev cp "a" "o" "d" `shouldBe` True
-        it "a, x -> False" $ ev cp "a" "o" "x" `shouldBe` False
-        it "x, d -> False" $ ev cp "x" "o" "d" `shouldBe` False
-        it "x, y -> False" $ ev cp "x" "o" "y" `shouldBe` False
+        it "a, d -> True" $ ev cp "a" "o" "d" "?" `shouldBe` True
+        it "a, x -> False" $ ev cp "a" "o" "x" "?" `shouldBe` False
+        it "x, d -> False" $ ev cp "x" "o" "d" "?" `shouldBe` False
+        it "x, y -> False" $ ev cp "x" "o" "y" "?" `shouldBe` False
       c -> it "Is the expected compilation result" $
         ("Unexpected compilation result: " <> show c) `shouldBe` "And (Contains Account (Constant \"a\")) (Contains Description (Constant \"b\"))"
     doTest "(or (cond t ((and (contains account \"a\") (contains description \"d\")) nil)) () nil (contains other-account \"oa\"))" $ \case
       Right (AsBool _ cp) -> context "compiled code works" $ do
-        it "a, oa, d -> True" $ ev cp "a" "oa" "d" `shouldBe` True
-        it "a, x, d -> False" $ ev cp "a" "x" "d" `shouldBe` False
-        it "a, x, y -> True" $ ev cp "a" "x" "y" `shouldBe` True
-        it "x, y, z -> True" $ ev cp "x" "y" "z" `shouldBe` True
+        it "a, oa, d -> True" $ ev cp "a" "oa" "d" "?" `shouldBe` True
+        it "a, x, d -> False" $ ev cp "a" "x" "d" "?" `shouldBe` False
+        it "a, x, y -> True" $ ev cp "a" "x" "y" "?" `shouldBe` True
+        it "x, y, z -> True" $ ev cp "x" "y" "z" "?" `shouldBe` True
       c -> shouldBeDiff c
   describe "compile (pair)" $ do
     doTest "(pair (snd (pair \"a\" \"z\")) (fst (pair \"y\" \"c\")))" $ \case
-      Right (AsTextPair _ cp) -> it "compiled code works" $ ev cp "a" "b" "c" `shouldBe` ("z", "y")
+      Right (AsTextPair _ cp) -> it "compiled code works" $ ev cp "a" "b" "c" "?" `shouldBe` ("z", "y")
       c ->
         it "Is the expected compilation result" $
           ("Unexpected compilation result: " <> show c) `shouldBe` "different"
@@ -191,11 +191,11 @@ configLanguageSpecs = describe "src/ConfigLanguage" $ do
           ("Unexpected compilation result: " <> show c) `shouldBe` "Select Acccount f Description"
     doTest "(lookup (cond other-account ((contains account \"a\") \"a\") ((contains description \"b\") \"b\")) ((\"a1\" \"r1\") (\"a2\" \"r2\")) (fst (pair account other-account)))" $ \case
       Right (AsText _ cp) -> context "compiled code works" $ do
-        it "a1 -> r1" $ ev cp "a1" "o" "d" `shouldBe` "r1"
-        it "a2 -> r2" $ ev cp "a2" "o" "d" `shouldBe` "r2"
-        it "a3 -> a" $ ev cp "a3" "o" "d" `shouldBe` "a"
-        it "4b (desc=4b) -> a" $ ev cp "4b" "o" "4b" `shouldBe` "b"
-        it "z (desc=z) -> o" $ ev cp "z" "o" "z" `shouldBe` "o"
+        it "a1 -> r1" $ ev cp "a1" "o" "d" "?" `shouldBe` "r1"
+        it "a2 -> r2" $ ev cp "a2" "o" "d" "?" `shouldBe` "r2"
+        it "a3 -> a" $ ev cp "a3" "o" "d" "?" `shouldBe` "a"
+        it "4b (desc=4b) -> a" $ ev cp "4b" "o" "4b" "?" `shouldBe` "b"
+        it "z (desc=z) -> o" $ ev cp "z" "o" "z" "?" `shouldBe` "o"
       c -> shouldBeDiff c
     doTest "test-true" $ \case
       Right (AsBool _ (Constant x)) -> it "is compiled correctly" $ x `shouldBe` True
@@ -219,12 +219,12 @@ configLanguageSpecs = describe "src/ConfigLanguage" $ do
          \               ((\"zzz\" \"= zzz\"))\n\
          \               account)))" $ \case
       Right (AsText _ cp) -> context "compiled code works" $ do
-        it "ex1" $ ev cp "x" "x" "see test-value in descr" `shouldBe` "see test-value in descr"
-        it "ex2" $ ev cp "x" "x" "x" `shouldBe` "1st"
-        it "ex3" $ ev cp "x" "b" "x" `shouldBe` "2nd"
-        it "ex4" $ ev cp "zzz" "b" "x" `shouldBe` "= zzz"
-        it "ex5" $ ev cp "zzz" "x" "b" `shouldBe` "= zzz"
-        it "ex6" $ ev cp "a" "?" "?" `shouldBe` "account is 'a'"
+        it "ex1" $ ev cp "x" "x" "see test-value in descr" "?" `shouldBe` "see test-value in descr"
+        it "ex2" $ ev cp "x" "x" "x" "?" `shouldBe` "1st"
+        it "ex3" $ ev cp "x" "b" "x" "?" `shouldBe` "2nd"
+        it "ex4" $ ev cp "zzz" "b" "x" "?" `shouldBe` "= zzz"
+        it "ex5" $ ev cp "zzz" "x" "b" "?" `shouldBe` "= zzz"
+        it "ex6" $ ev cp "a" "?" "?" "?" `shouldBe` "account is 'a'"
       c -> shouldBeDiff c
   describe "testParseThenCompileFile" $ do
     let doTestFile n s f = describe n $ f $ testParseThenCompileFile n s
@@ -241,6 +241,7 @@ configLanguageSpecs = describe "src/ConfigLanguage" $ do
       Right c -> shouldBeDiff c
     doTestFile "valid ex1"
       "(setq info (cond (pair description \"Expenses:\")\n\
+      \                 ((contains other-name \"other-name\") (pair other-name \"Expenses:Misc\"))\n\
       \                 ((contains other-account \"restaurant\") (pair description \"Expenses:Food\"))\n\
       \                 ((contains other-account \"doctor\") (pair \"Doctor visit\"\n\
       \                                                            (cond \"Expenses:Health\"\n\
@@ -252,20 +253,21 @@ configLanguageSpecs = describe "src/ConfigLanguage" $ do
       Left e -> it "should parse & compile correctly" $ show e `shouldBe` "different"
       Right c -> context "compiled values evaluate correctly" $ do
         context "Asset classifier" $ do
-          let go s e = it s $ ev (getAssetClassifier c) (T.pack s) "?" "?" `shouldBe` e
+          let go s e = it s $ ev (getAssetClassifier c) (T.pack s) "?" "?" "?" `shouldBe` e
           go "BE51-1234" "Asset:Bank"
           go "BE62-5678" "Asset:Savings"
           go "BE73-0001" "Asset:"
         context "Ledger text classifier" $ do
-          let go d o e = it (d <> " -> " <> o) $ ev (getLedgerTextClassifier c) "?" (T.pack o) (T.pack d) `shouldBe` e
+          let go d o e = it (d <> " -> " <> o) $ ev (getLedgerTextClassifier c) "?" (T.pack o) (T.pack d) "?" `shouldBe` e
           go "descr" "?" "descr"
           go "?" "doctor" "Doctor visit"
           go "pizza vesuvio" "restaurant" "pizza vesuvio"
         context "Other asset classifier" $ do
-          let go d o e = it (d <> " -> " <> o) $ ev (getLedgerOtherAssetClassifier c) "?" (T.pack o) (T.pack d) `shouldBe` e
-          go "descr" "?" "Expenses:"
-          go "?" "doctor" "Expenses:Health"
-          go "Surgery for patient 990101" "doctor" "Expenses:Health:MrA"
-          go "Cast for patient 000202" "doctor" "Expenses:Health:MsB"
-          go "Blood test for patient 680923" "doctor" "Expenses:Health"
-          go "pizza vesuvio" "restaurant" "Expenses:Food"
+          let go d o e n = it (d <> " -> " <> o) $ ev (getLedgerOtherAssetClassifier c) "?" (T.pack o) (T.pack d) n `shouldBe` e
+          go "descr" "?" "Expenses:" "?"
+          go "?" "doctor" "Expenses:Health" ""
+          go "Surgery for patient 990101" "doctor" "Expenses:Health:MrA" "?"
+          go "Cast for patient 000202" "doctor" "Expenses:Health:MsB" "?"
+          go "Blood test for patient 680923" "doctor" "Expenses:Health" "?"
+          go "pizza vesuvio" "restaurant" "Expenses:Food" ""
+          go "to other-name" "restaurant" "Expenses:Misc" "other-name"
