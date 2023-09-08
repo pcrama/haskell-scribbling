@@ -5,6 +5,8 @@ import Control.Lens (toListOf, traversed)
 import qualified Data.ByteString as BL
 import Data.Bifunctor (first)
 import Data.Char (isSpace)
+import Data.Either (partitionEithers)
+import Data.List.NonEmpty (NonEmpty(..), toList)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -102,14 +104,14 @@ renderLedgerEntry le =
 
 data AppArgs = AppArgs {
   classifiersFile :: String
-  , inputFile :: String
+  , inputFiles :: NonEmpty String
   , pastTransactionsFile :: Maybe String
   }
 
 defaultAppArgs :: AppArgs
 defaultAppArgs = AppArgs {
   classifiersFile = "app-config.lisp"
-  , inputFile = "script-input.txt"
+  , inputFiles = "script-input.txt" :| []
   , pastTransactionsFile = Nothing
   }
 
@@ -118,12 +120,14 @@ parseArgs topXs@(('-':_):_) = go defaultAppArgs topXs
   where go a [] = Right a
         go a ("-s":f:xs) = go (a { classifiersFile = f }) xs
         go a ("--script":f:xs) = go (a { classifiersFile = f }) xs
-        go a ("-i":f:xs) = go (a { inputFile = f }) xs
-        go a ("--input":f:xs) = go (a { inputFile = f }) xs
+        go a ("-i":xs) = gatherFiles a xs
+        go a ("--input":xs) = gatherFiles a xs
         go a ("-p":f:xs) = go (a { pastTransactionsFile = Just f }) xs
         go a ("--past":f:xs) = go (a { pastTransactionsFile = Just f }) xs
         go _ (e:_) = Left $ "Unkown command line arg: '" <> e <> "'"
-parseArgs [c, i] = pure AppArgs { classifiersFile = c, inputFile = i, pastTransactionsFile = Nothing }
+        gatherFiles a (x:xs) = Right $ a { inputFiles= x:|xs }
+        gatherFiles _ [] = Left "No input files"
+parseArgs [c, i] = pure AppArgs { classifiersFile = c, inputFiles = i:|[], pastTransactionsFile = Nothing }
 parseArgs [] = pure defaultAppArgs
 parseArgs xs = Left $ "Can't parse command line args" <> foldMap (" " <>) xs
 
@@ -132,21 +136,40 @@ extractPastRows = Set.fromList
                 . filter (prefixForRowAsComment `T.isPrefixOf`)
 
 doMain :: AppArgs -> IO ()
-doMain AppArgs { classifiersFile = clF , inputFile = inF , pastTransactionsFile = mbPastF } = do
+doMain AppArgs { classifiersFile = clF , inputFiles = inFiles , pastTransactionsFile = mbPastF } = do
   script <- readAndDecodeText clF
-  bankData <- readAndDecodeEitherXlsxOrText inF
   pastData <- case mbPastF of
                 Just pastF -> (map T.strip . T.lines) <$> readAndDecodeText pastF
                 Nothing -> return []
-  case parseScript script >>= compileScript >>= parseBankData pastData bankData of
+  case parseScript script >>= compileScript of
     Left e -> e
-    Right rendered ->
-      mapM_ TIO.putStrLn
-          $ concat rendered
+    Right classifiers -> do
+      results <- traverse (parseBankData pastData classifiers) $ inFiles
+      let (errorMessages, rendered) = partitionEithers $ toList results
+      _ <- sequence errorMessages
+      mapM_ TIO.putStrLn $ concat $ foldr mergeSortedEntries [] rendered
   where parseScript = first print . Lib.parseConfigFileText clF
         compileScript = first print . Lib.compileConfigFile (clF, 0, 0)
-        parseBankData prev (Left rows) = parseArgentaBankData inF prev rows
-        parseBankData prev (Right text) = parseBelfiusBankData inF prev text
+        parseBankData :: [T.Text] -> Lib.Classifiers -> String -> IO (Either (IO ()) [[T.Text]])
+        parseBankData prev classifiers inF = do
+          bankData <- readAndDecodeEitherXlsxOrText inF
+          pure $ case bankData of
+            Left rows -> parseArgentaBankData prev classifiers inF rows
+            Right text -> parseBelfiusBankData prev classifiers inF text
+        mergeSortedEntries :: [[T.Text]] -> [[T.Text]] -> [[T.Text]]
+        mergeSortedEntries xs [] = xs
+        mergeSortedEntries [] ys = ys
+        mergeSortedEntries xx@(aa@(_:a:_):xs) yy@(bb@(_:b:_):ys)
+          | a <= b = aa:mergeSortedEntries xs yy
+          | otherwise = bb:mergeSortedEntries xx ys
+        -- These five cases should never happen:
+        mergeSortedEntries ([]:xs) ys = mergeSortedEntries xs ys
+        mergeSortedEntries xs ([]:ys) = mergeSortedEntries xs ys
+        mergeSortedEntries xx@(aa@[a]:xs) yy@(bb@[b]:ys)
+          | a <= b = aa:mergeSortedEntries xs yy
+          | otherwise = bb:mergeSortedEntries xx ys
+        mergeSortedEntries (aa@[_]:xs) yy = aa:mergeSortedEntries xs yy
+        mergeSortedEntries xx (bb@[_]:ys) = bb:mergeSortedEntries xx ys
 
 readAndDecodeEitherXlsxOrText :: String -> IO (Either [XL.Row] T.Text)
 readAndDecodeEitherXlsxOrText f = do
@@ -171,12 +194,12 @@ decodeToText f bytes = do
   putStrLn $ f <> " uses " <> encoding <> "."
   pure fileData
 
-parseBelfiusBankData :: String  -- ^ bank data's file name (for error messages)
-                     -> [T.Text] -- ^ existing ledger file lines
-                     -> T.Text  -- ^ bank data read from inF
+parseBelfiusBankData :: [T.Text] -- ^ existing ledger file lines
                      -> Lib.Classifiers -- ^ functions to map transactions to output text
+                     -> String -- ^ bank data's file name (for error messages)
+                     -> T.Text -- ^ bank data read from inF
                      -> Either (IO ()) [[T.Text]] -- ^ Either IO action to report the error or the list of transaction descriptions
-parseBelfiusBankData inF pastLines b c = case Lib.runUnstructuredDataParser inF b of
+parseBelfiusBankData pastLines c inF b = case Lib.runUnstructuredDataParser inF b of
     Left errorAction -> Left $ print errorAction
     Right belfiusData -> Right <$> filter isNotAlreadyThere
                                         $ map (uncurry $ renderTransaction c)
@@ -186,12 +209,12 @@ parseBelfiusBankData inF pastLines b c = case Lib.runUnstructuredDataParser inF 
         isNotAlreadyThere (firstLine:_) = not $ firstLine `Set.member` pastData
         isNotAlreadyThere [] = True
 
-parseArgentaBankData :: String -- ^ bank data's file name (for error messages)
-                     -> [T.Text] -- ^ existing ledger file lines
-                     -> [XL.Row]  -- ^ bank data read from inF
+parseArgentaBankData :: [T.Text] -- ^ existing ledger file lines
                      -> Lib.Classifiers -- ^ functions to map transactions to output text
+                     -> String -- ^ bank data's file name (for error messages)
+                     -> [XL.Row] -- ^ bank data read from inF
                      -> Either (IO ()) [[T.Text]] -- ^ Either IO action to report the error or the list of transaction descriptions
-parseArgentaBankData inF pastLines rows classifiers = case Lib.parseXlsxRows rows of
+parseArgentaBankData pastLines classifiers inF rows = case Lib.parseXlsxRows rows of
     Left errMsg -> Left . print $ inF <> ": " <> errMsg
     Right argentaData -> Right <$> map (uncurry $ renderTransaction classifiers)
                                      $ reverse
