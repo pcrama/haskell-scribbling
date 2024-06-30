@@ -14,6 +14,7 @@ import Data.Text.Encoding (decodeLatin1, decodeUtf8')
 import qualified Data.Text.IO as TIO
 import Data.Time (toGregorian)
 import System.Environment (getArgs)
+import System.IO (hPutStrLn, stderr)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import qualified Codec.Xlsx.Parser.Stream as XL
 import qualified Lib
@@ -33,6 +34,9 @@ import qualified Lib
     runUnstructuredDataParser,
     squeeze,
   )
+
+putErrLn :: String -> IO ()
+putErrLn = hPutStrLn stderr
 
 newline :: T.Text
 newline = "\n"
@@ -173,6 +177,7 @@ doMain AppArgs { classifiersFile = clF , inputFiles = inFiles , pastTransactions
 
 readAndDecodeEitherXlsxOrText :: String -> IO (Either [XL.Row] T.Text)
 readAndDecodeEitherXlsxOrText f = do
+  putErrLn $ "Looking at file type of '" <> f <> "'"
   bytes <- BL.readFile f
   case BL.take 4 bytes of
     -- Xlsx magic number = ZIP file magic numbers = file starts with "PK\x03\x04"
@@ -191,7 +196,7 @@ decodeToText f bytes = do
   let (encoding, fileData) = case decodeUtf8' bytes of
         Left _ -> ("latin1", decodeLatin1 bytes)
         Right d -> ("utf8", d)
-  putStrLn $ f <> " uses " <> encoding <> "."
+  putErrLn $ "'" <> f <> "' uses " <> encoding <> "."
   pure fileData
 
 parseBelfiusBankData :: [T.Text] -- ^ existing ledger file lines
@@ -236,7 +241,7 @@ main = do
   setLocaleEncoding utf8
   args <- getArgs
   case parseArgs args of
-    Left errorMessage -> foldMap putStrLn [
+    Left errorMessage -> foldMap putErrLn [
       errorMessage
       , "cabal new-run exe:autoledger -- [(-s | --script) app-config.lisp]\
                                        \ [(-i | --input) script-input.txt]\
