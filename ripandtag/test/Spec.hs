@@ -173,7 +173,7 @@ prop_allInputsToShellCommandsCount :: Key -- ^Key to modify value for
                                    -> PreciseTrackRipSpec -- ^Initial PreciseTrackRipSpec
                                    -> Bool
 prop_allInputsToShellCommandsCount k v prs =
-    (prs == newValue) || (cmd1 /= cmd2)
+    (prs == newValue) || (all shellCommandsDiffer [minBound .. maxBound])
   where newFieldString = if v > 0 then Just $ show v else Nothing
         newFieldInt = if v > 0 then Just v else Nothing
         newValue = case k of
@@ -184,7 +184,7 @@ prop_allInputsToShellCommandsCount k v prs =
           Album -> prs { album = newFieldString }
           Genre -> prs { genre = newFieldString }
           Year -> prs { year = newFieldInt }
-        [cmd1, cmd2] = map shellCommands [[prs], [newValue]]
+        shellCommandsDiffer r = shellCommands r [prs] /= shellCommands r [newValue]
 
 main :: IO ()
 main = hspec $ do

@@ -88,6 +88,7 @@ safeTrackName x = makeSafe
           in Just $ if l < w then replicate (w - l) '0' ++ s else s
 
 data Extractor = Icedax | Cdda2Wav
+  deriving (Enum, Bounded)
 
 shellCommands :: Extractor -> [PreciseTrackRipSpec] -> [String]
 shellCommands extractor = map shellCommand
