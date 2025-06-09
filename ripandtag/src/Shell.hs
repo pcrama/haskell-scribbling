@@ -110,6 +110,7 @@ shellCommands extractor = map shellCommand
                . mkAccStringField album "tl"
                . mkAccStringField genre "tg"
                . mkAccIntField year "ty"
+               . mkAccStringField comment "tc"
                $ " --tn "
                  ++ case total trs of
                       Nothing -> trackStr

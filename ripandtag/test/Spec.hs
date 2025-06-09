@@ -184,6 +184,7 @@ prop_allInputsToShellCommandsCount k v prs =
           Album -> prs { album = newFieldString }
           Genre -> prs { genre = newFieldString }
           Year -> prs { year = newFieldInt }
+          Comment -> prs { comment = newFieldString }
         shellCommandsDiffer r = shellCommands r [prs] /= shellCommands r [newValue]
 
 main :: IO ()
