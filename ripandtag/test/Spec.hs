@@ -159,9 +159,16 @@ testParseCRS indent s expected =
 testParseCRSfail :: Int -> [Char] -> SpecWith ()
 testParseCRSfail indent s =
   it ("should fail for '" ++ s ++ "'")
-   $ assertEqual ("testParseCRS of " ++ s)
+   $ assertEqual ("testParseCRSfail of " ++ s)
                  []
                $ readP_to_S (parseCRS indent) s
+
+testParseSpec :: [Char] -> [CDRipSpec] -> SpecWith ()
+testParseSpec s expected =
+  it ("should work for '" ++ s ++ "'")
+   $ assertEqual ("testParseSpec of " ++ s)
+                 [(expected, "")]
+               $ readP_to_S parseSpec s
 
 -- If we replace an arbitrary field in a PreciseTrackRipSpec by an
 -- arbitrary value and the resulting PreciseTrackRipSpec is different,
@@ -222,6 +229,35 @@ main = hspec $ do
     testParseCRSfail 0 "-  unknown key   :  g:g "
     testParseCRSfail 2 "-  Title   :  dedent "
     testParseCRSfail 0 "  -  Title   :  indent "
+  describe "testParseSpec" $ do
+    testParseSpec "- album: A\n\
+                  \  genre: Blues\n\
+                  \  - Title: T1\n\
+                  \    comment: C1\n\
+                  \  - Title: T2"
+                $ [CRS { info = (Album, "A") :| [(Genre, "Blues")]
+                       , overrides = [CRS { info = (Title, "T1") :| [(Comment, "C1")], overrides =[] }
+                                     , CRS { info = (Title, "T2") :| [], overrides =[] }] }]
+    testParseSpec "- album: A\n\
+                  \  genre: Blues\n\
+                  \  - Title: T1\n\
+                  \    comment: C1\n\
+                  \- album: B\n\
+                  \  - genre: Rock\n\
+                  \    - Title: T2\n\
+                  \  - Genre: Classical\n\
+                  \    Comment: C2\n\
+                  \    | Title | track |\n\
+                  \    | T3    | 3     |\n"
+                $ [CRS { info = (Album, "A") :| [(Genre, "Blues")]
+                       , overrides = [CRS { info = (Title, "T1") :| [(Comment, "C1")], overrides =[] }] }
+                  , CRS { info = (Album, "B") :| []
+                        , overrides = [CRS { info = (Genre, "Rock") :| []
+                                           , overrides = [CRS { info = (Title, "T2") :| []
+                                                              , overrides = [] }]}
+                                      , CRS { info = (Genre, "Classical") :| [(Comment, "C2")]
+                                            , overrides = [CRS { info = (Title, "T3") :| [(Track, "3")]
+                                                               , overrides = [] }]}]}]
   describe "parseCellData" $ do
     testParseCellData "   " ""
     testParseCellData " A  " "A"
