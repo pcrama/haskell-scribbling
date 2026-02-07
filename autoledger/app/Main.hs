@@ -1,7 +1,5 @@
-{-# LANGUAGE TupleSections #-}
 module Main where
 
-import Control.Lens (toListOf, traversed)
 import qualified Data.ByteString as BL
 import Data.Bifunctor (first)
 import Data.Char (isSpace)
@@ -143,14 +141,14 @@ doMain :: AppArgs -> IO ()
 doMain AppArgs { classifiersFile = clF , inputFiles = inFiles , pastTransactionsFile = mbPastF } = do
   script <- readAndDecodeText clF
   pastData <- case mbPastF of
-                Just pastF -> (map T.strip . T.lines) <$> readAndDecodeText pastF
+                Just pastF -> map T.strip . T.lines <$> readAndDecodeText pastF
                 Nothing -> return []
   case parseScript script >>= compileScript of
     Left e -> e
     Right classifiers -> do
-      results <- traverse (parseBankData pastData classifiers) $ inFiles
+      results <- traverse (parseBankData pastData classifiers) inFiles
       let (errorMessages, rendered) = partitionEithers $ toList results
-      _ <- sequence errorMessages
+      sequence_ errorMessages
       mapM_ TIO.putStrLn $ concat $ foldr mergeSortedEntries [] rendered
   where parseScript = first print . Lib.parseConfigFileText clF
         compileScript = first print . Lib.compileConfigFile (clF, 0, 0)
@@ -185,8 +183,19 @@ readAndDecodeEitherXlsxOrText f = do
     _ -> Right <$> decodeToText f bytes
 
 decodeXlsxToRows :: String -> IO [XL.Row]
-decodeXlsxToRows inF = fmap (toListOf $ traversed . XL.si_row)
-                          $ XL.runXlsxM inF $ XL.collectItems $ XL.makeIndex 1 -- 1st sheet
+decodeXlsxToRows inF = do
+    itemsOrError <- getItemsOfUniqueSheet
+    case itemsOrError of
+      Left err -> putErrLn err >> return []
+      Right rows -> return rows
+  where getItemsOfUniqueSheet :: IO (Either String [XL.Row])
+        getItemsOfUniqueSheet = XL.runXlsxM inF $ do
+          XL.WorkbookInfo sheets <- XL.getWorkbookInfo
+          case sheets of
+            [] -> return $ Left $ "No sheets in " <> inF
+            [onlySheet] -> let sheetId = XL.getSheetIdentifier onlySheet
+                            in Right <$> XL.collectItemsIdentifier sheetId
+            _:_:_ -> return $ Left $ "More than one sheet in " <> inF
 
 readAndDecodeText :: String -> IO T.Text
 readAndDecodeText f = BL.readFile f >>= decodeToText f
@@ -233,7 +242,7 @@ parseArgentaBankData pastLines classifiers inF rows = case Lib.parseXlsxRows row
         extractUniqueID = safeFifth . T.splitOn ";"
         safeFifth (_:_:_:_:x:_) = x
         safeFifth _ = mempty
-        isNotAlreadyThere (_, Right ad) = not $ (Lib.argentaReference ad) `Set.member` pastData
+        isNotAlreadyThere (_, Right ad) = not $ Lib.argentaReference ad `Set.member` pastData
         isNotAlreadyThere (_, Left _) = True -- let errors percolate up
 
 main :: IO ()
