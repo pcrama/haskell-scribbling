@@ -5,7 +5,7 @@ import Data.Bifunctor (first)
 import Data.Char (isSpace)
 import Data.Either (partitionEithers)
 import Data.List.NonEmpty (NonEmpty(..), toList)
-import Data.Set (Set)
+-- import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeLatin1, decodeUtf8')
@@ -97,9 +97,9 @@ renderTransaction c _ (Right transaction) =
 
 renderLedgerEntry :: Lib.LedgerEntry -> [T.Text]
 renderLedgerEntry le =
-  [ copyRowAsComment $ Lib.precedingComment le,
-    renderDay le <> " " <> renderDescription le
-  ]
+  [ renderDay le <> " " <> renderDescription le,
+    "    " <> (copyRowAsComment $ Lib.precedingComment le)
+   ]
   ++ renderAccountUpdate le
   -- Add trailing newline with [""]
   ++ [""]
@@ -133,9 +133,8 @@ parseArgs [c, i] = pure AppArgs { classifiersFile = c, inputFiles = i:|[], pastT
 parseArgs [] = pure defaultAppArgs
 parseArgs xs = Left $ "Can't parse command line args" <> foldMap (" " <>) xs
 
-extractPastRows :: [T.Text] -> Set T.Text
-extractPastRows = Set.fromList
-                . filter (prefixForRowAsComment `T.isPrefixOf`)
+extractPastRows :: [T.Text] -> [T.Text]
+extractPastRows = filter (prefixForRowAsComment `T.isPrefixOf`) . map T.stripStart
 
 doMain :: AppArgs -> IO ()
 doMain AppArgs { classifiersFile = clF , inputFiles = inFiles , pastTransactionsFile = mbPastF } = do
@@ -161,17 +160,17 @@ doMain AppArgs { classifiersFile = clF , inputFiles = inFiles , pastTransactions
         mergeSortedEntries :: [[T.Text]] -> [[T.Text]] -> [[T.Text]]
         mergeSortedEntries xs [] = xs
         mergeSortedEntries [] ys = ys
-        mergeSortedEntries xx@(aa@(_:a:_):xs) yy@(bb@(_:b:_):ys)
+        mergeSortedEntries xx@(aa@(a:_):xs) yy@(bb@(b:_):ys)
           | a <= b = aa:mergeSortedEntries xs yy
           | otherwise = bb:mergeSortedEntries xx ys
         -- These five cases should never happen:
         mergeSortedEntries ([]:xs) ys = mergeSortedEntries xs ys
         mergeSortedEntries xs ([]:ys) = mergeSortedEntries xs ys
-        mergeSortedEntries xx@(aa@[a]:xs) yy@(bb@[b]:ys)
-          | a <= b = aa:mergeSortedEntries xs yy
-          | otherwise = bb:mergeSortedEntries xx ys
-        mergeSortedEntries (aa@[_]:xs) yy = aa:mergeSortedEntries xs yy
-        mergeSortedEntries xx (bb@[_]:ys) = bb:mergeSortedEntries xx ys
+        -- mergeSortedEntries xx@(aa@[a]:xs) yy@(bb@[b]:ys)
+        --   | a <= b = aa:mergeSortedEntries xs yy
+        --   | otherwise = bb:mergeSortedEntries xx ys
+        -- mergeSortedEntries (aa@[_]:xs) yy = aa:mergeSortedEntries xs yy
+        -- mergeSortedEntries xx (bb@[_]:ys) = bb:mergeSortedEntries xx ys
 
 readAndDecodeEitherXlsxOrText :: String -> IO (Either [XL.Row] T.Text)
 readAndDecodeEitherXlsxOrText f = do
@@ -219,9 +218,9 @@ parseBelfiusBankData pastLines c inF b = case Lib.runUnstructuredDataParser inF 
                                         $ map (uncurry $ renderTransaction c)
                                         $ reverse $ zip (Lib.getRawRows belfiusData)
                                                       $ Lib.columnsToBelfius belfiusData
-  where pastData = extractPastRows pastLines
-        isNotAlreadyThere (firstLine:_) = not $ firstLine `Set.member` pastData
-        isNotAlreadyThere [] = True
+  where pastData = Set.fromList $ extractPastRows pastLines
+        isNotAlreadyThere (_:secondLine:_) = not $ (T.stripStart secondLine) `Set.member` pastData
+        isNotAlreadyThere _ = True
 
 parseArgentaBankData :: [T.Text] -- ^ existing ledger file lines
                      -> Lib.Classifiers -- ^ functions to map transactions to output text
@@ -238,7 +237,7 @@ parseArgentaBankData pastLines classifiers inF rows = case Lib.parseXlsxRows row
   where pastData = Set.fromList
                  $ filter (not . T.null)
                  $ map extractUniqueID
-                 $ filter (prefixForRowAsComment `T.isPrefixOf`) pastLines
+                 $ extractPastRows pastLines
         extractUniqueID = safeFifth . T.splitOn ";"
         safeFifth (_:_:_:_:x:_) = x
         safeFifth _ = mempty
