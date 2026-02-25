@@ -17,20 +17,20 @@ import ParseRipSpec
   )
 
 simplifyLatin1 :: [String]
-simplifyLatin1 = [ "a\xe4\xe0\xe1"
-                 , "A\xc4\xc0\xc1"
+simplifyLatin1 = [ "a\xe4\xe0\xe1\xe2"
+                 , "A\xc4\xc0\xc1\xc2"
                  , "c\xe7"
                  , "C\xc7"
-                 , "e\xeb\xe9\xe8"
-                 , "E\xcb\xc9\xc8"
-                 , "i\xef\xed\xec"
-                 , "I\xcf\xcd\xcc"
+                 , "e\xeb\xe9\xe8\xea"
+                 , "E\xcb\xc9\xc8\xca"
+                 , "i\xef\xed\xec\xee"
+                 , "I\xcf\xcd\xcc\xce"
                  , "n\xf1"
                  , "N\xd1"
-                 , "o\xf6\xf3\xf2"
-                 , "O\xd6\xd3\xd2"
-                 , "u\xfc\xfa\xf9"
-                 , "U\xdc\xda\xd9"
+                 , "o\xf6\xf3\xf2\xf4"
+                 , "O\xd6\xd3\xd2\xd4"
+                 , "u\xfc\xfa\xf9\xfb"
+                 , "U\xdc\xda\xd9\xdb"
                  , "y\xff\xfd"
                  , "Y\xdd" ]
 
