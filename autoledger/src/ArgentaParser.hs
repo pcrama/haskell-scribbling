@@ -14,7 +14,6 @@ import qualified Data.Text as T
 import Data.Char (digitToInt, isDigit)
 import Data.Functor (void)
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (foldl')
 import Data.Monoid (First(..), getFirst)
 import Data.Text (Text)
 import Data.Time.Clock (UTCTime(..))

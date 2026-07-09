@@ -15,7 +15,6 @@ module BelfiusParser (
 import qualified Data.Text as T
 import Data.Char (digitToInt, isDigit, isSpace)
 import Data.Functor (void)
-import Data.List (foldl')
 import Data.Text (Text)
 import Data.Time.Calendar (Day, fromGregorian, fromGregorianValid)
 import Text.Parsec

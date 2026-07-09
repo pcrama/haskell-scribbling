@@ -90,7 +90,7 @@ test-suite test
                        , bytestring
                        , containers
                        , parsec
-                       , hspec >=2.7 && <2.10
+                       , hspec >=2.7 && <2.12
                        , lens
                        , mtl
                        , text
