@@ -1,0 +1,3 @@
+#+TITLE: Freer Arrows
+
+Inspired by [[https://arxiv.org/pdf/2506.12212][Freer Arrows and Why You Need Them in Haskell]].
