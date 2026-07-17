@@ -22,6 +22,9 @@ class Category a => PreArrow a where
 class PreArrow a => Arrow a where
     first :: a b c -> a (b,d) (c, d)
 
+class Arrow a => ChoiceArrow a where
+    left :: a b c -> a (Either b d) (Either c d)
+
 instance Category (->) where
     ida = id
     (.>) = (.)
@@ -31,6 +34,10 @@ instance PreArrow (->) where
 
 instance Arrow (->) where
     first f = \(b, d) -> (f b, d)
+
+instance ChoiceArrow (->) where
+    left f (Left b) = Left $ f b
+    left _ (Right d) = Right d
 
 newtype AState s a b = AState { runAState :: (a, s) -> (b, s) }
 
@@ -113,6 +120,11 @@ instance Monad m => PreArrow (ArrowM m) where
 instance Monad m => Arrow (ArrowM m) where
     first (ArrowM a) = ArrowM $ \(x, d) -> fmap (, d) (a x)
 
+instance Monad m => ChoiceArrow (ArrowM m) where
+    left (ArrowM a) = ArrowM aLeft
+        where aLeft (Left x) = fmap Left $ a x
+              aLeft (Right x) = return $ Right x
+
 interpWebServiceOpsIntoIO :: WebServiceOps a b -> ArrowM IO a b
 interpWebServiceOpsIntoIO (Get url params) = ArrowM $ \() -> do
     putStrLn $ "curl '" <> url <> "?" <> show params <> "'"
@@ -132,6 +144,79 @@ nameThatOp :: forall a b. WebServiceOps a b -> String
 nameThatOp (Get _ _) = "GET"
 nameThatOp (Post _ _) = "POST"
 
+second :: Arrow a => a b c -> a (d, b) (d, c)
+second bc = arr swap >>> first bc >>> arr swap
+    where swap (x, y) = (y, x)
+
+(&&&) :: Arrow a => a b c -> a b d -> a b (c, d)
+bc &&& bd = arr dup >>> first bc >>> second bd
+    where dup x = (x, x)
+
+(***) :: Arrow a => a b c -> a d e -> a (b, d) (c, e)
+bc *** de = first bc >>> second de
+
+data FreerChoiceArrow e x y where
+    CHom :: (x -> y) -> FreerChoiceArrow e x y
+    CComp :: (x -> Either (a, c) w) -> e a b -> FreerChoiceArrow e (Either (b, c) w) y -> FreerChoiceArrow e x y
+
+instance Category (FreerChoiceArrow e) where
+    ida = CHom id
+    CHom f .> CHom g = CHom $ f . g
+    CComp g eff a .> CHom f = CComp (g . f) eff a
+    f .> CComp g ggg b = CComp g ggg $ f .> b
+
+instance PreArrow (FreerChoiceArrow e) where
+    arr = CHom
+
+instance Arrow (FreerChoiceArrow e) where
+    first (CHom f) = CHom $ \(a, d) -> (f a, d)
+    first (CComp f eff cont) = CComp g eff $ CHom h >>> first cont
+        where g (x, d) = case f x of
+                             Left (a, c) -> Left (a, (c, d))
+                             Right w -> Right (w, d)
+              h (Left (a, (c, d))) = (Left (a, c), d)
+              h (Right (w, d)) = (Right w, d)
+
+instance ChoiceArrow (FreerChoiceArrow e) where
+    left (CHom f) = CHom $ left f
+    left (CComp g eff cont) = CComp h eff $ arr reassoc >>> left cont
+        where h = unassoc . left g
+              unassoc (Left (Left (a, c))) = Left (a, c)
+              unassoc (Left (Right w)) = Right $ Left w
+              unassoc (Right d) = Right $ Right d
+              reassoc (Left (b, c)) = Left $ Left (b, c)
+              reassoc (Right (Left w)) = Left $ Right w
+              reassoc (Right (Right d)) = Right $ d
+
+(+++) :: ChoiceArrow a => a b c -> a d e -> a (Either b d) (Either c e)
+bc +++ de = left bc >>> right de
+
+leftOrRight :: Either a a -> a
+leftOrRight (Left x) = x
+leftOrRight (Right x) = x
+        
+(|||) :: ChoiceArrow a => a b d -> a c d -> a (Either b c) d
+bd ||| cd = (bd +++ cd) >>> arr leftOrRight
+
+right :: ChoiceArrow a => a b c -> a (Either d b) (Either d c)
+right a = arrSwap >>> left a >>> arrSwap
+    where swapLR (Left x) = Right x
+          swapLR (Right x) = Left x
+          arrSwap = arr swapLR
+
+cembed :: e x y -> FreerChoiceArrow e x y
+cembed eff = CComp (Left . (,())) eff $ arr fstOfLeft
+    where fstOfLeft (Left (x, _)) = x
+          fstOfLeft (Right _) = error "cembed: expected Left, got Right"
+
+cinterp :: ChoiceArrow arr => (e :-> arr) -> FreerChoiceArrow e a b -> arr a b
+cinterp _ (CHom f) = arr f
+cinterp eff2arr (CComp g eff cont) = arr g >>> (left $ first $ eff2arr eff) >>> cinterp eff2arr cont
+
+overApproximate :: Monoid m => (forall x y. e x y -> m) -> FreerChoiceArrow e a b -> m
+overApproximate _ (CHom _) = mempty
+overApproximate apx (CComp _ eff cont) = apx eff <> overApproximate apx cont
+
 main :: IO ()
 main = do
     let prog = echo "https://example/com/get" "https://example/com/post" []
@@ -146,3 +231,17 @@ main = do
     putStrLn $ "reader 9 = " <> (show $ reader 9)
     let func = interp interpWebServiceOpsIntoFuncsArrowInstance prog
     putStrLn $ "func () = " <> (show $ func ())
+    putStrLn "-- FreerChoiceArrow --"
+    let cprog = (arr $ \x -> if x `mod` 2 == (0 :: Int)
+                                 then Left ()
+                                 else Right $ "short-cut GET for odd " <> show x)
+            >>> (left $ cembed $ Get "https://x-even.com" [])
+            >>> (arr leftOrRight)
+            >>> arr (\x -> (x, x))
+            >>> (first $ cembed $ Post "https://post.example.com" [])
+            >>> arr snd
+    result <- runArrowM (cinterp interpWebServiceOpsIntoIO cprog) 2
+    putStrLn $ "program 2 result: '" <> result <> "'"
+    result <- runArrowM (cinterp interpWebServiceOpsIntoIO cprog) 5
+    putStrLn $ "program 5 result: '" <> result <> "'"
+    putStrLn $ "Ops (at most) = " <> (show $ overApproximate ((:[]) . nameThatOp) cprog)
