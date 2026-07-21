@@ -8,6 +8,9 @@ module Main (main) where
 
 import Data.Kind (Type)
 
+import Effect
+import Penner (ioPenner, recordPenner)
+
 class Category (cat :: k -> k -> Type) where
     ida :: forall (a :: k). cat a a
     (.>) :: forall (b :: k) (c :: k) (a :: k). cat b c -> cat a b -> cat a c
@@ -71,16 +74,6 @@ instance Arrow (FreerArrow e) where
          -- first ar :: FreerArrow e ((b, c), d) (y, d)
          in Comp g eff $ (Hom $ \(b, (c, d)) -> ((b, c), d)) >>> first ar
 
-type URL = String
-
-data WebServiceOps :: Type -> Type -> Type where
-    Get :: URL -- ^ url
-        -> [String] -- ^ params
-        -> WebServiceOps () String -- ^ WebServiceOps without input producing a String
-    Post :: URL -- ^ url
-         -> [String] -- ^ params
-         -> WebServiceOps String () -- ^ WebServiceOps accepting a String as body and producing ()
-
 embed :: e x y -> FreerArrow e x y
 embed eff = Comp (,()) eff $ arr fst
 
@@ -139,10 +132,6 @@ interpWebServiceOpsIntoIntReader (Post _ _) = ArrowM $ \_body -> const ()
 interpWebServiceOpsIntoFuncsArrowInstance :: WebServiceOps a b -> a -> b
 interpWebServiceOpsIntoFuncsArrowInstance (Get url params) = const $ "GET -> " <> url <> "?" <> show params
 interpWebServiceOpsIntoFuncsArrowInstance (Post _ _) = const ()
-
-nameThatOp :: forall a b. WebServiceOps a b -> String
-nameThatOp (Get _ _) = "GET"
-nameThatOp (Post _ _) = "POST"
 
 second :: Arrow a => a b c -> a (d, b) (d, c)
 second bc = arr swap >>> first bc >>> arr swap
@@ -245,3 +234,7 @@ main = do
     result <- runArrowM (cinterp interpWebServiceOpsIntoIO cprog) 5
     putStrLn $ "program 5 result: '" <> result <> "'"
     putStrLn $ "Ops (at most) = " <> (show $ overApproximate ((:[]) . nameThatOp) cprog)
+    pennerResult <- ioPenner "first body" "https://get.example.com/"
+    putStrLn $ "ioPenner = " <> show pennerResult
+    let recordResult = recordPenner "record" "https://get.record.com/"
+    putStrLn $ "recordPenner = " <> show recordResult
