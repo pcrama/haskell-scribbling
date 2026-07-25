@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PolyKinds #-}
@@ -11,7 +12,7 @@ import Control.Category as Cat
 import Data.Kind (Type)
 
 import Effect
-import Penner (ioPenner, pennerArrow, recordPenner, CommandRecorder(..), CommandTree(Eff))
+import Penner (ioPenner, pennerArrow, recordPenner, CommandRecorder(..), CommandTree(Eff), GetPost(..))
 
 newtype AState s a b = AState { runAState :: (a, s) -> (b, s) }
 
@@ -51,7 +52,7 @@ post :: URL -> [String] -> FreerArrow WebServiceOps String ()
 post url params = embed $ Post url params
 
 echo :: URL -> URL -> [String] -> FreerArrow WebServiceOps () String
-echo getUrl postUrl params = get getUrl params >>> dup >>> (first $ post postUrl params) >>> arr snd
+echo getUrl postUrl params = Main.get getUrl params >>> dup >>> (first $ Main.post postUrl params) >>> arr snd
     where dup = arr $ \x -> (x, x)
 
 countEffects :: FreerArrow e a b -> Integer
@@ -82,10 +83,6 @@ interpWebServiceOpsIntoIntReader (Post _ _) = Kleisli $ \_body -> const ()
 interpWebServiceOpsIntoFuncsArrowInstance :: WebServiceOps a b -> a -> b
 interpWebServiceOpsIntoFuncsArrowInstance (Get url params) = const $ "GET -> " <> url <> "?" <> show params
 interpWebServiceOpsIntoFuncsArrowInstance (Post _ _) = const ()
-
-interpWebServiceOpsIntoCommandRecorder :: WebServiceOps a b -> CommandRecorder String a b
-interpWebServiceOpsIntoCommandRecorder (Get url _) = CommandRecorder $ Eff $ "Get " <> url
-interpWebServiceOpsIntoCommandRecorder (Post url _) = CommandRecorder $ Eff $ "Post " <> url
 
 data FreerChoiceArrow e x y where
     CHom :: (x -> y) -> FreerChoiceArrow e x y
@@ -135,6 +132,21 @@ overApproximate :: Monoid m => (forall x y. e x y -> m) -> FreerChoiceArrow e a 
 overApproximate _ (CHom _) = mempty
 overApproximate apx (CComp _ eff cont) = apx eff <> overApproximate apx cont
 
+data WebServiceOpsWithDyn :: Type -> Type -> Type where
+  GetWD :: URL -> [String] -> WebServiceOpsWithDyn () String
+  GetDynWD :: [String] -> WebServiceOpsWithDyn URL String
+  PostWD :: URL -> [String] -> WebServiceOpsWithDyn String ()
+
+instance GetPost (FreerChoiceArrow WebServiceOpsWithDyn) where
+  get url params = cembed $ GetWD url params
+  getDyn params = cembed $ GetDynWD params
+  post url params = cembed $ PostWD url params
+
+interpWebServiceOpsIntoCommandRecorder :: WebServiceOpsWithDyn a b -> CommandRecorder String a b
+interpWebServiceOpsIntoCommandRecorder (GetWD url _) = CommandRecorder $ Eff $ "Get " <> url
+interpWebServiceOpsIntoCommandRecorder (PostWD url _) = CommandRecorder $ Eff $ "Post " <> url
+interpWebServiceOpsIntoCommandRecorder (GetDynWD _) = CommandRecorder $ Eff $ "GetDyn"
+  
 main :: IO ()
 main = do
     let prog = echo "https://example/com/get" "https://example/com/post" []
@@ -167,5 +179,6 @@ main = do
     putStrLn $ "ioPenner = " <> show pennerResult
     let recordResult = recordPenner "record" "https://get.record.com/"
     putStrLn $ "recordPenner = " <> show recordResult
-    putStrLn $ "freer penner = " <> show (cinterp interpWebServiceOpsIntoCommandRecorder
+    putStrLn $ "freer penner doesn't reflect the first or left 'structure'\n\
+               \             = " <> show (cinterp interpWebServiceOpsIntoCommandRecorder
                                                 $ pennerArrow "firstBody" "http://get.com")

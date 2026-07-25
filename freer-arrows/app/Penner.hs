@@ -7,7 +7,16 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
 
-module Penner (ioPenner, recordPenner, approxMax, approxMin, pennerArrow, CommandRecorder(..), CommandTree(Eff)) where
+module Penner (
+  ioPenner
+  , recordPenner
+  , approxMax
+  , approxMin
+  , pennerArrow
+  , CommandRecorder(..)
+  , CommandTree(Eff)
+  , GetPost(..)
+  ) where
 
 import Control.Category
 import Control.Arrow
