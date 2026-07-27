@@ -12,7 +12,18 @@ import Control.Category as Cat
 import Data.Kind (Type)
 
 import Effect
-import Penner (ioPenner, pennerArrow, recordPenner, CommandRecorder(..), CommandTree(Eff), GetPost(..))
+import Penner (
+  ioPenner
+  , ioPennerHttpAndConsole
+  , pennerArrow
+  , pennerHttpAndConsoleArrow
+  , recordPenner
+  , CommandRecorder(..)
+  , CommandTree(Eff)
+  , GetPost(..)
+  , GetPostCommand
+  , ReadWriteCommand
+  )
 
 newtype AState s a b = AState { runAState :: (a, s) -> (b, s) }
 
@@ -182,3 +193,13 @@ main = do
     putStrLn $ "freer penner doesn't reflect the first or left 'structure'\n\
                \             = " <> show (cinterp interpWebServiceOpsIntoCommandRecorder
                                                 $ pennerArrow "firstBody" "http://get.com")
+    putStrLn "Mixing GetPost and ReadWriteConsole"
+    ioPennerHttpAndConsole
+    let recordAsGetPost = pennerHttpAndConsoleArrow :: CommandRecorder (Maybe GetPostCommand) () ()
+    putStrLn $ "Recording for (Maybe GetPostCommand) = " <> show recordAsGetPost
+    let recordAsReadWriteConsole = pennerHttpAndConsoleArrow :: CommandRecorder (Maybe ReadWriteCommand) () ()
+    putStrLn $ "Recording for (Maybe ReadWriteCommand) = " <> show recordAsReadWriteConsole
+    -- compiler errors since only either GetPost or ReadWriteConsole constraint is present:
+    -- let recordAsGetPost = pennerHttpAndConsoleArrow :: CommandRecorder GetPostCommand () ()
+    -- let recordAsReadWriteConsole = pennerHttpAndConsoleArrow :: CommandRecorder ReadWriteCommand () ()
+    putStrLn "The END!"

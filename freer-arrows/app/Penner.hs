@@ -9,13 +9,17 @@
 
 module Penner (
   ioPenner
+  , ioPennerHttpAndConsole
   , recordPenner
   , approxMax
   , approxMin
   , pennerArrow
+  , pennerHttpAndConsoleArrow
   , CommandRecorder(..)
   , CommandTree(Eff)
   , GetPost(..)
+  , GetPostCommand
+  , ReadWriteCommand
   ) where
 
 import Control.Category
@@ -23,7 +27,7 @@ import Control.Arrow
 
 import Effect (URL)
 
-class (Arrow k, ArrowChoice k) => GetPost k where
+class Arrow k => GetPost k where
   -- Get has no interesting input, so we use () as input type.
   get :: URL -> [String] -> k () String
 
@@ -31,6 +35,10 @@ class (Arrow k, ArrowChoice k) => GetPost k where
   post :: URL -> [String] -> k String ()
 
   getDyn :: [String] -> k URL String
+
+class Arrow k => ReadWriteConsole k where
+  readLine :: k () String
+  writeLine :: k String ()
 
 instance GetPost (Kleisli IO) where
   get url params = Kleisli $ const $ do
@@ -42,7 +50,13 @@ instance GetPost (Kleisli IO) where
     putStrLn $ "kleisli.getDyn " <> url <> "?" <> show params
     return $ "getDyn " <> url <> "?" <> show params
 
-pennerArrow :: GetPost k => String -> URL -> k () ()
+instance ReadWriteConsole (Kleisli IO) where
+  readLine = Kleisli $ const $ do
+    putStrLn "Simulating readLine..."
+    return "ReadWriteConsole/fake/input"
+  writeLine = Kleisli putStrLn
+
+pennerArrow :: (ArrowChoice k, GetPost k) => String -> URL -> k () ()
 pennerArrow firstBody getUrl =
   let string2URL = Prelude.id in proc () -> do
     post "https://post.example.com" ["1st", "post"] -< firstBody 
@@ -122,5 +136,41 @@ instance GetPost (CommandRecorder GetPostCommand) where
   post url params = CommandRecorder $ Eff $ Post url params
   getDyn params = CommandRecorder $ Eff $ GetDyn params
 
+instance {-# OVERLAPPABLE #-} GetPost (CommandRecorder (Maybe a)) where
+  get _ _ = CommandRecorder $ Eff $ Nothing
+  post _ _ = CommandRecorder $ Eff $ Nothing
+  getDyn _ = CommandRecorder $ Eff $ Nothing
+
+instance GetPost (CommandRecorder (Maybe GetPostCommand)) where
+  get url _ = CommandRecorder $ Eff $ Just $ Get url
+  post url params = CommandRecorder $ Eff $ Just $ Post url params
+  getDyn params = CommandRecorder $ Eff $ Just $ GetDyn params
+
+data ReadWriteCommand = ReadLine | WriteLine deriving (Show, Eq)
+
+instance ReadWriteConsole (CommandRecorder ReadWriteCommand) where
+  readLine = CommandRecorder $ Eff $ ReadLine
+  writeLine = CommandRecorder $ Eff $ WriteLine
+
+instance {-# OVERLAPPABLE #-} ReadWriteConsole (CommandRecorder (Maybe a)) where
+  readLine = CommandRecorder $ Eff $ Nothing
+  writeLine = CommandRecorder $ Eff $ Nothing
+
+instance ReadWriteConsole (CommandRecorder (Maybe ReadWriteCommand)) where
+  readLine = CommandRecorder $ Eff $ Just $ ReadLine
+  writeLine = CommandRecorder $ Eff $ Just $ WriteLine
+
 recordPenner :: String -> URL -> CommandRecorder GetPostCommand () ()
 recordPenner = pennerArrow
+
+pennerHttpAndConsoleArrow :: (GetPost k, ReadWriteConsole k) => k () ()
+pennerHttpAndConsoleArrow =
+  let string2URL = Prelude.id in proc () -> do
+    writeLine -< "Enter an URL"
+    sUrl <- readLine -< ()
+    response <- getDyn [] -< string2URL sUrl
+    writeLine -< ("'" <> sUrl <> "' returned:")
+    writeLine -< response
+
+ioPennerHttpAndConsole :: IO ()
+ioPennerHttpAndConsole = runKleisli pennerHttpAndConsoleArrow ()
