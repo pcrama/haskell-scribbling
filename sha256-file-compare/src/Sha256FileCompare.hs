@@ -18,10 +18,11 @@ module Sha256FileCompare
 import Data.Char (isSpace, toLower)
 import Data.List (sort)
 import Data.List.NonEmpty (NonEmpty(..))
+import Data.Monoid (First(..))
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
-import System.FilePath (FilePath, takeFileName)
+import System.FilePath (FilePath, (</>), takeDirectory, takeFileName)
 
 newtype Hash = Hash String
   deriving (Show, Ord, Eq)
@@ -75,11 +76,19 @@ parseChecksumLine line =
       ' ':' ':fName -> Just (Hash hash, fName)
       _ -> Nothing
 
+normalizeFilePath :: Int -> FilePath -> String
+normalizeFilePath level fp
+  | level < 1 = normalizeFileName fp
+  | otherwise = let directory = takeDirectory fp in normalizeFilePath (level - 1) directory </> normalizeFileName fp
+
 normalizeFileName :: FilePath -> String
 normalizeFileName =
     map toLower
     . filter (not . isSpace)
     . takeFileName
+
+groupBy :: Ord k => (a -> k) -> (a -> v) -> [a] -> Map.Map k (NonEmpty v)
+groupBy getKey getVal = Map.fromListWith (<>) . map (\a -> (getKey a, getVal a:|[]))
 
 findDuplicates :: [FileEntry] -> [DuplicateFile]
 findDuplicates entries =
@@ -88,45 +97,58 @@ findDuplicates entries =
                     , file2 = f2
                     , moreDuplicates = rest
                     }
-    | (hash, f1:f2:rest) <- Map.toList grouped
+    | (hash, f1:|f2:rest) <- Map.toList grouped
     ]
   where
-    grouped =
-        Map.fromListWith (++)
-            [ (feHash e, [feFile e]) | e <- entries ]
+    grouped = groupBy feHash feFile entries
 
-findOldAndNewSame :: [FileEntry] -> [FileEntry] -> [OldAndNewFile]
+findOldAndNewSame :: [FileEntry] -> [FileEntry] -> [Either FileEntry OldAndNewFile]
 findOldAndNewSame oldEntries newEntries =
-    [ OldAndNewFile { oanfHash = hash, oldFiles = oldies, newFiles = newies }
-    | (hash, oldies) <- Map.toList oldGrouped
-    , Just newies <- [Map.lookup hash newGrouped] ]
+    concatMap linkToOldOrReject $ Map.toList newGrouped
   where
-    group entries = Map.fromListWith (<>)
-                                     [ (feHash e, feFile e:|[])
-                                     | e <- entries ]
+    group = groupBy feHash feFile
     oldGrouped = group oldEntries
     newGrouped = group newEntries
+    linkToOldOrReject (hash, newies) = case Map.lookup hash oldGrouped of
+      Just oldies -> [Right $ OldAndNewFile { oanfHash = hash, oldFiles = oldies, newFiles = newies }]
+      Nothing -> let hdNew:|tlNew = newies in map (Left . FileEntry hash) (hdNew:tlNew)
 
-findChanged :: [FileEntry] -> [FileEntry] -> [OldAndNewFile] -> [ChangedFile]
-findChanged oldEntries newEntries oldAndNewFiles =
-    [ ChangedFile
-        { oldHash = feHash old
-        , oldFile = feFile old
-        , newHash = feHash new
-        , newFile = feFile new
-        }
-    | old <- oldEntries
-    , not $ feHash old `Set.member` oldAndNewSet
-    , Just new <- [Map.lookup (normalizeFileName (feFile old)) newMap]
-    , feHash old /= feHash new
-    , not $ feHash new `Set.member` oldAndNewSet
-    ]
+firstJust (a -> Maybe b) -> [a] -> Maybe b
+firstJust f = foldr (\a b -> getFirst $ (First $ f a) <> First b) Nothing
+
+maybeToEither :: a -> Maybe b -> Either a b
+maybeToEither new (Just cf) = Right cf
+maybeToEither new Nothing = Left new
+
+findChanged :: [FileEntry] -> [FileEntry] -> [Either FileEntry ChangedFile]
+findChanged oldEntries newEntries =
+    concatMap linkToSameNameOrReject $ Map.toList newGrouped
+    -- [ ChangedFile
+    --     { oldHash = feHash old
+    --     , oldFile = feFile old
+    --     , newHash = feHash new
+    --     , newFile = feFile new
+    --     }
   where
-    oldAndNewSet = Set.fromList $ map oanfHash oldAndNewFiles
-    newMap = Map.fromList $ map (\fe -> (normalizeFileName (feFile fe), fe)) newEntries
+    grouped = groupBy (normalizeFileName . feFile) id
+    oldGrouped = grouped oldEntries
+    newGrouped = grouped newEntries
+    linkToSameNameOrReject (_, hdNew:|tlNew) = map (\new -> maybeToEither new $ byLongestFilePath new) $ hdNew:tlNew
+    byLongestFilePath new = do
+      oldies <- Map.lookup (normalizeFileName $ feFile new) oldGrouped
+      getFirst $ mconcat $ map (First . byFilePathUpTo new oldies) [3, 2, 1, 0]
+    byFilePathUpTo new oldies level = do
+      let normalizedNew = normalizeFilePath level $ feFile new
+      sameOldAfterNormalization <- firstJust (\old -> if (normalizeFilePath level $ feFile old) == normalizedNew
+                                                        then Just old else Nothing)
+                                             oldies
+      return $ ChangedFile { oldHash = feHash sameOldAfterNormalization
+                           , oldFile = feFile sameOldAfterNormalization
+                           , newHash = feHash new
+                           , newFile = feFile new}
 
-findRemoved :: [FileEntry] -> [FileEntry] -> [ChangedFile] -> [RemovedFile]
-findRemoved oldEntries newEntries changed =
+findRemoved :: [FileEntry] -> [FileEntry] -> [Either FileEntry RemovedFile]
+findRemoved oldEntries newEntries =
     [ RemovedFile
         { rfHash = feHash old
         , rfFile = feFile old
