@@ -3,6 +3,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -15,6 +16,7 @@ module Penner (
   , approxMin
   , pennerArrow
   , pennerHttpAndConsoleArrow
+  , someAction
   , CommandRecorder(..)
   , CommandTree(Eff)
   , GetPost(..)
@@ -174,3 +176,57 @@ pennerHttpAndConsoleArrow =
 
 ioPennerHttpAndConsole :: IO ()
 ioPennerHttpAndConsole = runKleisli pennerHttpAndConsoleArrow ()
+
+newtype Date = Date Int deriving (Show, Eq, Ord)
+
+class Arrow k => Finanshanalyze k where
+  bal :: [String] -> Maybe Date -> Maybe Date -> k () [(String, Float)]
+  reg :: [String] -> Maybe Date -> Maybe Date -> k () [(String, Float)]
+  plot :: String -> k [(Float, Float)] ()
+
+data FinanshanalyzeCommand =
+  Bal [String] (Maybe Date) (Maybe Date)
+  | Reg [String] (Maybe Date) (Maybe Date)
+  | Plot String
+  deriving (Show, Eq, Ord)
+
+instance Finanshanalyze (CommandRecorder FinanshanalyzeCommand) where
+  bal patterns begin end = CommandRecorder $ Eff $ Bal patterns begin end
+  reg patterns begin end = CommandRecorder $ Eff $ Reg patterns begin end
+  plot title = CommandRecorder $ Eff $ Plot title
+
+balPerMonth :: Finanshanalyze k => [String] -> Date -> Int -> k () [(Date, [(String, Float)])]
+balPerMonth patterns startDate count = arr (const []) >>> arrows
+  where dates@(_:datesTail) = iterate advance30days startDate
+        advance30days (Date julianDate) = Date $ julianDate + 30
+        buildArrowThenChain (start, end) tl = buildArrow start end >>> tl
+        buildArrow start end = proc tl -> do
+          thisMonthsData <- bal patterns (Just start) (Just end) -< ()
+          returnA -< (start, thisMonthsData):tl
+        arrows = foldr buildArrowThenChain Control.Category.id $ take count $ zip dates datesTail
+
+plotMonthlyBalances :: Finanshanalyze k => k [(Date, [(String, Float)])] ()
+plotMonthlyBalances = (arr $ const []) >>> plot "These balances"
+
+plotExpenses :: Finanshanalyze k => k [(String, Float)] ()
+plotExpenses = (arr $ const []) >>> plot "Expenses"
+
+fullAnalysis :: Finanshanalyze k => k () ()
+fullAnalysis =
+  let startDate = Date 123
+  in balPerMonth ["Assets:Belfius:", "Assets:Argenta:"] startDate 4
+     >>> plotMonthlyBalances
+     >>> reg ["Expenses:Misc"] (Just startDate) Nothing
+     >>> plotExpenses
+
+type Cache = [(FinanshanalyzeCommand, String)]
+
+someAction :: IO ()
+someAction = do
+  let CommandRecorder actionsRecording = fullAnalysis :: CommandRecorder FinanshanalyzeCommand () ()
+  let prepareCache cmd = case cmd of
+        Bal _ _ _ -> [cmd]
+        Reg _ _ _ -> [cmd]
+        Plot _ -> []
+  putStrLn $ show actionsRecording
+  putStrLn $ show $ foldMap prepareCache actionsRecording

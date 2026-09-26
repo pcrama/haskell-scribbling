@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
@@ -18,12 +19,15 @@ import Penner (
   , pennerArrow
   , pennerHttpAndConsoleArrow
   , recordPenner
+  , someAction
   , CommandRecorder(..)
   , CommandTree(Eff)
   , GetPost(..)
   , GetPostCommand
   , ReadWriteCommand
   )
+import FreeArrow (FreeChoiceArrow(..))
+import FreeArrow as FA
 
 newtype AState s a b = AState { runAState :: (a, s) -> (b, s) }
 
@@ -157,7 +161,25 @@ interpWebServiceOpsIntoCommandRecorder :: WebServiceOpsWithDyn a b -> CommandRec
 interpWebServiceOpsIntoCommandRecorder (GetWD url _) = CommandRecorder $ Eff $ "Get " <> url
 interpWebServiceOpsIntoCommandRecorder (PostWD url _) = CommandRecorder $ Eff $ "Post " <> url
 interpWebServiceOpsIntoCommandRecorder (GetDynWD _) = CommandRecorder $ Eff $ "GetDyn"
-  
+
+fcaProg :: URL -> URL -> FreeChoiceArrow WebServiceOpsWithDyn URL Int
+fcaProg urlG urlP = Arr (\x -> (x, x)) >>> StarStarStar a1 a2 >>> Arr snd
+  where a1 = (Carry $ GetDynWD ["arg1"])
+             >>> Arr (\case
+                         '1':tailBoDyn -> Left $ tailBoDyn
+                         [] -> Right $ Left "empty"
+                         _ -> Right $ Right "any")
+             >>> (PlusPlusPlus (Carry $ PostWD urlP ["arg2"])
+                             $ PlusPlusPlus (Carry $ PostWD "empty-url" ["arg3"])
+                                            (Carry $ PostWD "any-url" ["arg4"]))
+        a2 = Arr (\x -> if x == urlG then Left () else Right ())
+             >>> PlusPlusPlus ((Carry $ GetWD "same" ["arg5"]) >>> arr ((+ 100000) Prelude.. length))
+                              ((Carry $ GetWD "diff" ["arg6"]) >>> (Carry $ GetDynWD ["arg7"]) >>> arr length)
+             >>> Arr (\case
+                         Left x -> x
+                         Right y -> y)
+
+
 main :: IO ()
 main = do
     let prog = echo "https://example/com/get" "https://example/com/post" []
@@ -202,4 +224,7 @@ main = do
     -- compiler errors since only either GetPost or ReadWriteConsole constraint is present:
     -- let recordAsGetPost = pennerHttpAndConsoleArrow :: CommandRecorder GetPostCommand () ()
     -- let recordAsReadWriteConsole = pennerHttpAndConsoleArrow :: CommandRecorder ReadWriteCommand () ()
+    putStrLn $ "FreeArrow:"
+    putStrLn $ show $ FA.interpFca interpWebServiceOpsIntoCommandRecorder (fcaProg "urlG" "urlP")
     putStrLn "The END!"
+    someAction
