@@ -364,7 +364,7 @@ makeBelfiusPicking = makePicking bilingualLookup $ BelfiusTransaction {
                  ("Compte contrepartie", "Rekening tegenpartij", pickOtherAccount),
                  ("Nom contrepartie contient", "Naam tegenpartij bevat", pickOtherName),
                  ("Rue et numéro", "Straat en nummer", pickOtherStreetAndNumber),
-                 ("Code postal et localité", "Postcode en plaats", pickOtherCity),
+                 ("Code postal et ville", "Postcode en plaats", pickOtherCity),
                  ("Transaction", "Transactie", pickTransactionDescription),
                  ("Date valeur", "Valutadatum", pickValueDate),
                  ("Montant", "Bedrag", pickAmountCents),
