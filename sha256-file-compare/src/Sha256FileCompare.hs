@@ -1,28 +1,30 @@
 module Sha256FileCompare
     ( DuplicateFile(..)
     , ChangedFile(..)
-    , RemovedFile(..)
-    , OldAndNewFile(..)
-    , NewFile(..)
     , FileEntry(..)
     , Hash(..)
-    , parseChecksumLine
-    , normalizeFileName
-    , findOldAndNewSame
-    , findDuplicates
+    , NewFile(..)
+    , OldAndNewFile(..)
+    , RemovedFile(..)
+    , Result(..)
     , findChanged
-    , findRemoved
+    , findDuplicates
     , findNew
+    , findOldAndNewSame
+    , findRemoved
+    , normalizeFileName
+    , normalizeFilePath
+    , parseChecksumLine
     ) where
 
 import Data.Char (isSpace, toLower)
 import Data.List (sort)
-import Data.List.NonEmpty (NonEmpty(..))
+import Data.List.NonEmpty (NonEmpty(..), nonEmpty)
+import qualified Data.List.NonEmpty as NonEmpty
 import Data.Monoid (First(..))
 import qualified Data.Map.Strict as Map
-import Data.Set (Set)
 import qualified Data.Set as Set
-import System.FilePath (FilePath, (</>), takeDirectory, takeFileName)
+import System.FilePath ((</>), takeDirectory, takeFileName)
 
 newtype Hash = Hash String
   deriving (Show, Ord, Eq)
@@ -68,6 +70,12 @@ data FileEntry = FileEntry
     , feFile :: FilePath
     } deriving (Eq, Show)
 
+data Result a = Result
+    { nextOldFiles :: [FileEntry]
+    , nextNewFiles :: [FileEntry]
+    , result :: a
+    } deriving (Eq, Show)
+
 parseChecksumLine :: String -> Maybe (Hash, FilePath)
 parseChecksumLine line =
     let (hash, restOfLine) = span (\c -> ('0' <= c && c <= '9') || ('a' <= c && c <= 'f'))
@@ -102,27 +110,47 @@ findDuplicates entries =
   where
     grouped = groupBy feHash feFile entries
 
-findOldAndNewSame :: [FileEntry] -> [FileEntry] -> [Either FileEntry OldAndNewFile]
+findOldAndNewSame :: [FileEntry] -> [FileEntry] -> Result [OldAndNewFile]
 findOldAndNewSame oldEntries newEntries =
-    concatMap linkToOldOrReject $ Map.toList newGrouped
+    let finalResult = [res | Right res <- nextNewOrResult]
+    in Result { nextOldFiles = concatMap NonEmpty.toList
+                                       $ foldr (\(OldAndNewFile { oanfHash = hash }) remaining ->
+                                                    Map.delete hash remaining)
+                                               oldGrouped
+                                               finalResult
+              , nextNewFiles = [fh | Left fh <- nextNewOrResult]
+              , result = finalResult
+              }
   where
-    group = groupBy feHash feFile
+    group = groupBy feHash id
     oldGrouped = group oldEntries
     newGrouped = group newEntries
     linkToOldOrReject (hash, newies) = case Map.lookup hash oldGrouped of
-      Just oldies -> [Right $ OldAndNewFile { oanfHash = hash, oldFiles = oldies, newFiles = newies }]
-      Nothing -> let hdNew:|tlNew = newies in map (Left . FileEntry hash) (hdNew:tlNew)
+      Just oldies -> [Right $ OldAndNewFile { oanfHash = hash, oldFiles = fmap feFile oldies, newFiles = fmap feFile newies }]
+      Nothing -> let hdNew:|tlNew = newies in map (Left) $ hdNew:tlNew
+    nextNewOrResult = concatMap linkToOldOrReject $ Map.toList newGrouped
 
-firstJust (a -> Maybe b) -> [a] -> Maybe b
+firstJust :: (a -> Maybe b) -> [a] -> Maybe b
 firstJust f = foldr (\a b -> getFirst $ (First $ f a) <> First b) Nothing
 
 maybeToEither :: a -> Maybe b -> Either a b
-maybeToEither new (Just cf) = Right cf
+maybeToEither _ (Just cf) = Right cf
 maybeToEither new Nothing = Left new
 
-findChanged :: [FileEntry] -> [FileEntry] -> [Either FileEntry ChangedFile]
+findChanged :: [FileEntry] -> [FileEntry] -> Result [ChangedFile]
 findChanged oldEntries newEntries =
-    concatMap linkToSameNameOrReject $ Map.toList newGrouped
+    let finalResult = [res | Right res <- nextNewOrResult]
+    in Result { nextOldFiles = concatMap NonEmpty.toList
+                                       $ foldr (\(ChangedFile { oldHash = hash, oldFile = oldie }) remaining ->
+                                                      Map.update (nonEmpty . NonEmpty.filter (\fe -> feFile fe /= oldie))
+                                                                 hash
+                                                                 remaining)
+                                               (groupBy feHash id oldEntries)
+                                               finalResult
+              , nextNewFiles = [fh | Left fh <- nextNewOrResult]
+              , result = finalResult
+              }
+    -- 
     -- [ ChangedFile
     --     { oldHash = feHash old
     --     , oldFile = feFile old
@@ -136,7 +164,7 @@ findChanged oldEntries newEntries =
     linkToSameNameOrReject (_, hdNew:|tlNew) = map (\new -> maybeToEither new $ byLongestFilePath new) $ hdNew:tlNew
     byLongestFilePath new = do
       oldies <- Map.lookup (normalizeFileName $ feFile new) oldGrouped
-      getFirst $ mconcat $ map (First . byFilePathUpTo new oldies) [3, 2, 1, 0]
+      getFirst $ mconcat $ map (First . byFilePathUpTo new (NonEmpty.toList oldies)) [3, 2, 1, 0]
     byFilePathUpTo new oldies level = do
       let normalizedNew = normalizeFilePath level $ feFile new
       sameOldAfterNormalization <- firstJust (\old -> if (normalizeFilePath level $ feFile old) == normalizedNew
@@ -146,20 +174,21 @@ findChanged oldEntries newEntries =
                            , oldFile = feFile sameOldAfterNormalization
                            , newHash = feHash new
                            , newFile = feFile new}
+    nextNewOrResult = concatMap linkToSameNameOrReject $ Map.toList newGrouped
 
-findRemoved :: [FileEntry] -> [FileEntry] -> [Either FileEntry RemovedFile]
+findRemoved :: [FileEntry] -> [FileEntry] -> Result [RemovedFile]
 findRemoved oldEntries newEntries =
-    [ RemovedFile
-        { rfHash = feHash old
-        , rfFile = feFile old
-        }
-    | old <- oldEntries
-    , let key = normalizeFileName (feFile old)
-    , not $ key `Set.member` changedOldNames
-    , not $ key `Set.member` newNames
-    ]
+  Result { nextOldFiles = []
+         , nextNewFiles = newEntries
+         , result = [ RemovedFile { rfHash = feHash old
+                                  , rfFile = feFile old
+                                  }
+                    | old <- oldEntries
+                    , let key = normalizeFileName (feFile old)
+                    , not $ key `Set.member` newNames
+                    ]
+         }
   where
-    changedOldNames = Set.fromList $ map (normalizeFileName . oldFile) changed
     newNames = Set.fromList $ map (normalizeFileName . feFile) newEntries
 
 findNew :: [FileEntry] -> [FileEntry] -> [ChangedFile] -> [RemovedFile] -> [NewFile]
