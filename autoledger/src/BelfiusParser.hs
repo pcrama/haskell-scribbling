@@ -29,22 +29,20 @@ data UnstructuredHeader = UnstructuredHeader {
     }
   deriving (Show, Eq)
 
-fieldSeparator :: Char
-fieldSeparator = ';'
-
 newLines :: String
 newLines = "\r\n"
-
-doubleQuote :: Char
-doubleQuote = '"'
 
 ssvChar :: Char -> Bool
 ssvChar = not . (`elem` (fieldSeparator:newLines))
 
 ssvText, ssvText1 :: Monad m => UnstructuredParser m Text
 ssvText = T.pack <$> (
-  (char doubleQuote *> many (satisfy $ not . (`elem` (doubleQuote:newLines))) <* char doubleQuote)
+  (joinWithDoubleQuote
+      <$> many1 (char doubleQuote *> many (satisfy $ not . (`elem` (doubleQuote:newLines))) <* char doubleQuote))
   <|> many (satisfy ssvChar))
+  where
+    -- joinWithDoubleQuote ["a", "b"] == "a\"b"
+    joinWithDoubleQuote = drop 1 . concat . map (doubleQuote:)
 ssvText1 = T.pack <$> many1 (satisfy ssvChar)
 
 type UnstructuredParsingState = Maybe Int

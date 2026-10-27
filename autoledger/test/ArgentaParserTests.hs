@@ -87,21 +87,21 @@ argentaParserSpecs = describe "src/ArgentaParser" $ do
           it "date" $ date exampleData2 `shouldBe` fromGregorian 2023 7 17
           it "otherAccount" $ otherAccount exampleData2 `shouldBe` mkNonBlankText "BE54 0000 0000 0000"
           it "otherName" $ otherName exampleData2 `shouldBe` mkNonBlankText "SARL BARAK"
-          it "description" $ description exampleData2 `shouldBe` mkNonBlankText "SARL BARAK 14-07-2023 14:00 SAAS FEE FR 123456*******4321"
+          it "description" $ description exampleData2 `shouldBe` mkNonBlankText "SARL BARAK 14-07-2023 14:00 \"SAAS FEE FR 123456*******4321\""
           it "amountCents" $ amountCents exampleData2 `shouldBe` -2150
           it "currency" $ currency exampleData2 `shouldBe` "EUR"
           it "identifyingComment" $ identifyingComment exampleData2 `shouldBe`
-            "BE12 3456 3456 3456;17/07/2023;17/07/2023;0NCNC0;;-21,50;EUR;17/07/2023;BE54 0000 0000 0000;SARL BARAK;SARL BARAK 14-07-2023 14:00 SAAS FEE FR 123456*******4321"
+            "BE12 3456 3456 3456;17/07/2023;17/07/2023;0NCNC0;;-21,50;EUR;17/07/2023;BE54 0000 0000 0000;SARL BARAK;\"SARL BARAK 14-07-2023 14:00 \"\"SAAS FEE FR 123456*******4321\"\"\""
         describe "example 3" $ do
           it "account" $ account exampleData3 `shouldBe` "BE12 3456 3456 3456"
           it "date" $ date exampleData3 `shouldBe` fromGregorian 2023 7 17
-          it "otherAccount" $ otherAccount exampleData3 `shouldBe` mkNonBlankText "BE55 0055 0055 0055"
+          it "otherAccount" $ otherAccount exampleData3 `shouldBe` mkNonBlankText "BE55 0055 0055;0055"
           it "otherName" $ otherName exampleData3 `shouldBe` mkNonBlankText "Abc Def Ghi"
           it "description" $ description exampleData3 `shouldBe` mkNonBlankText "Abc Def Ghi +++123/456/78901+++"
           it "amountCents" $ amountCents exampleData3 `shouldBe` -20100
           it "currency" $ currency exampleData3 `shouldBe` "EUR"
           it "identifyingComment" $ identifyingComment exampleData3 `shouldBe`
-            "BE12 3456 3456 3456;17/07/2023;17/07/2023;GSRSRG;Betaling Maestro;-201,00;EUR;17/07/2023;BE55 0055 0055 0055;Abc Def Ghi;+++123/456/78901+++"
+            "BE12 3456 3456 3456;17/07/2023;17/07/2023;GSRSRG;Betaling Maestro;-201,00;EUR;17/07/2023;\"BE55 0055 0055;0055\";Abc Def Ghi;+++123/456/78901+++"
         describe "example 4" $ do
           it "account" $ account exampleData4 `shouldBe` "BE12 3456 3456 3456"
           it "date" $ date exampleData4 `shouldBe` fromGregorian 2023 6 28
@@ -178,7 +178,7 @@ exampleInput =
                      ,dateCell 45124.0 -- 17-07-2023
                      ,textCell "BE54 0000 0000 0000"
                      ,textCell "SARL BARAK"
-                     ,textCell "SARL BARAK 14-07-2023 14:00 SAAS FEE FR 123456*******4321"]
+                     ,textCell "SARL BARAK 14-07-2023 14:00 \"SAAS FEE FR 123456*******4321\""]
     ,makeRow 4 $ zip [1..]
                      [textCell "BE12 3456 3456 3456"
                      ,dateCell 45124.0 -- 17-07-2023
@@ -188,7 +188,7 @@ exampleInput =
                      ,textCell "-201,00" -- doubleCell (-201.00)
                      ,textCell "EUR"
                      ,dateCell 45124.0 -- 17-07-2023
-                     ,textCell "BE55 0055 0055 0055"
+                     ,textCell "BE55 0055 0055;0055"
                      ,textCell "Abc Def Ghi"
                      ,textCell "+++123/456/78901+++"]
     ,makeRow 5 $ filter isNotEmptyTextCell

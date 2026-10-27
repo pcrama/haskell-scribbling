@@ -11,7 +11,9 @@ module Transaction
     pattern NonBlankText,
     TransactionEval (..),
     UnstructuredDataToRecordError(..),
+    doubleQuote,
     evalForTransaction,
+    fieldSeparator,
     joinNonBlankTextWith,
     mkNonBlankText,
     mkLedgerEntry,
@@ -27,6 +29,7 @@ where
 
 import Control.Monad.Reader (MonadReader, asks, runReader)
 import Data.Char (isSpace)
+import Data.List (intersperse)
 import qualified Data.Text as T
 import Data.Time.Calendar (Day, toGregorian)
 
@@ -65,9 +68,18 @@ instance Semigroup NonBlankText where
 joinNonBlankTextWith :: T.Text -> NonBlankText -> NonBlankText -> NonBlankText
 joinNonBlankTextWith sep (NonBlankText a) (NonBlankText b) = NonBlankText' $ a <> sep <> b
 
+fieldSeparator :: Char
+fieldSeparator = ';'
+
+doubleQuote :: Char
+doubleQuote = '"'
+
 renderNonBlankText :: Maybe NonBlankText -> T.Text
 renderNonBlankText Nothing = ""
-renderNonBlankText (Just (NonBlankText t)) = t
+renderNonBlankText (Just (NonBlankText t))
+  | doubleQuote `T.elem` t = "\"" <> (T.concat $ intersperse "\"\"" $ T.split (== doubleQuote) t) <> "\""
+  | fieldSeparator `T.elem` t = "\"" <> t <> "\""
+  | otherwise = t
 
 data TransactionEval a where
   Constant :: a -> TransactionEval a
