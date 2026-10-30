@@ -1,0 +1,48 @@
+* Input data
+
+Sqlite3 database with one table: =data_202203=
+#+begin_src sql :exports code
+  CREATE TABLE data_202303 (
+      timestamp INTEGER PRIMARY KEY ASC, -- seconds since unix epoch
+      pv2012_kWh FLOAT,                  -- infrequent manual readings of PV installation's production (panels installed in 2012)
+      pv2022_kWh FLOAT,                  -- automatic reading of second PV installation's production (panels installed in 2022)
+      peak_conso_kWh FLOAT,              -- P1 meter data, cumulative energy consumption from the grid during peak hours
+      off_conso_kWh FLOAT,               -- P1 meter data, cumulative energy consumption from the grid during off hours
+      peak_inj_kWh FLOAT,                -- P1 meter data, cumulative energy injection into the grid during peak hours
+      off_inj_kWh FLOAT,                 -- P1 meter data, cumulative energy injection into the grid during off hours
+      gas_m3 FLOAT,                      -- infrequent manual readings of cumulative gas consumption
+      water_m3 FLOAT                     -- infrequent manual readings of cumulative water consumption
+    );
+#+end_src
+
+Notation:
+- t20260101_cet = 1767222000 :: seconds since unix epoch for 2026/01/01 00:00 in CET local time
+
+* Processing
+- implement interpolate
+  #+begin_src haskell :exports code
+    interpolateLinear :: Int -> Double -> Int -> Double -> Double -> Double
+    interpolateLinear unix_epoch_0 value_at_0 unix_epoch_1 value_at_1 unix_epoch = ...
+  #+end_src
+- Resample pv2022_kWh on 15min timesteps as a higher order function
+  - from :: t20260101_cet
+  - to :: t20260101_cet + (((max(timestamp) where pv2022_kWh is not null) - t20260101_cet) `div` (60 * 15)) * 60 * 15
+
+  #+begin_src haskell :exports code
+    -- Data202303Row defined in @app/Main.hs
+    resamplePv2022Kwh :: [Data202303Row] -> (Int -> Double -> Int -> Double -> Double -> Double) -> Int -> Int -> [(Int, Double)]
+    resamplePv2022Kwh measurements interpolator unix_epoch_start unix_epoch_end = ...
+  #+end_src
+
+  To be used like this to resample linearly for January 2026:
+
+  #+begin_src haskell :exports code
+    measurements <- query_ conn "SELECT * from data_202303 where timestamp > ? and timestamp < ? order by timestamp" :: IO [Data202303Row]
+    resamplePv2022Kwh measurements interpolateLinear t20260101_cet (t20260101_cet + 31 * 60 * 15) = ...
+  #+end_src
+
+  Expected result:
+  #+begin_example
+    [(1767222000, 12345.678), (1767222900, 12345.678)  -- there's no sun at midnight ;-)
+     ...]
+  #+end_example
