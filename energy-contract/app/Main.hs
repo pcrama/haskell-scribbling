@@ -4,6 +4,7 @@ module Main (main) where
 import Control.Applicative
 import Database.SQLite.Simple
 import Database.SQLite.Simple.FromRow
+import System.Environment (getArgs)
 
 data Data202303Row = Data202303Row
   { row_timestamp :: Int -- ^ seconds since unix epoch
@@ -20,9 +21,31 @@ data Data202303Row = Data202303Row
 instance FromRow Data202303Row where
   fromRow = Data202303Row <$> field <*> field <*> field <*> field <*> field <*> field <*> field <*> field <*> field
 
+interpolateLinear :: Int -> Double -> Int -> Double -> Int -> Double
+interpolateLinear unix_epoch_0 value_at_0 unix_epoch_1 value_at_1 unix_epoch
+  | unix_epoch_0 == unix_epoch_1 = error "interpolateLinear: endpoint timestamps must differ"
+  | otherwise = value_at_0 + (value_at_1 - value_at_0) * elapsed / interval
+  where
+    elapsed = fromIntegral $ unix_epoch - unix_epoch_0
+    interval = fromIntegral $ unix_epoch_1 - unix_epoch_0
+
 main :: IO ()
 main = do
+  args <- getArgs
+  case args of
+    ["test"] -> test
+    [] -> run
+    _ -> fail "Usage: energy-contract [test]"
+
+run :: IO ()
+run = do
   conn <- open "test.db"
   r <- query_ conn "SELECT * from data_202303 where pv2012_kWh is not null order by timestamp desc limit 10" :: IO [Data202303Row]
   mapM_ print r
   close conn
+
+test :: IO ()
+test =
+  if interpolateLinear 0 0 10 30 5 == 15
+    then pure ()
+    else fail "interpolateLinear failed midpoint test"
