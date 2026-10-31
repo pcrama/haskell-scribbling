@@ -46,3 +46,40 @@ Notation:
     [(1767222000, 12345.678), (1767222900, 12345.678)  -- there's no sun at midnight ;-)
      ...]
   #+end_example
+- Write a reconstruction function for pv2012_kWh by using
+  pv2022_kWh as proxy (both solar panel installations are on the same roof, so
+  let's assume that the incoming sun power per square meter of panel is the
+  same and that the yield of pv2012_kWh is always proportional to pv2022_kWh's
+  yield).  Simple test case:
+  |    t | pv2022_kWh | pv2012_kWh | reconstructed pv2012_kWh |
+  |------+------------+------------+--------------------------|
+  |    0 |          0 | 10         |                       10 |
+  |  900 |        100 | NULL       |                       30 |
+  | 1800 |        150 | NULL       |                       40 |
+  | 2700 |        250 | 60         |                       60 |
+
+  #+begin_src haskell :exports code
+    reconstructPv2012kWh :: [Data2023Row] -> [(Int, Double)] -> [(Int, Double)]
+    reconstructPv2012kWh datarows interpolated_pv2022_kWh = ...
+  #+end_src
+
+  To be used like this:
+  #+begin_src haskell :exports code
+    measurements <- query_ conn "SELECT * from data_202303 where timestamp > ? and timestamp < ? order by timestamp" :: IO [Data202303Row]
+    let resampled_pv2022_kWh = resamplePv2022Kwh measurements interpolateLinear t20260101_cet $ t20260101_cet + 31 * 60 * 15
+    let reconstructed = reconstructPv2012kWh datarows resampled_pv2022_kWh
+    if length reconstructed /= length resampled_pv2022_kWh
+      then fail "Lengths should be the same"
+      else return ()
+    if foldr (\((t1, _), (t2, _)) rst -> t1 == t2 && rst) True (zip resampled_pv2022_kWh reconstructed)
+      then fail "Reconstructed should be sampled on the same instants as resampled_pv2022_kWh"
+      else return ()
+  #+end_src
+- Use resampleInjKwh and resampleConsoKwh from @app/Main.hs to reproduce rows similar to @example.csv
+
+  #+begin_example
+    ["dd-mm-yy", "hh:mm:00", "dd-mm-yy", "hh:mm:00", "EAN", "COUNTER", "Consumption (+A) Totals", conso in that interval]
+    ["dd-mm-yy", "hh:mm:00", "dd-mm-yy", "hh:mm:00", "EAN", "COUNTER", "Productions (-A) Totals", inj that interval]
+  #+end_example
+
+  As you can see from the example, it looks like the times are in CET since I see the switch from CET to CEST in the data (double-check my assumption)
