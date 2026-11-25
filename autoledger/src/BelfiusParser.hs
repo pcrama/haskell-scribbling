@@ -352,20 +352,20 @@ makeBelfiusPicking = makePicking bilingualLookup $ BelfiusTransaction {
   }
   where bilingualLookup :: T.Text -> Maybe (Filler T.Text BelfiusTransaction)
         bilingualLookup s =
-          foldr (\(fr, nl, res) other -> if s == fr || s == nl then Just res else other)
+          foldr (\(hdrs, res) other -> if s `elem` hdrs then Just res else other)
                 Nothing
-                [("Communications", "Mededelingen", pickCommunication),
-                 ("Compte", "Rekening", pickAccount),
-                 ("Date de comptabilisation", "Boekingsdatum", pickAccountingDate),
-                 ("Numéro d'extrait", "Rekeninguittrekselnummer", pickExtractNumber),
-                 ("Numéro de transaction", "Transactienummer", pickTransactionNumber),
-                 ("Compte contrepartie", "Rekening tegenpartij", pickOtherAccount),
-                 ("Nom contrepartie contient", "Naam tegenpartij bevat", pickOtherName),
-                 ("Rue et numéro", "Straat en nummer", pickOtherStreetAndNumber),
-                 ("Code postal et ville", "Postcode en plaats", pickOtherCity),
-                 ("Transaction", "Transactie", pickTransactionDescription),
-                 ("Date valeur", "Valutadatum", pickValueDate),
-                 ("Montant", "Bedrag", pickAmountCents),
-                 ("Devise", "Devies", pickCurrency),
-                 ("BIC", "BIC", pickBankIdentificationCode),
-                 ("Code pays", "Landcode", pickCountryCode)]
+                [(["Communications", "Mededelingen"], pickCommunication),
+                 (["Compte", "Rekening"], pickAccount),
+                 (["Date de comptabilisation", "Boekingsdatum"], pickAccountingDate),
+                 (["Numéro d'extrait", "Rekeninguittrekselnummer"], pickExtractNumber),
+                 (["Numéro de transaction", "Transactienummer"], pickTransactionNumber),
+                 (["Compte contrepartie", "Rekening tegenpartij"], pickOtherAccount),
+                 (["Nom contrepartie contient", "Naam tegenpartij bevat"], pickOtherName),
+                 (["Rue et numéro", "Straat en nummer"], pickOtherStreetAndNumber),
+                 (["Code postal et ville", "Code postal et commune", "Postcode en plaats"], pickOtherCity),
+                 (["Transaction", "Transactie"], pickTransactionDescription),
+                 (["Date valeur", "Valutadatum"], pickValueDate),
+                 (["Montant", "Bedrag"], pickAmountCents),
+                 (["Devise", "Devies"], pickCurrency),
+                 (["BIC", "BIC"], pickBankIdentificationCode),
+                 (["Code pays", "Landcode"], pickCountryCode)]
